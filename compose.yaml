@@ -1,0 +1,29 @@
+# docker compose up -d
+# docker compose logs manager    # the first-run setup PIN is printed here
+services:
+  manager:
+    image: ghcr.io/xthrasherrr/reskate-manager:latest
+    build: .
+    restart: unless-stopped
+    # SIGTERM makes the manager send "quit" to every server; give them time to log off Steam.
+    stop_grace_period: 45s
+    # Behind Cloudflare (Tunnel included) or another reverse proxy, and the
+    # time zone scheduled restarts follow (UTC otherwise):
+    # environment:
+    #   RSM_PROXY: cloudflare            # or "forwarded" for nginx, Caddy, Traefik...
+    #   RSM_PUBLIC_URL: https://panel.example.com
+    #   TZ: Europe/Berlin
+    ports:
+      # Behind a proxy, only it may reach the panel: "127.0.0.1:40125:40125/tcp"
+      # for one on this machine, or drop the line when cloudflared runs in this
+      # project and points at http://manager:40125.
+      - "40125:40125/tcp"
+      # Game/query pairs from 27015, two per server. ReSkate joins over Steam relay
+      # without them; open them for server-browser ping and faster joins. Host and
+      # container ports must match, since each server reports its own port.
+      - "27015-27024:27015-27024/udp"
+    volumes:
+      - reskate:/data
+
+volumes:
+  reskate:

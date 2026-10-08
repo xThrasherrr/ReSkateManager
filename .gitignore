@@ -1,0 +1,9 @@
+bin/
+dev/
+cache/
+web/dist/*
+!web/dist/.keep
+web/node_modules/
+web/.svelte-kit/
+*.exe
+.task/

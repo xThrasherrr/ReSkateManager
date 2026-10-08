@@ -1,0 +1,247 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/rubik/wght.css';
+@import '@fontsource/lilita-one/latin-400.css';
+@import '@fontsource/permanent-marker/latin-400.css';
+
+/* Styles for the sidebar collapsed to its icon rail; the rail only exists on wide screens. */
+@custom-variant rail {
+	@media (width >= 64rem) {
+		&:where([data-rail] *) {
+			@slot;
+		}
+	}
+}
+
+/* Scrolls sideways without showing a bar, for tab strips and filters on phones. */
+@utility no-scrollbar {
+	scrollbar-width: none;
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+@theme {
+	--font-sans: 'Rubik Variable', 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+	--font-display: 'Lilita One', 'Rubik Variable', system-ui, sans-serif;
+	--font-marker: 'Permanent Marker', 'Comic Sans MS', cursive;
+	--font-mono: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+	/* Grip tape: warm near-blacks, cream ink, sticker colours on top. */
+	--color-bg: #1a1a1e;
+	--color-sunken: #111114;
+	--color-panel: #232328;
+	--color-raised: #2f2f36;
+	--color-line: #393941;
+	--color-line-strong: #52525c;
+	--color-ink: #050506;
+	--color-fg: #f6f1e7;
+	--color-muted: #aca69c;
+	--color-faint: #9c968c; /* 4.5:1 or more on every surface, raised included */
+	/* The brand pair: light blue leads, pink seconds it (the wordmark's dot, title underlines). */
+	--color-accent: #4cc3ff;
+	--color-accent-hover: #80d5ff;
+	--color-pink: #ff5ca8;
+	--color-ok: #7ee26b;
+	--color-warn: #ffd23f;
+	--color-bad: #ff4f5c;
+	--color-info: #b28dff; /* violet, so it never reads as the accent */
+
+	--shadow-ledge: 0 3px 0 0 var(--color-ink);
+	--shadow-ledge-sm: 0 2px 0 0 var(--color-ink);
+	--shadow-sticker: 4px 4px 0 0 var(--color-ink);
+	--shadow-sticker-lg: 6px 6px 0 0 var(--color-ink);
+
+	--animate-pop: pop 160ms cubic-bezier(0.2, 0.9, 0.3, 1.25);
+	--animate-slide-in: slide-in 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+	--animate-tape: tape 900ms linear infinite;
+
+	@keyframes pop {
+		from {
+			opacity: 0;
+			transform: scale(0.94) rotate(-1deg);
+		}
+	}
+	@keyframes slide-in {
+		from {
+			opacity: 0;
+			transform: translateX(24px) rotate(2deg);
+		}
+	}
+	@keyframes tape {
+		to {
+			background-position: 20px 0;
+		}
+	}
+}
+
+@layer base {
+	html,
+	body {
+		background-color: var(--color-bg);
+		color: var(--color-fg);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+	}
+	body {
+		/* Grip-tape grain. */
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 .09 0 0 0 -.02'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+	}
+	h1,
+	h2 {
+		font-family: var(--font-display);
+		font-weight: 400;
+		font-synthesis: none;
+		letter-spacing: 0.01em;
+	}
+	h2 {
+		font-size: 1.125rem;
+		line-height: 1.5rem;
+	}
+	::selection {
+		background: color-mix(in oklab, var(--color-accent) 45%, transparent);
+	}
+	:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
+	}
+	input,
+	select,
+	textarea,
+	button {
+		font: inherit;
+	}
+	input[type='checkbox'],
+	input[type='radio'] {
+		accent-color: var(--color-accent);
+	}
+	@media (prefers-reduced-motion: reduce) {
+		*,
+		::before,
+		::after {
+			animation-duration: 1ms !important;
+			animation-iteration-count: 1 !important;
+			transition-duration: 1ms !important;
+		}
+	}
+}
+
+@layer components {
+	.btn {
+		@apply inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border-2 border-ink bg-raised px-3 text-sm font-semibold text-fg shadow-ledge transition-[background-color,translate,box-shadow] duration-100 select-none hover:bg-line-strong active:translate-y-[3px] active:shadow-none disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0 disabled:active:shadow-ledge;
+	}
+	.btn-primary {
+		@apply bg-accent text-ink hover:bg-accent-hover;
+	}
+	.btn-danger {
+		@apply bg-bad/15 text-bad hover:bg-bad/25;
+	}
+	.btn-ghost {
+		@apply border-transparent bg-transparent shadow-none hover:bg-raised active:translate-y-0;
+	}
+	.btn-sm {
+		@apply h-7 rounded-md px-2 text-xs shadow-ledge-sm active:translate-y-[2px];
+	}
+	.input {
+		@apply h-8 w-full rounded-lg border-2 border-line-strong bg-sunken px-2.5 text-sm text-fg transition-[border-color,box-shadow] placeholder:text-faint focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_25%,transparent)] focus:outline-none disabled:opacity-60;
+	}
+	.label {
+		@apply mb-1 block text-[11px] font-semibold tracking-wider text-muted uppercase;
+	}
+	.card {
+		@apply rounded-2xl border-2 border-ink bg-panel shadow-sticker;
+	}
+	.table {
+		@apply w-full text-left text-sm;
+	}
+	.table th {
+		@apply border-b-2 border-line px-3 py-2 text-[11px] font-semibold tracking-wider text-faint uppercase first:pl-4 last:pr-4;
+	}
+	.table td {
+		@apply border-b border-line/70 px-3 py-2 align-middle first:pl-4 last:pr-4;
+	}
+	.table tbody tr {
+		@apply transition-colors hover:bg-raised/40;
+	}
+	.table tr:last-child td {
+		@apply border-b-0;
+	}
+
+	/* Page heading with a spray-paint underline. */
+	.page-title {
+		@apply relative inline-block font-display text-3xl leading-tight text-fg;
+	}
+	.page-title::after {
+		@apply pointer-events-none absolute -bottom-1 left-0 h-2.5 w-full bg-pink;
+		content: '';
+		mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 12' preserveAspectRatio='none'%3E%3Cpath d='M3 8C40 3 78 10 118 6s62-4 79 0' fill='none' stroke='%23000' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E")
+			center / 100% 100% no-repeat;
+	}
+
+	/* Tilted label slapped on like a sticker. Pair with a colour: sticker-accent, sticker-warn... */
+	.sticker {
+		@apply inline-flex -rotate-2 items-center rounded-md border-2 border-ink bg-fg px-1.5 py-0.5 font-display text-[11px] leading-none tracking-wide text-ink uppercase shadow-[2px_2px_0_0_var(--color-ink)];
+	}
+	.sticker-accent {
+		@apply bg-accent;
+	}
+	.sticker-warn {
+		@apply bg-warn;
+	}
+	.sticker-info {
+		@apply bg-info;
+	}
+	.sticker-pink {
+		@apply bg-pink;
+	}
+
+	/* Segmented control: buttons inside, the selected one gets .seg-on. */
+	.seg {
+		@apply inline-flex gap-0.5 rounded-lg border-2 border-ink bg-sunken p-0.5;
+	}
+	.seg > button {
+		@apply shrink-0 rounded-md px-2.5 py-1 text-xs font-semibold whitespace-nowrap text-muted transition-colors hover:bg-raised hover:text-fg disabled:cursor-not-allowed disabled:hover:bg-transparent;
+	}
+	.seg > button.seg-on {
+		@apply bg-fg text-ink hover:bg-fg hover:text-ink;
+	}
+
+	/* The sr-only input is absolutely positioned. Without a positioned label it escapes
+	   the scrolling <main>, stretches the document, and focusing it scrolls the whole
+	   page out from under the fixed layout. */
+	label:has(> .switch) {
+		position: relative;
+	}
+	/* Toggle track; follows an <input type="checkbox" class="peer sr-only">. */
+	.switch {
+		@apply relative h-6 w-11 shrink-0 rounded-full border-2 border-ink bg-line-strong transition-colors peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent peer-disabled:opacity-50 after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:border-2 after:border-ink after:bg-fg after:transition-transform peer-checked:after:translate-x-5;
+	}
+
+	/* On the rail a heading shrinks to a divider. */
+	.nav-heading {
+		@apply mt-4 mb-1 px-2.5 font-display text-xs tracking-widest text-faint uppercase rail:mx-2 rail:my-3 rail:h-0.5 rail:overflow-hidden rail:rounded-full rail:bg-line rail:p-0 rail:text-[0px];
+	}
+	.nav-link {
+		@apply flex items-center gap-2 rounded-lg border-2 border-transparent px-2.5 py-2 font-medium text-muted transition-colors hover:bg-raised hover:text-fg lg:py-1.5 rail:justify-center rail:px-0;
+	}
+	.nav-link-active {
+		@apply border-ink bg-accent text-ink shadow-ledge-sm hover:bg-accent hover:text-ink;
+	}
+
+	/* Diagonal hazard stripes over a state colour, for in-between states. */
+	.tape-stripes {
+		background-image: linear-gradient(
+			-45deg,
+			rgb(0 0 0 / 0.3) 25%,
+			transparent 25% 50%,
+			rgb(0 0 0 / 0.3) 50% 75%,
+			transparent 75%
+		);
+		background-size: 20px 20px;
+	}
+
+	/* Halftone dot corner used on the sign-in screens. */
+	.halftone {
+		background-image: radial-gradient(circle, var(--color-accent) 1.4px, transparent 1.8px);
+		background-size: 14px 14px;
+	}
+}

@@ -1,0 +1,38 @@
+version: 2
+project_name: ReSkateManager
+
+before:
+  hooks:
+    - sh -c "cd web && pnpm install --frozen-lockfile && pnpm run build && touch dist/.keep"
+
+builds:
+  - main: ./cmd/ReSkateManager
+    binary: ReSkateManager
+    env: [CGO_ENABLED=0]
+    goos: [windows, linux]
+    goarch: [amd64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{.Version}}"]
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "ReSkateManager-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+      - src: deploy/reskate-manager.service
+        dst: reskate-manager.service
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github-native
+
+# A tag like v1.0.0-rc.1 is published as a pre-release, so GitHub's latest
+# (what released managers update to) stays on the last release.
+release:
+  prerelease: auto

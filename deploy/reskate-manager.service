@@ -1,0 +1,38 @@
+# ReSkateManager on Linux. The manager starts and stops the ReSkate servers
+# itself, so this unit replaces contrib/reskate-server.service from ReSkate.
+#
+#   sudo useradd --system --home /opt/reskate-manager reskate
+#   sudo cp ReSkateManager /opt/reskate-manager/ && sudo chown -R reskate: /opt/reskate-manager
+#   sudo cp reskate-manager.service /etc/systemd/system/
+#   sudo systemctl enable --now reskate-manager
+#   journalctl -u reskate-manager    # the first-run setup PIN is printed here
+#
+# Before 0.9 the binary was called reskate-manager. An install from then that
+# updates itself keeps that name, so its own copy of this unit needs no change.
+#
+# Servers link Steam's steamclient.so under the reskate user's home
+# (/opt/reskate-manager/.steam/sdk64), so it must stay writable.
+[Unit]
+Description=ReSkateManager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=reskate
+WorkingDirectory=/opt/reskate-manager
+ExecStart=/opt/reskate-manager/ReSkateManager --root /opt/reskate-manager --no-tray --no-browser
+Restart=on-failure
+RestartSec=5
+# A manager update exits with 3 so systemd starts the new binary.
+SuccessExitStatus=3
+RestartForceExitStatus=3
+# SIGTERM makes the manager send "quit" to every server; give them time to log off Steam.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

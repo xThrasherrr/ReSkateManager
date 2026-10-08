@@ -1,0 +1,10 @@
+.git
+.github
+bin
+dev
+cache
+deploy
+*.exe
+web/node_modules
+web/.svelte-kit
+web/dist

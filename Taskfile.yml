@@ -1,0 +1,48 @@
+# https://taskfile.dev — `task --list` shows everything.
+version: '3'
+
+vars:
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  EXE: '{{if eq OS "windows"}}ReSkateManager.exe{{else}}ReSkateManager{{end}}'
+
+tasks:
+  web:install:
+    dir: web
+    cmds: [pnpm install --frozen-lockfile]
+    sources: [package.json, pnpm-lock.yaml]
+
+  web:build:
+    desc: Build the panel into web/dist (embedded by the Go build)
+    deps: [web:install]
+    dir: web
+    cmds:
+      - pnpm run build
+      # adapter-static empties dist; the placeholder keeps `go build` working in a fresh clone.
+      - '{{if eq OS "windows"}}cmd /c type nul > dist\.keep{{else}}touch dist/.keep{{end}}'
+
+  build:
+    desc: Build the manager with the panel embedded
+    deps: [web:build]
+    cmds:
+      - go build -trimpath -ldflags "-s -w -X main.version={{.VERSION}}" -o bin/{{.EXE}} ./cmd/ReSkateManager
+
+  dev:api:
+    desc: Run the manager against ./dev (no tray, no browser)
+    cmds: [go run ./cmd/ReSkateManager --root ./dev --no-tray --no-browser]
+
+  dev:web:
+    desc: Run the panel with hot reload; proxies /api to dev:api
+    dir: web
+    cmds: [pnpm dev]
+
+  check:
+    desc: Vet, test and type-check everything
+    cmds:
+      - go vet ./...
+      - go test ./...
+      - cd web && pnpm run check
+
+  release:snapshot:
+    desc: Build release archives locally with GoReleaser
+    cmds: [goreleaser release --snapshot --clean]
