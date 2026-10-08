@@ -88,7 +88,7 @@ var Fields = []Field{
 	{Key: "steam_token", Label: "Steam login token", Group: "General", Type: TypeString, MaxLen: 64, Secret: true, Owner: true, Restart: true, Help: "The server browser only shows servers that have one. Each server needs its own.", Default: ""},
 
 	{Key: "reserved_slots", Label: "Reserved slots", Group: "Reserved slots", Type: TypeInt, Min: 0, Max: 248, Help: "Of the max players, kept for the players below and the admins. 0 is none.", Default: 0.0},
-	{Key: "reserved", Label: "Players with a reserved slot", Group: "Reserved slots", Type: TypeList, Help: "SteamID64s. Admins always have one.", Default: []string{}},
+	{Key: "reserved", Label: "Players with a reserved slot", Group: "Reserved slots", Type: TypeList, Help: "SteamID64s. They can join a full server; admins always can.", Default: []string{}},
 
 	{Key: "map_pool", Label: "Maps in the pool", Group: "Map pool", Type: TypeMaps, Help: "The maps players vote between, in rotation order.", Default: []string{}},
 	{Key: "map_rotation_minutes", Label: "Minutes on each map", Group: "Map pool", Type: TypeInt, Min: 0, Max: 1440, Help: "Then the server moves to the next pool map. 0 is off.", Default: 0.0},
@@ -107,7 +107,7 @@ var Fields = []Field{
 
 	{Key: "object_placement", Label: "Who may place objects", Group: "Gameplay", Type: TypeEnum, Options: []string{"everyone", "admins", "nobody"}, Default: "everyone"},
 	{Key: "object_limit", Label: "Objects each player may place", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1024, Help: "0 is no limit. Admins are not limited.", Default: 100.0},
-	{Key: "bone_scale_limit", Label: "Resized body parts, at most (times)", Group: "Gameplay", Type: TypeNumber, Min: 0, Max: 8, Help: "How far a mod may resize part of a skater for the others. 1 is not at all; 0 is no limit.", Default: 1.0},
+	{Key: "bone_scale_limit", Label: "Resized body parts, at most (times)", Group: "Gameplay", Type: TypeNumber, Min: 0, Max: 8, Help: "How far a mod may resize part of a skater for the others. 0 is no limit.", Default: 2.0},
 	{Key: "noclip", Label: "Players may noclip and teleport", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "no_bail", Label: "Players may use No Bail", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "boosts", Label: "Players may use boosts", Group: "Gameplay", Type: TypeBool, Default: true},

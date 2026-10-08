@@ -35,8 +35,11 @@ var fieldInfo = map[string]string{
 		"Keep it private: anyone with it can sign in as your server. The server reads it only when it starts.",
 
 	"reserved_slots": "With 64 max players and 4 reserved slots, anyone can join until 60 are on; the last 4 only reserved players and admins can take. " +
-		"The server browser still shows 64, and everyone else is told the remaining slots are reserved. It must be less than max players.",
-	"reserved": "SteamID64s (17 digits starting 7656119), one per line, up to 1024. The Players page shows each player's. Admins always have a reserved slot, so they needn't be listed.",
+		"The server browser still shows 64, and everyone else is told the remaining slots are reserved. It must be less than max players. " +
+		"ReSkate 1.1.7 took this setting out: since then the players below get extra slots instead.",
+	"reserved": "SteamID64s (17 digits starting 7656119), one per line, up to 1024. The Players page shows each player's. " +
+		"From ReSkate 1.1.8, anyone can join until max players are on, and then these players and the admins still can, each adding a slot beyond the limit (33/32 and so on). " +
+		"Before that, they took the reserved slots above. Admins always have a place, so they needn't be listed.",
 
 	"map_pool": "The maps players vote between and the rotation goes through, top to bottom. With none picked, it's every map: the retail ones and every custom map in Mods.\n" +
 		"Keep each pool map's mod installed: the server won't start while the pool names a map it doesn't have.",
@@ -59,7 +62,7 @@ var fieldInfo = map[string]string{
 
 	"object_placement":    "\"admins\" lets only in-game admins (from the Players page) place objects. The console's clear-objects removes everything placed.",
 	"object_limit":        "How many objects one player can have placed at a time, 1 to 1024. A player at the limit deletes one of theirs to place another. Admins are never limited.",
-	"bone_scale_limit":    "The most a mod may scale one part of a skater, such as a big-head mod, as others see it: 1 to 8 times, or 0 for no limit. At 1 everyone shows at the game's own proportions. The player with the mod still sees it on their own screen. Needs ReSkate 1.1.6.",
+	"bone_scale_limit":    "The most a mod may scale one part of a skater, such as a big-head mod, as others see it: 1 to 8 times, or 0 for no limit. The default is 2: the game's own skater height is a bone scale, so at 1 every skater shows at one height. The player with the mod still sees it on their own screen. Needs ReSkate 1.1.6.",
 	"noclip":              "Lets players fly with noclip and teleport to others with /tp. Admins always can.",
 	"no_bail":             "Lets players turn on No Bail, which stops them wiping out. Admins always can.",
 	"boosts":              "Lets players use the forward and up boosts. Admins always can.",
