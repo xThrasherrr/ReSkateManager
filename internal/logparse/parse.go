@@ -26,7 +26,7 @@ const (
 	KindCommand   Kind = "command"   // [command] <name>: /<text>   (a player's chat command)
 	KindAdmin     Kind = "admin"     // [admin] <name>: <text>      (an in-game admin's server command)
 	KindPartyChat Kind = "partychat" // [party chat] <name>: <text>
-	KindTagged    Kind = "tagged"    // [vote], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network]
+	KindTagged    Kind = "tagged"    // [vote], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct]
 	KindReady     Kind = "ready"     // <name> is up on <map> for N players.
 	KindSteam     Kind = "steam"     // Steam ID <id>[ (<how it got it>)], public IP <ip>.
 	KindJoinCode  Kind = "joincode"  // Join code: <code>[ (password required)]
@@ -50,7 +50,7 @@ type Entry struct {
 
 var (
 	stampRe    = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] ?(.*)$`)
-	tagRe      = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|throwdown|objects|map|rotation|anticheat|join|network)\] (.*)$`)
+	tagRe      = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|throwdown|objects|map|rotation|anticheat|join|network|steam|direct)\] (.*)$`)
 	joinRe     = regexp.MustCompile(`^(.+) joined \((\d+)(, admin)?\), (\d+)/(\d+) players(?:, loaded in (\d+) s)?$`)
 	leaveRe    = regexp.MustCompile(`^(.+) left \((.*)\)(?: \[.*\])?$`) // then how the connection ended, since 1.1.5
 	readyRe    = regexp.MustCompile(`^(.+) is up on (.+) for (\d+) players\.$`)
@@ -80,7 +80,8 @@ var startupPrefixes = []string{"Signing in to Steam", "Wrote a default ", "Added
 	"Update check failed: ", "Restarting to install server update ", "Nobody is on; restarting", "Installing server update ",
 	"Could not start the updated server", "This is a local build", "Server error: ", "Could not save the config: ",
 	"Global bans", "The global ban list could not be read", "No steam_token: ", "The server browser now shows only servers with a steam_token",
-	"The server browser shows servers without a steam_token again"}
+	"The server browser shows servers without a steam_token again", "Connection: ", "Steam networking debug output is on",
+	"steam_debug: "}
 
 // Classify fills Kind, Tag, Name, ID and Fields from e.Text.
 func Classify(e *Entry) {

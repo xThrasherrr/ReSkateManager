@@ -45,6 +45,14 @@ func TestClassify(t *testing.T) {
 			map[string]string{"public_ip": "1.2.3.4"}},
 		{"Global bans: 12 player(s) banned from ReSkate multiplayer cannot join.", KindStartup, "", "", nil},
 		{`Global bans are off ("global_bans": false): only this server's own bans apply.`, KindStartup, "", "", nil},
+		{`Global bans are off ("use_global_bans": false): only this server's own bans apply.`, KindStartup, "", "", nil}, // 1.1.7
+		{`Connection: through Steam's relays ("use_steam_relay": false lets players connect straight to the server).`, KindStartup, "", "", nil},
+		{"Connection: direct, on UDP port 27015. The port must be open to the internet; players it does not reach come through Steam's relays.", KindStartup, "", "", nil},
+		{`Steam networking debug output is on ("steam_debug"): its lines are marked [direct] Steam:.`, KindStartup, "", "", nil},
+		// Printed whenever they happen, so never a command's reply (1.1.7).
+		{"[steam] Relay network: ready (5 relays)", KindTagged, "", "", nil},
+		{"[steam] No longer signed in to Steam: players already on stay, but nobody can join until it is back.", KindTagged, "", "", nil},
+		{"[direct] Steam: connection closed", KindTagged, "", "", nil},
 		{"No steam_token: the server browser can be set to show only servers that have one, and then this server is not in it.", KindStartup, "", "", nil},
 		{"Join code: ABCD-EFGH (password required)", KindJoinCode, "", "", map[string]string{"code": "ABCD-EFGH", "password": "1"}},
 		{"Everyone has loaded Isle of Grom.", KindLoaded, "", "", map[string]string{"map": "Isle of Grom"}},
