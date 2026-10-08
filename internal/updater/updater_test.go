@@ -110,6 +110,26 @@ func TestInstallRejectsTraversal(t *testing.T) {
 	}
 }
 
+// A zip made on Windows may part folders with backslashes, as ReSkate
+// 1.1.8's does: they install as folders, and still can't leave the server's.
+func TestInstallBackslashNames(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(t.TempDir(), "win.zip")
+	os.WriteFile(path, makeZip(t, map[string]string{"ReSkateServer.exe": "x", `licenses\lz4-LICENSE.txt`: "lz4"}), 0o644)
+	if _, err := Install(path, dir); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "licenses", "lz4-LICENSE.txt")); err != nil || string(b) != "lz4" {
+		t.Errorf("licenses/lz4-LICENSE.txt: %q, %v", b, err)
+	}
+	for _, bad := range []string{`..\evil.txt`, `licenses\..\..\evil.txt`, `\evil.txt`} {
+		os.WriteFile(path, makeZip(t, map[string]string{bad: "x"}), 0o644)
+		if _, err := Install(path, t.TempDir()); err == nil {
+			t.Errorf("%s installed", bad)
+		}
+	}
+}
+
 type tarEntry struct {
 	name, body string
 	mode       int64

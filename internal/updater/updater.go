@@ -486,22 +486,23 @@ func walk(r io.Reader, kind string, fn func(name string, mode os.FileMode, body 
 			return err
 		}
 		for _, zf := range zr.File {
-			if zf.FileInfo().IsDir() || strings.HasSuffix(zf.Name, "/") {
+			// Zips made on Windows may part folders with backslashes, as
+			// ReSkate 1.1.8's does. Install still refuses a name that leaves
+			// the server's folder.
+			name := strings.ReplaceAll(zf.Name, `\`, "/")
+			if zf.FileInfo().IsDir() || strings.HasSuffix(name, "/") {
 				continue
 			}
 			if !zf.Mode().IsRegular() {
 				return fmt.Errorf("the update contains a link or special file: %s", zf.Name)
 			}
-			// Cleaned as the tarball's names are, so "./ReSkateServer.json"
-			// is still known for the host's own file.
-			if strings.Contains(zf.Name, `\`) {
-				return fmt.Errorf("the update contains an unsafe path: %s", zf.Name)
-			}
 			rc, err := zf.Open()
 			if err != nil {
 				return err
 			}
-			err = fn(path.Clean(zf.Name), zf.Mode(), rc)
+			// Cleaned as the tarball's names are, so "./ReSkateServer.json"
+			// is still known for the host's own file.
+			err = fn(path.Clean(name), zf.Mode(), rc)
 			rc.Close()
 			if err != nil {
 				return err
