@@ -22,7 +22,8 @@ func (a *API) world(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	layers := f.Layers()
-	layerSync, _ := f.Root["world_layer_sync"].(bool)
+	sync, _ := f.Get("world_layer_sync")
+	layerSync, _ := sync.(bool)
 	if all == nil {
 		all = []serverconfig.WorldLayer{}
 	}

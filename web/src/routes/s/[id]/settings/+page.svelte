@@ -21,7 +21,9 @@
 	}
 
 	const ctx = useLive();
-	const fields = $derived(session.meta?.settings ?? []);
+	// Settings the server's layout no longer has, such as reserved slots since ReSkate 1.1.7.
+	let gone = $state.raw<string[]>([]);
+	const fields = $derived((session.meta?.settings ?? []).filter((f) => !gone.includes(f.key)));
 	const groups = $derived([...new Set(fields.map((f) => f.group))]);
 	const canEdit = $derived(ctx.can('settings.edit'));
 	const status = $derived(ctx.live.state?.state);
@@ -44,10 +46,11 @@
 	async function load() {
 		error = '';
 		try {
-			const r = await api.get<{ values: Record<string, unknown>; unknown?: string[] }>(`/instances/${ctx.id}/settings`);
+			const r = await api.get<{ values: Record<string, unknown>; unknown?: string[]; gone?: string[] }>(`/instances/${ctx.id}/settings`);
 			saved = r.values;
 			values = structuredClone(r.values);
 			unknown = r.unknown ?? [];
+			gone = r.gone ?? [];
 			loaded = true;
 		} catch (e) {
 			error = message(e);
@@ -62,8 +65,12 @@
 	$effect(() => {
 		if (status !== 'running') return;
 		const current = beginUnknown();
-		untrack(() => api.get<{ unknown?: string[] }>(`/instances/${ctx.id}/settings`)).then(
-			(r) => current() && (unknown = r.unknown ?? []),
+		untrack(() => api.get<{ unknown?: string[]; gone?: string[] }>(`/instances/${ctx.id}/settings`)).then(
+			(r) => {
+				if (!current()) return;
+				unknown = r.unknown ?? [];
+				gone = r.gone ?? []; // a newer server lays its file out again on its first start
+			},
 			() => {}
 		);
 	});

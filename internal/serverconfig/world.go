@@ -55,7 +55,8 @@ func ReadWorldLayers(dir string) ([]WorldLayer, error) {
 // Layers is the world layers set in the config, by key.
 func (f *File) Layers() map[string]string {
 	out := map[string]string{}
-	m, _ := f.Root["layers"].(map[string]any)
+	v, _ := f.Get("layers")
+	m, _ := v.(map[string]any)
 	for k, v := range m {
 		out[k] = fmt.Sprint(v)
 	}
@@ -68,7 +69,7 @@ func (f *File) SetLayers(layers map[string]string) {
 	for k, v := range layers {
 		m[k] = v
 	}
-	f.Root["layers"] = m
+	f.Set("layers", m)
 }
 
 // todSlot is the n in a "<map>_tod_<n>_<name>" key, or -1.

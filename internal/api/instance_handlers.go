@@ -723,12 +723,17 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "the server has no config yet; start it once")
 		return
 	}
+	// Settings a server laid out in sections no longer has.
+	gone := []string{}
+	if f.Sectioned() {
+		gone = serverconfig.Removed
+	}
 	// A running server has written every setting it knows into the file (it
 	// adds missing ones at start), so a key still missing is newer than it.
 	unknown := []string{}
 	if in.State() == instance.Running {
 		for _, fd := range serverconfig.Fields {
-			if _, ok := f.Get(fd.Key); !ok {
+			if _, ok := f.Get(fd.Key); !ok && !slices.Contains(gone, fd.Key) {
 				unknown = append(unknown, fd.Key)
 			}
 		}
@@ -737,7 +742,7 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 	if !from(r).perms.Owner {
 		maps.DeleteFunc(values, func(k string, _ any) bool { return serverconfig.OwnerOnly(k) })
 	}
-	writeJSON(w, 200, map[string]any{"values": values, "running": running(in), "unknown": unknown})
+	writeJSON(w, 200, map[string]any{"values": values, "running": running(in), "unknown": unknown, "gone": gone})
 }
 
 type cmdResult struct {

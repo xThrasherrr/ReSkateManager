@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"math"
 	"os"
@@ -19,15 +20,31 @@ import (
 
 // File is ReSkateServer.json as a generic tree, so keys the manager does not
 // know (added by a newer server) survive a write.
+//
+// Since ReSkate 1.1.7 the server writes its settings in sections, some under
+// new names, and keeps its bans in data/bans.json beside the file. It still
+// reads a file from before then, flat, and writes it back in sections on its
+// first start. Keys here are always the flat names, as the panel, the API and
+// the console commands use them; Get and Set find each one's place in either
+// layout.
 type File struct {
 	Root map[string]any
+
+	bans     []Ban // data/bans.json, when the server keeps them there
+	bansFile bool  // the bans belong in data/bans.json
+	bansSet  bool  // SetBans changed them, so Write writes data/bans.json
 }
 
 // maxConfig caps how much of a ReSkateServer.json is read. The server's own
 // is a few KB; one from a restore or an import could be anything.
 const maxConfig = 16 << 20
 
-// Read reads a ReSkateServer.json, which must hold one JSON object.
+// BansFile is where a server from ReSkate 1.1.7 on keeps its bans, relative
+// to its folder.
+const BansFile = "data/bans.json"
+
+// Read reads a ReSkateServer.json, which must hold one JSON object, and the
+// bans in data/bans.json beside it.
 func Read(path string) (*File, error) {
 	data, err := readCapped(path, maxConfig)
 	if err != nil {
@@ -45,7 +62,23 @@ func Read(path string) (*File, error) {
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("ReSkateServer.json is not valid JSON: something follows its settings")
 	}
-	return &File{Root: root}, nil
+	f := &File{Root: root}
+	data, err = readCapped(filepath.Join(filepath.Dir(path), BansFile), maxConfig)
+	if errors.Is(err, fs.ErrNotExist) {
+		return f, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The server won't start with bans it can't read either.
+	dec = json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var rows []any
+	if err := dec.Decode(&rows); err != nil {
+		return nil, fmt.Errorf("%s is not a JSON list: %w", BansFile, err)
+	}
+	f.bans, f.bansFile = bansOf(rows), true
+	return f, nil
 }
 
 // readCapped reads a file of at most max bytes, refusing a bigger one
@@ -79,12 +112,35 @@ func (f *File) Bytes() ([]byte, error) {
 // it, flushed to disk, then renamed over it, so a crash can't leave the
 // server a config it refuses to start with. It holds the server's password
 // and Steam token, so it's for the manager's user, who runs the server too.
+// Changed bans that belong in data/bans.json go there first, as the server
+// writes them, so a config that held them loses them only once they're safe.
 func (f *File) Write(path string) error {
 	data, err := f.Bytes()
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".ReSkateServer-*.json.tmp")
+	if f.bansSet && f.bansFile {
+		rows := make([]any, len(f.bans))
+		for i, b := range f.bans {
+			rows[i] = map[string]any{"id": b.ID, "name": b.Name, "added": b.Added}
+		}
+		bans, err := json.MarshalIndent(rows, "", "  ")
+		if err != nil {
+			return err
+		}
+		bansPath := filepath.Join(filepath.Dir(path), BansFile)
+		if err := os.MkdirAll(filepath.Dir(bansPath), 0o755); err != nil {
+			return err
+		}
+		if err := writeAtomic(bansPath, append(bans, '\n')); err != nil {
+			return err
+		}
+	}
+	return writeAtomic(path, data)
+}
+
+func writeAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -102,10 +158,104 @@ func (f *File) Write(path string) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// Get reads a setting by its key, dotted for nested ones ("distances.half_rate_start").
+// sections says where a sectioned file keeps each flat key (load_config in
+// Server/server_config.cpp, 1.1.7). A nested key goes by its first part, so
+// "distances.half_rate_start" is in network.distances. Keys not listed, the
+// votes, are in the same place in both layouts.
+var sections = map[string]string{
+	"name": "server.name", "password": "server.password", "welcome": "server.welcome_message", "listed": "server.listed",
+	"max_players": "server.max_players", "port": "server.port", "query_port": "server.query_port",
+	"steam_token": "server.steam_token", "auto_update": "server.auto_update", "activity_log": "server.activity_log",
+
+	"admins": "access.admins", "reserved": "access.reserved_players_slots", "global_bans": "access.use_global_bans",
+
+	"map": "maps.map", "map_pool": "maps.pool", "map_rotation_minutes": "maps.rotation_minutes", "parks": "maps.parks",
+	"world_layer_sync": "maps.world_layer_sync", "layers": "maps.layers",
+
+	"boosts": "players.allow_boosts", "no_bail": "players.allow_no_bail", "noclip": "players.allow_noclip",
+	"parties": "players.allow_parties", "party_size": "players.party_size", "voice_chat": "players.allow_voice_chat",
+	"voice_range": "players.voice_range", "object_placement": "players.object_placement",
+	"object_limit": "players.object_limit", "announce_throwdowns": "players.announce_throwdowns",
+
+	"speed_check": "anti_cheat.speed_hack", "score_check": "anti_cheat.modified_scoring",
+	"score_allow": "anti_cheat.allowed_scoring_mods", "enforce_tuning": "anti_cheat.enforce_tuning",
+	"bone_scale_limit": "anti_cheat.bone_scale_limit",
+
+	"send_rate": "network.send_rate", "crowd_budget": "network.crowd_budget", "distances": "network.distances",
+}
+
+// Removed are the flat settings a sectioned server no longer has: reserved
+// slots are kept for each listed player instead.
+var Removed = []string{"reserved_slots"}
+
+// Sectioned reports whether the file is laid out in sections, as servers from
+// ReSkate 1.1.7 on write it.
+func (f *File) Sectioned() bool {
+	for _, s := range []string{"server", "access", "maps", "players", "anti_cheat", "network"} {
+		if _, ok := f.Root[s].(map[string]any); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// places lists where the server looks for key, in its order: in its section,
+// at the top under its new name, then under the flat name.
+func places(key string) []string {
+	head, rest, nested := strings.Cut(key, ".")
+	at, ok := sections[head]
+	if !ok {
+		return []string{key}
+	}
+	_, name, _ := strings.Cut(at, ".")
+	out := []string{at}
+	for _, p := range []string{name, head} {
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	if nested {
+		for i := range out {
+			out[i] += "." + rest
+		}
+	}
+	return out
+}
+
+// Get reads a setting by its flat key, dotted for nested ones
+// ("distances.half_rate_start"), from wherever the server would take it.
 func (f *File) Get(key string) (any, bool) {
+	for _, p := range places(key) {
+		if v, ok := f.at(p); ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// Set writes a setting by its flat key: into its section when the file has
+// them, dropping any copy left at the top, which the server would not read.
+func (f *File) Set(key string, v any) {
+	if !f.Sectioned() {
+		f.setAt(key, v)
+		return
+	}
+	all := places(key)
+	for _, p := range all[1:] {
+		f.delAt(p)
+	}
+	f.setAt(all[0], v)
+}
+
+func (f *File) del(key string) {
+	for _, p := range places(key) {
+		f.delAt(p)
+	}
+}
+
+func (f *File) at(path string) (any, bool) {
 	var cur any = f.Root
-	for part := range strings.SplitSeq(key, ".") {
+	for part := range strings.SplitSeq(path, ".") {
 		m, ok := cur.(map[string]any)
 		if !ok {
 			return nil, false
@@ -117,9 +267,8 @@ func (f *File) Get(key string) (any, bool) {
 	return cur, true
 }
 
-// Set writes a setting by its key, dotted for nested ones.
-func (f *File) Set(key string, v any) {
-	parts := strings.Split(key, ".")
+func (f *File) setAt(path string, v any) {
+	parts := strings.Split(path, ".")
 	m := f.Root
 	for _, part := range parts[:len(parts)-1] {
 		next, ok := m[part].(map[string]any)
@@ -132,8 +281,8 @@ func (f *File) Set(key string, v any) {
 	m[parts[len(parts)-1]] = v
 }
 
-func (f *File) del(key string) {
-	parts := strings.Split(key, ".")
+func (f *File) delAt(path string) {
+	parts := strings.Split(path, ".")
 	m := f.Root
 	for _, part := range parts[:len(parts)-1] {
 		next, ok := m[part].(map[string]any)
@@ -185,8 +334,7 @@ func (f *File) Values() map[string]any {
 	return out
 }
 
-// Ban is one entry in the file's bans. Admins and bans live in the same file
-// as the settings but have their own pages.
+// Ban is one of the server's bans. Admins and bans have their own pages.
 type Ban struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
@@ -196,17 +344,16 @@ type Ban struct {
 // Admins lists the in-game admins, by SteamID64.
 func (f *File) Admins() []string {
 	out := []string{}
-	list, _ := f.Root["admins"].([]any)
+	v, _ := f.Get("admins")
+	list, _ := v.([]any)
 	for _, v := range list {
 		out = append(out, fmt.Sprint(v))
 	}
 	return out
 }
 
-// Bans lists the bans.
-func (f *File) Bans() []Ban {
+func bansOf(list []any) []Ban {
 	out := []Ban{}
-	list, _ := f.Root["bans"].([]any)
 	for _, v := range list {
 		row, ok := v.(map[string]any)
 		if !ok {
@@ -224,17 +371,39 @@ func (f *File) Bans() []Ban {
 	return out
 }
 
+// Bans lists the bans as the server reads them: data/bans.json, then any
+// still in the config, which it moves there.
+func (f *File) Bans() []Ban {
+	out := slices.Clone(f.bans)
+	list, _ := f.Root["bans"].([]any)
+	for _, b := range bansOf(list) {
+		if !slices.ContainsFunc(out, func(x Ban) bool { return x.ID == b.ID }) {
+			out = append(out, b)
+		}
+	}
+	if out == nil {
+		out = []Ban{}
+	}
+	return out
+}
+
 // SetAdmins replaces the in-game admins.
 func (f *File) SetAdmins(ids []string) {
 	list := make([]any, len(ids))
 	for i, id := range ids {
 		list[i] = id
 	}
-	f.Root["admins"] = list
+	f.Set("admins", list)
 }
 
-// SetBans replaces the bans.
+// SetBans replaces the bans: in data/bans.json for a server that keeps them
+// there, else in the config.
 func (f *File) SetBans(bans []Ban) {
+	if f.bansFile || f.Sectioned() {
+		f.bans, f.bansFile, f.bansSet = slices.Clone(bans), true, true
+		delete(f.Root, "bans")
+		return
+	}
 	list := make([]any, len(bans))
 	for i, b := range bans {
 		list[i] = map[string]any{"id": b.ID, "name": b.Name, "added": b.Added}
@@ -518,6 +687,9 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 		fd, ok := FieldByKey(key)
 		if !ok {
 			return nil, fmt.Errorf("unknown setting %q", key)
+		}
+		if cur.Sectioned() && slices.Contains(Removed, key) {
+			return nil, fmt.Errorf("the server no longer has %s: ReSkate 1.1.7 took it out", strings.ToLower(fd.Label))
 		}
 		v, err := normalize(fd, raw)
 		if err != nil {
