@@ -551,7 +551,7 @@ func walk(r io.Reader, kind string, fn func(name string, mode os.FileMode, body 
 // Protected files are the host's own: a release creates them when missing but never replaces them.
 func protected(rel string) bool {
 	switch strings.ToLower(filepath.ToSlash(rel)) {
-	case "reskateserver.json", "world-layers.json":
+	case "reskateserver.json", "world-layers.json", "data/bans.json":
 		return true
 	}
 	return false

@@ -41,6 +41,7 @@ const Format = 1
 //	data/manager.toml
 //	servers/<id>/ReSkateServer.json
 //	servers/<id>/world-layers.json
+//	servers/<id>/data/bans.json
 //	servers/<id>/Mods/<folder>/...
 //	servers/<id>/DisabledMods/<folder>/...
 //	shared/Mods/<folder>/...
@@ -54,9 +55,9 @@ const (
 func serverPrefix(id string) string { return "servers/" + id + "/" }
 
 // ConfigFiles are the files in a server's folder that a backup holds: what
-// it can't download again, apart from its mods. A server update leaves both
-// in place.
-var ConfigFiles = []string{"ReSkateServer.json", "world-layers.json"}
+// it can't download again, apart from its mods. A server update leaves them
+// in place. Servers from ReSkate 1.1.7 on keep their bans in the last.
+var ConfigFiles = []string{"ReSkateServer.json", "world-layers.json", serverconfig.BansFile}
 
 // modDirs are a server's folders of mods, enabled and disabled.
 var modDirs = []string{"Mods", "DisabledMods"}

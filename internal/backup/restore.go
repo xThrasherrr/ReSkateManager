@@ -138,7 +138,11 @@ func (r *Reader) RestoreConfig(id, dir string) ([]string, error) {
 		}
 		// It can hold the server's password and Steam token: for the
 		// manager's user, who runs the server too.
-		if err := writeFileAtomic(filepath.Join(dir, name), data, 0o600); err != nil {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return done, err
+		}
+		if err := writeFileAtomic(path, data, 0o600); err != nil {
 			return done, err
 		}
 		done = append(done, name)

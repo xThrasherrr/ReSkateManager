@@ -132,6 +132,7 @@ func TestBackUpWipeRestore(t *testing.T) {
 	lobby := m.addServer(t, instance.Def{ID: "lobby", Name: "Lobby", AutoStart: true, SharedMods: serverconfig.SharedAll, RestartTimes: []string{"04:00"}})
 	write(t, filepath.Join(lobby.Dir, "ReSkateServer.json"), `{"name":"Lobby","port":27015}`)
 	write(t, filepath.Join(lobby.Dir, "world-layers.json"), `{"rows":[]}`)
+	write(t, filepath.Join(lobby.Dir, "data", "bans.json"), `[{"id":"76561198000000001","name":"A","added":1}]`) // ReSkate 1.1.7
 	write(t, lobby.Exe(), "a server program")
 	write(t, filepath.Join(lobby.Dir, "ReSkateServer.log"), "a log")
 	writeMod(t, filepath.Join(lobby.Dir, "Mods", "own"), "1.0.0")
