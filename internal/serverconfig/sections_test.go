@@ -119,6 +119,30 @@ func TestSectionedRedact(t *testing.T) {
 	}
 }
 
+// 1.1.7's network settings have no console command: they wait for the
+// server to stop, and go into its network section.
+func TestNetworkSettings(t *testing.T) {
+	f, _ := readSectioned(t)
+	p, err := Diff(f, map[string]any{"use_steam_relay": false, "pack_ms": 5.0, "finger_distance": 40.0, "steam_debug": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Commands) != 0 || len(p.Restart) != 4 {
+		t.Fatalf("planned %+v", p)
+	}
+	f.ApplyOffline(p.Restart)
+	for path, want := range map[string]string{"network.use_steam_relay": `false`, "network.pack_ms": `5`,
+		"network.finger_distance": `40`, "network.steam_debug": `true`} {
+		got, ok := f.at(path)
+		if b, _ := json.Marshal(got); !ok || string(b) != want {
+			t.Errorf("%s = %s, want %s", path, b, want)
+		}
+	}
+	if _, err := Diff(f, map[string]any{"pack_ms": 51.0}, nil); err == nil {
+		t.Error("pack_ms 51 accepted; the server allows 0 to 50")
+	}
+}
+
 // Reserved slots are gone from a sectioned server: never asked of it.
 func TestSectionedRemoved(t *testing.T) {
 	f, _ := readSectioned(t)

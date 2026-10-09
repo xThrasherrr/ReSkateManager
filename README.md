@@ -211,7 +211,7 @@ If the panel says it can't reach the manager, the manager stopped or is restarti
 
 The manager works with ReSkate server **1.0.8 and newer**, on Windows and on Linux.
 
-- Settings a server's release doesn't have yet show as needing a server update: global bans came in 1.1.1, the map pool and rotation in 1.1.2, `steam_token` in 1.1.4, reserved slots, the object limit, send rate and crowd budget in 1.1.5, and the limit on resized body parts in 1.1.6.
+- Settings a server's release doesn't have yet show as needing a server update: global bans came in 1.1.1, the map pool and rotation in 1.1.2, `steam_token` in 1.1.4, reserved slots, the object limit, send rate and crowd budget in 1.1.5, the limit on resized body parts in 1.1.6, and Steam relays only (direct connections), the packing delay, finger distance and the Steam networking log in 1.1.7.
 - Network health needs 1.1.5 or newer.
 
 ## How it works

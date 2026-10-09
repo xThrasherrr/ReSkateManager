@@ -93,14 +93,18 @@ var Fields = []Field{
 	{Key: "map_pool", Label: "Maps in the pool", Group: "Map pool", Type: TypeMaps, Help: "The maps players vote between, in rotation order.", Default: []string{}},
 	{Key: "map_rotation_minutes", Label: "Minutes on each map", Group: "Map pool", Type: TypeInt, Min: 0, Max: 1440, Help: "Then the server moves to the next pool map. 0 is off.", Default: 0.0},
 
+	{Key: "use_steam_relay", Label: "Steam relays only", Group: "Network", Type: TypeBool, Restart: true, Help: "Off lets players connect straight to the game port, which must then be open (UDP).", Default: true},
 	{Key: "send_rate", Label: "Send rate per player (KB/s)", Group: "Network", Type: TypeInt, Min: 128, Max: 16384, Help: "Steam's relays carry about 1100; above that, more is lost.", Default: 900.0},
 	{Key: "crowd_budget", Label: "Crowd budget (updates a second)", Group: "Network", Type: TypeInt, Min: 0, Max: 20000, Help: "The most position updates one player is sent. 0 is no limit; otherwise 300 to 20000.", Default: 600.0},
+	{Key: "pack_ms", Label: "Packing delay (ms)", Group: "Network", Type: TypeInt, Min: 0, Max: 50, Restart: true, Help: "How long a message may wait to share a packet. 0 sends each at once.", Default: 10.0},
+	{Key: "finger_distance", Label: "Finger distance (m)", Group: "Network", Type: TypeInt, Min: 0, Max: 10000, Restart: true, Help: "Past this, a player's fingers aren't sent moving. 0 always sends them.", Default: 25.0},
 	{Key: "port", Label: "Game port (UDP)", Group: "Network", Type: TypeInt, Min: 1, Max: 65535, Restart: true, Default: 27015.0},
 	{Key: "query_port", Label: "Query port (UDP)", Group: "Network", Type: TypeInt, Min: 1, Max: 65535, Restart: true, Default: 27016.0},
 	{Key: "distances.full_rate_return", Label: "Full rate return (m)", Group: "Network", Type: TypeInt, Min: 0, Max: 10000, Default: 50.0},
 	{Key: "distances.half_rate_start", Label: "Half rate start (m)", Group: "Network", Type: TypeInt, Min: 0, Max: 10000, Default: 60.0},
 	{Key: "distances.half_rate_return", Label: "Half rate return (m)", Group: "Network", Type: TypeInt, Min: 0, Max: 10000, Default: 150.0},
 	{Key: "distances.low_rate_start", Label: "Low rate start (m)", Group: "Network", Type: TypeInt, Min: 0, Max: 10000, Default: 170.0},
+	{Key: "steam_debug", Label: "Steam networking log", Group: "Network", Type: TypeBool, Restart: true, Help: "Logs what Steam's networking does, to find why players can't connect. A lot of text: turn it off after.", Default: false},
 
 	{Key: "voice_chat", Label: "Voice chat", Group: "Voice", Type: TypeBool, Default: true},
 	{Key: "voice_range", Label: "Voice range (m)", Group: "Voice", Type: TypeNumber, Min: 50, Max: 1000, Default: 300.0},

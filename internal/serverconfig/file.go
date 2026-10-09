@@ -182,6 +182,8 @@ var sections = map[string]string{
 	"bone_scale_limit": "anti_cheat.bone_scale_limit",
 
 	"send_rate": "network.send_rate", "crowd_budget": "network.crowd_budget", "distances": "network.distances",
+	"use_steam_relay": "network.use_steam_relay", "pack_ms": "network.pack_ms", "finger_distance": "network.finger_distance",
+	"steam_debug": "network.steam_debug",
 }
 
 // Removed are the flat settings a sectioned server no longer has: reserved
