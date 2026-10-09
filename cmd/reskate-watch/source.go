@@ -61,7 +61,7 @@ func readUpstream(src, tag string) (*upstream, error) {
 				u.help = s
 			}
 		}
-		for _, m := range verbRe.FindAllStringSubmatch(text, -1) {
+		for _, m := range verbRe.FindAllStringSubmatch(hostCommand(text), -1) {
 			verbs[m[1]] = true
 		}
 		for _, s := range logStarts(text) {
@@ -85,19 +85,7 @@ func readUpstream(src, tag string) (*upstream, error) {
 // checkSource compares the source at From and To: text the manager uses that
 // the server no longer has, and new commands, console tags, lines and flags.
 func (r *report) checkSource(use *usage) {
-	for _, frag := range slices.Sorted(maps.Keys(use.frags)) {
-		if strings.Contains(r.old.all, frag) && !strings.Contains(r.cur.all, frag) {
-			where := use.frags[frag]
-			links := make([]string, 0, 3)
-			for _, w := range where[:min(len(where), 3)] {
-				links = append(links, managerLink(w))
-			}
-			if len(where) > 3 {
-				links = append(links, fmt.Sprintf("%d more", len(where)-3))
-			}
-			r.Breaking = append(r.Breaking, fmt.Sprintf("The server's source no longer has %s, which the manager uses at %s", code(frag), strings.Join(links, ", ")))
-		}
-	}
+	r.checkLost(use)
 
 	r.Checked = append(r.Checked, fmt.Sprintf("%d strings in the manager's code, against the server's source at %s and %s.", len(use.frags), r.From, r.To))
 	oldCmds, newCmds := r.old.cmds, r.cur.cmds
@@ -115,7 +103,7 @@ func (r *report) checkSource(use *usage) {
 		var added []string
 		for _, f := range forms {
 			// A command the help didn't list before is known only by its verb.
-			if f != verb && !slices.Contains(was, f) && !slices.Contains(was, verb) {
+			if f != verb && !slices.Contains(was, f) && !slices.Contains(was, verb) && !use.sendsForm(f) {
 				added = append(added, f)
 			}
 		}
@@ -172,15 +160,92 @@ func (r *report) checkSource(use *usage) {
 	r.sourceDetails()
 }
 
+// checkLost reports the text the manager uses that the source had at From
+// and no longer has at To. A setting the server still writes isn't lost, only
+// no longer spelled out whole: 2.0.2 built "votes.seconds" from "votes." and
+// a key instead.
+func (r *report) checkLost(use *usage) {
+	for _, frag := range slices.Sorted(maps.Keys(use.frags)) {
+		if !strings.Contains(r.old.all, frag) || strings.Contains(r.cur.all, frag) {
+			continue
+		}
+		if r.serverTag == r.To && r.written[frag] {
+			continue
+		}
+		where := use.frags[frag]
+		links := make([]string, 0, 3)
+		for _, w := range where[:min(len(where), 3)] {
+			links = append(links, managerLink(w))
+		}
+		if len(where) > 3 {
+			links = append(links, fmt.Sprintf("%d more", len(where)-3))
+		}
+		r.Breaking = append(r.Breaking, fmt.Sprintf("The server's source no longer has %s, which the manager uses at %s", code(frag), strings.Join(links, ", ")))
+	}
+}
+
 var (
 	flagRe = regexp.MustCompile(`^--[a-z][a-z0-9-]+$`)
 	tagRe  = regexp.MustCompile(`^\[([a-z][a-z ]*[a-z])\]`)
+	// Where Host::command is defined: not in a comment that names it.
+	hostCommandRe = regexp.MustCompile(`(?m)^[^/\n]*\bHost::command\(`)
 	// The verbs Host::command tests for, which the help doesn't always list
-	// (chat-color in 2.0.0).
+	// (chat-color in 2.0.0). Only there: players' chat commands test theirs
+	// the same way (/poll in 2.0.2).
 	verbRe = regexp.MustCompile(`\b(?:name|verb) == "([a-z][a-z0-9]*(?:-[a-z0-9]+)*)"`)
 	// A call that logs a line: write_log in main.cpp, log_ in the host.
 	logRe = regexp.MustCompile(`\b(?:write_log|log_)\(`)
 )
+
+// hostCommand is the body of Host::command, which runs the console's
+// commands, in a source file, or "" when the file doesn't define it. Braces
+// in literals, comments and numbers (1'000) don't count.
+func hostCommand(src string) string {
+	m := hostCommandRe.FindStringIndex(src)
+	if m == nil {
+		return ""
+	}
+	at := m[0]
+	open := strings.IndexByte(src[at:], '{')
+	if open < 0 {
+		return ""
+	}
+	start, depth := at+open, 0
+	for i := start; i < len(src); {
+		c := src[i]
+		switch {
+		case strings.HasPrefix(src[i:], "//"):
+			i += strings.IndexByte(src[i:]+"\n", '\n')
+			continue
+		case strings.HasPrefix(src[i:], "/*"):
+			end := strings.Index(src[i+2:], "*/")
+			if end < 0 {
+				return src[start:]
+			}
+			i += end + 4
+			continue
+		case c == '"' || c == '\'':
+			_, i = quoted(src, i, c)
+			continue
+		case isDigit(c):
+			for i++; i < len(src) && (isIdent(src[i]) || src[i] == '\'' && i+1 < len(src) && isIdent(src[i+1])); i++ {
+			}
+			continue
+		case isIdent(c):
+			for i++; i < len(src) && isIdent(src[i]); i++ {
+			}
+			continue
+		case c == '{':
+			depth++
+		case c == '}':
+			if depth--; depth == 0 {
+				return src[start : i+1]
+			}
+		}
+		i++
+	}
+	return src[start:]
+}
 
 // commands reads the help reply ("status | net [player] | ...") into each
 // command's forms by its verb.
@@ -208,27 +273,36 @@ func codes(list []string) string {
 
 // logStarts finds how the lines the server logs start: in each call that logs
 // one, the literals that begin the line, so in log_(on ? "A" : "B" + x) both
-// "A" and "B", and in log_(std::string("A") + x) "A", but not one added on.
+// "A" and "B", and in log_(std::string("A") + x) "A", but not one added on,
+// in parentheses or not: log_("A" + (first ? "" : "B")) is "A" alone.
 func logStarts(text string) []string {
 	var out []string
 	for _, m := range logRe.FindAllStringIndex(text, -1) {
-		depth, prev := 1, byte('(')
-		for i := m[1]; i < len(text) && depth > 0; {
+		// added: at each depth of parentheses, whether this branch of it has
+		// had a + yet.
+		added, prev := []bool{false}, byte('(')
+		for i := m[1]; i < len(text) && len(added) > 0; {
 			c := text[i]
 			switch {
 			case c == '"':
 				s, next := quoted(text, i, '"')
-				if prev == '(' || prev == '?' || prev == ':' && text[i-1] != ':' {
+				if (prev == '(' || prev == '?' || prev == ':') && !slices.Contains(added, true) {
 					out = append(out, s)
 				}
 				i, prev = next, '"'
 				continue
+			case c == ':' && (text[i-1] == ':' || i+1 < len(text) && text[i+1] == ':'):
+				c = 'S' // std::, not a branch
+			case c == '?' || c == ':':
+				added[len(added)-1] = false
+			case c == '+':
+				added[len(added)-1] = true
 			case c == '(':
-				depth++
+				added = append(added, false)
 			case c == ')':
-				depth--
+				added = added[:len(added)-1]
 			case c == ';':
-				depth = 0
+				added = nil
 			}
 			if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
 				prev = c

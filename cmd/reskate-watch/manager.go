@@ -69,6 +69,21 @@ func (u *usage) sends(verb string) bool {
 	return false
 }
 
+// sendsForm reports whether the manager has text for one form of a command:
+// its words up to the first that varies, so "votes polls" of "votes polls
+// off|admins|everyone". A form that varies from its second word can't be told
+// from the command's others.
+func (u *usage) sendsForm(form string) bool {
+	var fixed []string
+	for w := range strings.FieldsSeq(form) {
+		if strings.ContainsAny(w, "<[|") {
+			break
+		}
+		fixed = append(fixed, w)
+	}
+	return len(fixed) > 1 && u.sends(strings.Join(fixed, " "))
+}
+
 // knowsTag reports whether the manager knows the console tag t: from a
 // regular expression (the log parser's alternation of tags) or text that
 // has it in brackets. A plain "steam" elsewhere doesn't count.

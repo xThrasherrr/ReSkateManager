@@ -21,6 +21,19 @@ func TestRegexRuns(t *testing.T) {
 	}
 }
 
+func TestSendsForm(t *testing.T) {
+	u := &usage{words: map[string]bool{"votes polls ": true, "votes ": true}}
+	for form, want := range map[string]bool{
+		"votes polls off|admins|everyone": true,
+		"votes poll-seconds <n>":          false,
+		"votes [<vote> on|off|<percent>]": false, // only "votes" is fixed, which every form has
+	} {
+		if got := u.sendsForm(form); got != want {
+			t.Errorf("sendsForm(%q) = %v", form, got)
+		}
+	}
+}
+
 func TestAddFile(t *testing.T) {
 	src := "package x\n\nvar re = regexp.MustCompile(`^Join code: (\\S+)$`)\n\nfunc f() string { return fmt.Sprintf(\"voice-range %d\", 3) }\n"
 	fset := token.NewFileSet()

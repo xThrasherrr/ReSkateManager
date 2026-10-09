@@ -44,7 +44,7 @@ func (r *report) checkServer(ctx context.Context) {
 			r.To = tag
 		}
 		if goos == runtime.GOOS {
-			dir = d
+			dir, r.serverTag = d, tag
 		}
 	}
 	if len(installed) > 0 {
@@ -188,6 +188,13 @@ func (r *report) compareConfig(f *serverconfig.File) (int, int) {
 	var leaves []string
 	leafPaths(f.Root, "", &leaves)
 	slices.Sort(leaves)
+	r.written = map[string]bool{}
+	for _, p := range leaves {
+		r.written[p] = true
+		if key, ok := known[p]; ok {
+			r.written[key] = true
+		}
+	}
 	added := 0
 	for _, p := range leaves {
 		if _, ok := known[p]; !ok {

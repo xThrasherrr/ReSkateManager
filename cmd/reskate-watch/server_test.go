@@ -67,6 +67,12 @@ func TestCompareConfig(t *testing.T) {
 	}
 	check("Adds", r.Adds, "players.new_thing", "network.send_rate")
 	check("Breaking", r.Breaking, "players.allow_noclip", "network.pack_ms")
+	// Where the server writes each setting, and the manager's names for them.
+	for key, want := range map[string]bool{"players.new_thing": true, "network.send_rate": true, "send_rate": true, "noclip": false} {
+		if r.written[key] != want {
+			t.Errorf("written[%q] = %v", key, !want)
+		}
+	}
 }
 
 func TestDescribe(t *testing.T) {

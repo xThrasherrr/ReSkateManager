@@ -21,6 +21,9 @@ type report struct {
 
 	srcDir   string
 	old, cur *upstream // the source at From and To, when -src is given
+
+	serverTag string          // the release whose server was run
+	written   map[string]bool // the settings its config holds: where (dotted) and the manager's keys for them
 }
 
 type detail struct{ Title, Body string }
