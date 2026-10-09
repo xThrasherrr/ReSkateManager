@@ -13,7 +13,8 @@ var GroupInfo = map[string]string{
 		"The four distances must rise in order: full rate return < half rate start ≤ half rate return < low rate start.\n" +
 		"A player who has stood still for a few seconds (in a menu, or away) is sent at 5 a second to everyone until they move.",
 	"Parks": "San Vansterdam has three park lots. Each shows one layout to everyone: a Flump, Mega, Skate or Street park variant, " +
-		"or \"empty\" for a bare lot. Changes apply live.",
+		"or \"empty\" for a bare lot. Changes apply live.\n" +
+		"Randomize picks a layout for each lot (never an empty one) for you to save.",
 	"Map pool": "Build a server around a theme, like only Skate 3 maps. An empty pool is every map the server knows.\n" +
 		"• Map votes take only the pool's maps, and players' map suggestions list only those.\n" +
 		"• The rotation goes down the pool from the map the server is on, or from the top when that map isn't in it.\n" +

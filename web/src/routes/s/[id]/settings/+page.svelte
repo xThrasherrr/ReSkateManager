@@ -131,6 +131,16 @@
 		values[f.key] = v === '' ? '' : Number(v);
 	}
 
+	// Random layouts for the park lots, picked as the server's `park random` picks
+	// them (each of a lot's layouts as likely, never an empty lot) but never the one
+	// a lot has now, so every click changes all three. They save like any change.
+	function randomizeParks() {
+		for (const f of fields.filter((f) => f.key.startsWith('parks.'))) {
+			const pool = (f.options ?? []).filter((o) => o !== 'empty' && o !== values[f.key]);
+			if (pool.length) values[f.key] = pool[Math.floor(Math.random() * pool.length)];
+		}
+	}
+
 	guardUnsaved(() => canEdit && dirty.length > 0);
 
 	// What is wrong with a changed value by the rules every setting shares, as
@@ -179,6 +189,11 @@
 				<h2 class="flex items-center gap-1.5 border-b-2 border-line px-4 py-3">
 					{group}
 					{#if session.meta?.groupInfo?.[group]}<InfoTip text={session.meta.groupInfo[group]} label="About {group}" />{/if}
+					{#if group === 'Parks' && canEdit}
+						<button class="btn btn-sm -my-0.5 ml-auto" title="A random layout for each lot, never an empty one. Save to apply." onclick={randomizeParks}>
+							<Icon name="shuffle" size={14} />Randomize
+						</button>
+					{/if}
 				</h2>
 				<div class="divide-y divide-line/60">
 					{#each fields.filter((f) => f.group === group) as f (f.key)}
