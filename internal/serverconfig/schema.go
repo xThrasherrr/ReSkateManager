@@ -111,13 +111,16 @@ var Fields = []Field{
 
 	{Key: "object_placement", Label: "Who may place objects", Group: "Gameplay", Type: TypeEnum, Options: []string{"everyone", "admins", "nobody"}, Default: "everyone"},
 	{Key: "object_limit", Label: "Objects each player may place", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1024, Help: "0 is no limit. Admins are not limited.", Default: 100.0},
+	{Key: "allow_object_scaling", Label: "Players may resize objects", Group: "Gameplay", Type: TypeBool, Help: "Off shares every placed object at its own size. Admins always can.", Default: true},
 	{Key: "bone_scale_limit", Label: "Resized body parts, at most (times)", Group: "Gameplay", Type: TypeNumber, Min: 0, Max: 8, Help: "How far a mod may resize part of a skater for the others. 0 is no limit.", Default: 2.0},
+	{Key: "sync_effects", Label: "Players see each other's skater effects", Group: "Gameplay", Type: TypeBool, Help: "Sparks, dust, and the trails and fire of costumes and boards.", Default: true},
 	{Key: "noclip", Label: "Players may noclip and teleport", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "no_bail", Label: "Players may use No Bail", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "boosts", Label: "Players may use boosts", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "enforce_tuning", Label: "Enforce the game's physics tuning", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "parties", Label: "Parties", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "party_size", Label: "Party size", Group: "Gameplay", Type: TypeInt, Min: 2, Max: 8, Default: 8.0},
+	{Key: "afk_kick_minutes", Label: "Remove players away for (min)", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1440, Help: "They're warned a minute before. 0 is never. Admins are never removed.", Default: 0.0},
 	{Key: "announce_throwdowns", Label: "Announce throwdowns in chat", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "activity_log", Label: "Log player activity", Group: "Gameplay", Type: TypeBool, Default: true},
 

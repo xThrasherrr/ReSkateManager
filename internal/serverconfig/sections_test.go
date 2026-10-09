@@ -18,7 +18,8 @@ const sectionedConfig = `{
     "parks": {"construction": "skatepark_01", "historic": "empty", "financial": "empty"}, "world_layer_sync": true,
     "layers": {"grom_tod_1_night": "on"}},
   "players": {"allow_boosts": false, "allow_no_bail": true, "allow_noclip": false, "allow_parties": true, "party_size": 4,
-    "allow_voice_chat": true, "voice_range": 30, "object_placement": "admins", "object_limit": 10, "announce_throwdowns": false},
+    "afk_kick_minutes": 5, "allow_voice_chat": true, "voice_range": 30, "object_placement": "admins", "object_limit": 10,
+    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false},
   "anti_cheat": {"speed_hack": "kick", "modified_scoring": "off", "allowed_scoring_mods": ["00000000deadbeef"],
     "enforce_tuning": true, "bone_scale_limit": 2},
   "network": {"use_steam_relay": true, "send_rate": 48, "crowd_budget": 0, "pack_ms": 10, "finger_distance": 25,
@@ -140,6 +141,35 @@ func TestNetworkSettings(t *testing.T) {
 	}
 	if _, err := Diff(f, map[string]any{"pack_ms": 51.0}, nil); err == nil {
 		t.Error("pack_ms 51 accepted; the server allows 0 to 50")
+	}
+}
+
+// 2.0.0's player settings change live, and go into its players section.
+func TestPlayerSettings(t *testing.T) {
+	f, _ := readSectioned(t)
+	if v := f.Values(); v["afk_kick_minutes"] != 5.0 || v["allow_object_scaling"] != true || v["sync_effects"] != true {
+		t.Errorf("read %v %v %v", v["afk_kick_minutes"], v["allow_object_scaling"], v["sync_effects"])
+	}
+	p, err := Diff(f, map[string]any{"afk_kick_minutes": 15.0, "allow_object_scaling": false, "sync_effects": false}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"object-scaling off", "effects off", "afk-kick 15"}; !slices.Equal(p.Commands, want) || len(p.Restart) != 0 {
+		t.Fatalf("planned %+v, want %q", p, want)
+	}
+	f.ApplyOffline(p.Changed)
+	for path, want := range map[string]string{"players.afk_kick_minutes": `15`, "players.allow_object_scaling": `false`,
+		"players.sync_effects": `false`} {
+		got, ok := f.at(path)
+		if b, _ := json.Marshal(got); !ok || string(b) != want {
+			t.Errorf("%s = %s, want %s", path, b, want)
+		}
+	}
+	if p, err = Diff(f, map[string]any{"afk_kick_minutes": 0.0}, nil); err != nil || !slices.Equal(p.Commands, []string{"afk-kick off"}) {
+		t.Errorf("afk_kick_minutes 0 planned %+v, %v", p, err)
+	}
+	if _, err := Diff(f, map[string]any{"afk_kick_minutes": 1441.0}, nil); err == nil {
+		t.Error("afk_kick_minutes 1441 accepted; the server allows 0 to 1440")
 	}
 }
 

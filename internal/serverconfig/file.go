@@ -176,6 +176,7 @@ var sections = map[string]string{
 	"parties": "players.allow_parties", "party_size": "players.party_size", "voice_chat": "players.allow_voice_chat",
 	"voice_range": "players.voice_range", "object_placement": "players.object_placement",
 	"object_limit": "players.object_limit", "announce_throwdowns": "players.announce_throwdowns",
+	"afk_kick_minutes": "players.afk_kick_minutes", "allow_object_scaling": "players.allow_object_scaling", "sync_effects": "players.sync_effects",
 
 	"speed_check": "anti_cheat.speed_hack", "score_check": "anti_cheat.modified_scoring",
 	"score_allow": "anti_cheat.allowed_scoring_mods", "enforce_tuning": "anti_cheat.enforce_tuning",
@@ -800,12 +801,16 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 			} else {
 				p.Commands = append(p.Commands, "objects "+num(v))
 			}
+		case "allow_object_scaling":
+			p.Commands = append(p.Commands, "object-scaling "+onOff(v))
 		case "bone_scale_limit":
 			if v.(float64) == 0 {
 				p.Commands = append(p.Commands, "bone-scale off")
 			} else {
 				p.Commands = append(p.Commands, "bone-scale "+num(v))
 			}
+		case "sync_effects":
+			p.Commands = append(p.Commands, "effects "+onOff(v))
 		case "noclip":
 			p.Commands = append(p.Commands, "noclip "+onOff(v))
 		case "no_bail":
@@ -818,6 +823,12 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 			p.Commands = append(p.Commands, "parties "+onOff(v))
 		case "party_size":
 			p.Commands = append(p.Commands, "party-size "+num(v))
+		case "afk_kick_minutes":
+			if v.(float64) == 0 {
+				p.Commands = append(p.Commands, "afk-kick off")
+			} else {
+				p.Commands = append(p.Commands, "afk-kick "+num(v))
+			}
 		case "announce_throwdowns":
 			p.Commands = append(p.Commands, "announce-throwdowns "+onOff(v))
 		case "activity_log":
@@ -860,12 +871,13 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 
 // SettingVerbs are the console commands that change settings: every one Diff
 // plans, plus the world page's tod, layers and layer, tps, which servers
-// before 1.1.5 still take, and the in-game menu's names the server takes for
-// some of them. Typed into the console, they need the same permission as the
-// settings pages.
+// before 1.1.5 still take, 2.0.0's chat-color or chat-colour, and the in-game menu's names
+// the server takes for some of them. Typed into the console, they need the
+// same permission as the settings pages.
 var SettingVerbs = []string{"name", "map", "map-pool", "rotation", "password", "welcome", "listed", "reserved", "rate", "crowd", "tps", "distances",
-	"voice", "voice-range", "placement", "objects", "object-limit", "bone-scale", "noclip", "nobail", "boosts", "tuning", "parties", "party-size",
-	"announce-throwdowns", "activity-log", "park", "votes", "speed-check", "score-check", "score-allow", "layer-sync", "tod", "layers", "layer",
+	"voice", "voice-range", "placement", "objects", "object-limit", "object-scaling", "bone-scale", "effects", "noclip", "nobail", "boosts", "tuning",
+	"parties", "party-size", "afk-kick", "announce-throwdowns", "activity-log", "park", "votes", "speed-check", "score-check", "score-allow",
+	"layer-sync", "tod", "layers", "layer", "chat-color", "chat-colour",
 	"voice-allow", "object-placement", "world-layer-sync", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce"}
 
 // knownMaps checks a map pool against the server's maps and spells each as

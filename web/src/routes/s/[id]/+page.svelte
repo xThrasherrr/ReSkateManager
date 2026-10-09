@@ -46,13 +46,13 @@
 		view?.toBottom();
 	}
 
-	// Server commands from the server's help text (Server/server_host.cpp), for Tab completion.
+	// Server commands from the server's help text (Server/server_commands.cpp), for Tab completion.
 	const commands = [
 		'status', 'net', 'players', 'say', 'msg', 'msg-party', 'msg-admins', 'kick', 'ban', 'unban', 'bans', 'map', 'maps', 'name',
 		'password', 'welcome', 'listed',
-		'voice', 'voice-range', 'distances', 'crowd', 'rate', 'placement', 'objects', 'clear-objects', 'noclip', 'nobail', 'boosts',
-		'tuning', 'tpall', 'tphere', 'votes', 'vote-cancel', 'park', 'layer-sync', 'layer', 'layers', 'tod', 'activity-log',
-		'announce-throwdowns', 'parties', 'party-size', 'speed-check', 'score-check', 'score-allow', 'reserved', 'admin', 'admins', 'help'
+		'voice', 'voice-range', 'distances', 'crowd', 'rate', 'placement', 'objects', 'object-scaling', 'effects', 'clear-objects', 'noclip',
+		'nobail', 'boosts', 'tuning', 'tpall', 'tphere', 'votes', 'vote-cancel', 'park', 'layer-sync', 'layer', 'layers', 'tod', 'activity-log',
+		'announce-throwdowns', 'parties', 'party-size', 'afk-kick', 'speed-check', 'score-check', 'score-allow', 'reserved', 'admin', 'admins', 'help'
 	];
 
 	const historyKey = $derived(`rsm.history.${ctx.id}`);
