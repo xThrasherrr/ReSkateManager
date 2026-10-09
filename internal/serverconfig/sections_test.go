@@ -11,8 +11,8 @@ import (
 
 // A config as ReSkate 1.1.7 and later write it (layout in Server/server_config.cpp).
 const sectionedConfig = `{
-  "server": {"name": "Sectioned", "password": "", "welcome_message": "hi", "listed": true, "max_players": 32,
-    "port": 27017, "query_port": 27018, "steam_token": "TOKEN", "auto_update": false, "activity_log": true},
+  "server": {"name": "Sectioned", "password": "", "welcome_message": "hi", "chat_color": "#8E5CFF", "chat_text_color": "d9c8ff",
+    "listed": true, "max_players": 32, "port": 27017, "query_port": 27018, "steam_token": "TOKEN", "auto_update": false, "activity_log": true},
   "access": {"admins": ["76561198000000001"], "reserved_players_slots": ["76561198000000002"], "use_global_bans": false},
   "maps": {"map": "Isle of Grom", "pool": ["Isle of Grom", "San Vansterdam"], "rotation_minutes": 20,
     "parks": {"construction": "skatepark_01", "historic": "empty", "financial": "empty"}, "world_layer_sync": true,
@@ -170,6 +170,46 @@ func TestPlayerSettings(t *testing.T) {
 	}
 	if _, err := Diff(f, map[string]any{"afk_kick_minutes": 1441.0}, nil); err == nil {
 		t.Error("afk_kick_minutes 1441 accepted; the server allows 0 to 1440")
+	}
+}
+
+// 2.0.0's chat colours are set together by one command, and written one way.
+func TestChatColours(t *testing.T) {
+	f, _ := readSectioned(t)
+	if v := f.Values(); v["chat_color"] != "#8E5CFF" || v["chat_text_color"] != "#D9C8FF" {
+		t.Errorf("read %v %v", v["chat_color"], v["chat_text_color"])
+	}
+	for _, tt := range []struct {
+		want map[string]any
+		cmds []string
+	}{
+		{map[string]any{"chat_color": "#ff0000"}, []string{"chat-color #FF0000 #D9C8FF"}},
+		{map[string]any{"chat_text_color": "00ff00"}, []string{"chat-color #8E5CFF #00FF00"}},
+		{map[string]any{"chat_color": " #FF0000", "chat_text_color": "#00FF00"}, []string{"chat-color #FF0000 #00FF00"}},
+		{map[string]any{"chat_text_color": "#D9C8FF"}, nil}, // the same colour, written another way
+	} {
+		p, err := Diff(f, tt.want, nil)
+		if err != nil || !slices.Equal(p.Commands, tt.cmds) {
+			t.Errorf("%v planned %+v, %v; want %q", tt.want, p, err, tt.cmds)
+		}
+	}
+	for _, bad := range []any{"blue", "#12345", "#12345G", "#1234567", "", 0xff0000} {
+		if _, err := Diff(f, map[string]any{"chat_color": bad}, nil); err == nil {
+			t.Errorf("chat_color %v accepted", bad)
+		}
+	}
+	p, _ := Diff(f, map[string]any{"chat_color": "#ff0000"}, nil)
+	f.ApplyOffline(p.Changed)
+	if got, _ := f.at("server.chat_color"); got != "#FF0000" {
+		t.Errorf("server.chat_color = %v", got)
+	}
+	// The server won't start with a colour it can't read, so the other is set only with it.
+	f.Set("chat_color", "violet")
+	if _, err := Diff(f, map[string]any{"chat_text_color": "#FFFFFF"}, nil); err == nil {
+		t.Error("planned a text colour beside a badge that isn't a colour")
+	}
+	if p, err := Diff(f, map[string]any{"chat_color": "#8E5CFF"}, nil); err != nil || !slices.Equal(p.Commands, []string{"chat-color #8E5CFF #D9C8FF"}) {
+		t.Errorf("fixing the badge planned %+v, %v", p, err)
 	}
 }
 

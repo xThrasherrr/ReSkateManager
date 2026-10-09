@@ -324,7 +324,7 @@ export interface Field {
 	key: string;
 	label: string;
 	group: string;
-	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps'; // maps: map names, in order
+	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps' | 'color'; // maps: map names, in order; color: "#RRGGBB"
 	options?: string[];
 	min?: number;
 	max?: number;

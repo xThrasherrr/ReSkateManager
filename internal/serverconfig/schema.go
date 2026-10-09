@@ -20,8 +20,9 @@ const (
 	TypeNumber FieldType = "number"
 	TypeBool   FieldType = "bool"
 	TypeEnum   FieldType = "enum"
-	TypeList   FieldType = "list" // list of strings
-	TypeMaps   FieldType = "maps" // ordered list of map names
+	TypeList   FieldType = "list"  // list of strings
+	TypeMaps   FieldType = "maps"  // ordered list of map names
+	TypeColor  FieldType = "color" // "#RRGGBB"
 )
 
 // Field describes one setting of ReSkateServer.json for the settings page
@@ -84,6 +85,8 @@ var Fields = []Field{
 	{Key: "max_players", Label: "Max players", Group: "General", Type: TypeInt, Min: 1, Max: 249, Restart: true, Default: 16.0},
 	{Key: "password", Label: "Password", Group: "General", Type: TypeString, MaxLen: 64, Secret: true, Help: "Empty: anyone may join.", Default: ""},
 	{Key: "welcome", Label: "Welcome message", Group: "General", Type: TypeString, MaxLen: 200, Long: true, Help: "Sent to each player as they join.", Default: ""},
+	{Key: "chat_color", Label: "Server's name colour in chat", Group: "General", Type: TypeColor, Help: "Its \"Server\" badge and name, on its welcome, announcements and replies.", Default: "#8E5CFF"},
+	{Key: "chat_text_color", Label: "Server's text colour in chat", Group: "General", Type: TypeColor, Help: "Pick one that reads on a dark background.", Default: "#D9C8FF"},
 	{Key: "listed", Label: "Listed in the server browser", Group: "General", Type: TypeBool, Default: true},
 	{Key: "steam_token", Label: "Steam login token", Group: "General", Type: TypeString, MaxLen: 64, Secret: true, Owner: true, Restart: true, Help: "The server browser only shows servers that have one. Each server needs its own.", Default: ""},
 

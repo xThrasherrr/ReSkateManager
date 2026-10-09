@@ -27,9 +27,11 @@ var GroupInfo = map[string]string{
 }
 
 var fieldInfo = map[string]string{
-	"map":         "Lists the retail maps and every map in the server's Mods folder. Players need the same custom map mod installed to join. The server reads Mods when it starts, so a map added since needs a restart first. Changing it live moves everyone to the new map.",
-	"max_players": "The server itself doesn't take a slot. Changing it means a restart, which disconnects everyone.",
-	"listed":      "Off hides the server from the in-game browser; players then join with its code. The code changes every time the server starts.",
+	"map":             "Lists the retail maps and every map in the server's Mods folder. Players need the same custom map mod installed to join. The server reads Mods when it starts, so a map added since needs a restart first. Changing it live moves everyone to the new map.",
+	"max_players":     "The server itself doesn't take a slot. Changing it means a restart, which disconnects everyone.",
+	"listed":          "Off hides the server from the in-game browser; players then join with its code. The code changes every time the server starts.",
+	"chat_color":      "The server's own lines in chat (its welcome message, what the console or the panel says, announcements, and its answers to players' commands) start with a \"Server\" badge and name in this colour. The default is violet. Players see a change from the server's next line. Needs ReSkate 2.0.0.",
+	"chat_text_color": "The colour of the text in the server's own lines in chat, after its name. Chat is drawn on a dark background, so a light colour reads best. The default is lavender. Needs ReSkate 2.0.0.",
 	"steam_token": "A Steam game server login token. Make one at steamcommunity.com/dev/managegameservers with App ID 3354750. Each running server needs its own.\n" +
 		"With a token the server keeps the same Steam ID every start. Without one it signs in anonymously, and the ReSkate team's server browser can hide it; players can still join with its code.\n" +
 		"Keep it private: anyone with it can sign in as your server. The server reads it only when it starts.",

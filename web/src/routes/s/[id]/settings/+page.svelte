@@ -9,6 +9,7 @@
 	import Icon from '#lib/components/Icon.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
 	import MapPool from '#lib/components/MapPool.svelte';
+	import ColourInput from '#lib/components/ColourInput.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
@@ -146,8 +147,15 @@
 			if (control.test(v)) return "It can't hold control characters.";
 			if (f.maxLen && utf8Length(v) > f.maxLen) return `At most ${f.maxLen} bytes.`;
 		}
+		if (f.type === 'color' && !colour.test(String(v ?? ''))) return 'Enter a colour like #8E5CFF.';
 		return '';
 	}
+	const colour = /^#?[0-9a-f]{6}$/i;
+	// The server's chat colours as players will see them, or the saved ones while one is half typed.
+	const shown = (key: string) => {
+		const v = String(values[key] ?? '');
+		return colour.test(v) ? `#${v.replace('#', '')}` : String(saved[key] ?? '');
+	};
 	const problems = $derived(Object.fromEntries(fields.filter((f) => dirty.includes(f.key)).map((f) => [f.key, problem(f, values[f.key])])));
 	const blocked = $derived(Object.values(problems).some(Boolean));
 </script>
@@ -223,6 +231,8 @@
 										value={values[f.key]}
 										oninput={(e) => setNum(f, e.currentTarget.value)}
 									/>
+								{:else if f.type === 'color'}
+									<ColourInput id={f.key} bind:value={values[f.key]} disabled={locked} />
 								{:else if f.type === 'list'}
 									<textarea
 										id={f.key}
@@ -302,6 +312,14 @@
 								{/if}
 								{#if problems[f.key]}<p class="mt-1 text-xs text-bad">{problems[f.key]}</p>{/if}
 							</div>
+							{#if f.key === 'chat_text_color'}
+								<!-- As the game draws a server line: a filled badge, the name in its colour, then the text. -->
+								<p class="rounded-lg bg-ink px-2.5 py-1.5 text-sm leading-relaxed break-words sm:col-span-2" title="Preview">
+									<span class="mr-1 rounded px-1.5 py-px text-[11px] font-semibold text-[#121216]" style:background-color={shown('chat_color')}>Server</span>
+									<span style:color={shown('chat_color')}>{values.name || 'ReSkate server'}:</span>
+									<span style:color={shown('chat_text_color')}>{values.welcome || 'Welcome to the server!'}</span>
+								</p>
+							{/if}
 						</div>
 					{/each}
 				</div>

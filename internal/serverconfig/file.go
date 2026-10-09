@@ -166,6 +166,7 @@ var sections = map[string]string{
 	"name": "server.name", "password": "server.password", "welcome": "server.welcome_message", "listed": "server.listed",
 	"max_players": "server.max_players", "port": "server.port", "query_port": "server.query_port",
 	"steam_token": "server.steam_token", "auto_update": "server.auto_update", "activity_log": "server.activity_log",
+	"chat_color": "server.chat_color", "chat_text_color": "server.chat_text_color",
 
 	"admins": "access.admins", "reserved": "access.reserved_players_slots", "global_bans": "access.use_global_bans",
 
@@ -439,6 +440,8 @@ func ValidChatText(s string) bool {
 
 var fingerprintRe = regexp.MustCompile(`^[0-9a-fA-F]{1,16}$`)
 
+var colorRe = regexp.MustCompile(`^[0-9a-fA-F]{6}$`)
+
 // steamTokenRe is what config_error accepts: letters and digits, or empty.
 var steamTokenRe = regexp.MustCompile(`^[A-Za-z0-9]*$`)
 
@@ -584,6 +587,14 @@ func normalize(fd Field, raw any) (any, error) {
 			return nil, fmt.Errorf("%s must be letters and digits only, or empty", fd.Label)
 		}
 		return s, nil
+	case TypeColor:
+		// parse_colour: six hex digits, the # optional. The server won't start
+		// with anything else, so it's written back the one way.
+		s, ok := raw.(string)
+		if s = strings.TrimPrefix(strings.TrimSpace(s), "#"); !ok || !colorRe.MatchString(s) {
+			return nil, fmt.Errorf("%s must be a colour like #8E5CFF", fd.Label)
+		}
+		return "#" + strings.ToUpper(s), nil
 	case TypeList:
 		var items []string
 		switch v := raw.(type) {
@@ -718,7 +729,7 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 		return nil, err
 	}
 
-	distances := false
+	distances, colors := false, false
 	// The running server takes reserved slots only below its own max players,
 	// so with a new max they wait for the restart too.
 	_, newMax := p.Changed["max_players"]
@@ -757,6 +768,17 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 				return nil, fmt.Errorf("%s cannot be the word \"off\"", fd.Label)
 			}
 			p.Commands = append(p.Commands, fd.Key+" "+s)
+		case "chat_color", "chat_text_color":
+			// One command sets both; the text colour can't be given alone.
+			if !colors {
+				colors = true
+				badge, _ := merged["chat_color"].(string)
+				text, _ := merged["chat_text_color"].(string)
+				if badge == "" || text == "" { // the file holds one that isn't a colour
+					return nil, errors.New("set both chat colours: one in the file isn't a colour")
+				}
+				p.Commands = append(p.Commands, "chat-color "+badge+" "+text)
+			}
 		case "listed":
 			p.Commands = append(p.Commands, "listed "+onOff(v))
 		case "reserved_slots":
@@ -871,9 +893,9 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 
 // SettingVerbs are the console commands that change settings: every one Diff
 // plans, plus the world page's tod, layers and layer, tps, which servers
-// before 1.1.5 still take, 2.0.0's chat-color or chat-colour, and the in-game menu's names
-// the server takes for some of them. Typed into the console, they need the
-// same permission as the settings pages.
+// before 1.1.5 still take, and the names the server also takes for some of
+// them (the in-game menu's, and chat-colour). Typed into the console, they
+// need the same permission as the settings pages.
 var SettingVerbs = []string{"name", "map", "map-pool", "rotation", "password", "welcome", "listed", "reserved", "rate", "crowd", "tps", "distances",
 	"voice", "voice-range", "placement", "objects", "object-limit", "object-scaling", "bone-scale", "effects", "noclip", "nobail", "boosts", "tuning",
 	"parties", "party-size", "afk-kick", "announce-throwdowns", "activity-log", "park", "votes", "speed-check", "score-check", "score-allow",

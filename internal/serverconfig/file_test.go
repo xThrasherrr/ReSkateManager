@@ -236,7 +236,7 @@ func TestSettingVerbsCoverDiff(t *testing.T) {
 		case float64:
 			tries = []any{v + 1, v - 1}
 		case string:
-			tries = []any{"x"}
+			tries = []any{"x", "#123456"}
 			for _, o := range fd.Options {
 				if o != v {
 					tries = append(tries, o)
