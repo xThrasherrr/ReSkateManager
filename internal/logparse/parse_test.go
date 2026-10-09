@@ -53,6 +53,7 @@ func TestClassify(t *testing.T) {
 		{"[steam] Relay network: ready (5 relays)", KindTagged, "", "", nil},
 		{"[steam] No longer signed in to Steam: players already on stay, but nobody can join until it is back.", KindTagged, "", "", nil},
 		{"[direct] Steam: connection closed", KindTagged, "", "", nil},
+		{"[afk] Thrasher was removed after 15 min away.", KindTagged, "", "", nil}, // 2.0.0
 		{"No steam_token: the server browser can be set to show only servers that have one, and then this server is not in it.", KindStartup, "", "", nil},
 		{"Join code: ABCD-EFGH (password required)", KindJoinCode, "", "", map[string]string{"code": "ABCD-EFGH", "password": "1"}},
 		{"Everyone has loaded Isle of Grom.", KindLoaded, "", "", map[string]string{"map": "Isle of Grom"}},

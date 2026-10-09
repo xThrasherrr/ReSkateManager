@@ -26,7 +26,7 @@ const (
 	KindCommand   Kind = "command"   // [command] <name>: /<text>   (a player's chat command)
 	KindAdmin     Kind = "admin"     // [admin] <name>: <text>      (an in-game admin's server command)
 	KindPartyChat Kind = "partychat" // [party chat] <name>: <text>
-	KindTagged    Kind = "tagged"    // [vote], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct]
+	KindTagged    Kind = "tagged"    // [vote], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk]
 	KindReady     Kind = "ready"     // <name> is up on <map> for N players.
 	KindSteam     Kind = "steam"     // Steam ID <id>[ (<how it got it>)], public IP <ip>.
 	KindJoinCode  Kind = "joincode"  // Join code: <code>[ (password required)]
@@ -50,7 +50,7 @@ type Entry struct {
 
 var (
 	stampRe    = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] ?(.*)$`)
-	tagRe      = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|throwdown|objects|map|rotation|anticheat|join|network|steam|direct)\] (.*)$`)
+	tagRe      = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk)\] (.*)$`)
 	joinRe     = regexp.MustCompile(`^(.+) joined \((\d+)(, admin)?\), (\d+)/(\d+) players(?:, loaded in (\d+) s)?$`)
 	leaveRe    = regexp.MustCompile(`^(.+) left \((.*)\)(?: \[.*\])?$`) // then how the connection ended, since 1.1.5
 	readyRe    = regexp.MustCompile(`^(.+) is up on (.+) for (\d+) players\.$`)
