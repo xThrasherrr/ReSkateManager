@@ -93,6 +93,12 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
   - **Run console commands** alone covers read-only and player-movement commands (`status`, `players`, `maps`, etc.). Kick, ban, admin and chat commands need their own permission, and everything else, settings included, needs **Change server settings**.
 - **Announcements:** timed chat messages, such as a Discord invite, for one server or all of them, sent only while players are online.
 - **Discord alerts:** a webhook notifies a channel on a crash, repeated crashes or a server stopping itself; on a server or manager update installing or failing; on a failed scheduled backup; and on low disk space (10 GB free by default) or sustained high memory (90% for 10 minutes by default, the container limit included in Docker) — each firing once when it starts and once when it clears. Any alert type can be turned off, and a test button checks the webhook.
+- **Discord status message:** a bot keeps one message in a channel up to date with each server's state, players, map, join code, ReSkate version, uptime and next restart. It's edited at most once a minute, shows when it was last updated (so an old time means the manager isn't running), and marks every server offline when the manager stops. Owners set it up under **Manager**:
+  1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application, then on its **Bot** page reset the token and copy it.
+  2. Paste the token into the panel, then follow **Invite the bot** to add it to your Discord server. It asks only for View Channel, Send Messages and Embed Links.
+  3. In Discord, turn on Developer Mode (User Settings, Advanced), right-click the channel, choose **Copy Channel ID**, and paste it into the panel.
+
+  Once saved, the token is never shown again. The message's title is yours to change, and join codes can be hidden; a server with a password still asks for it. If Discord turns the bot away, the card says why. A refused token or a wrong channel ID stops it until you change them; a bot that can't see the channel yet, such as one not invited, is tried again every few minutes.
 
 ## Getting started
 
@@ -299,6 +305,7 @@ Without Task: `cd web && pnpm install && pnpm build`, then `go build ./cmd/ReSka
 | `internal/announce` | Timed chat announcements |
 | `internal/restarts` | Scheduled restarts and their chat warnings |
 | `internal/alerts` | Discord webhook alerts, and the watch on disk space and memory |
+| `internal/discord` | The Discord status message, which a bot posts once and then keeps up to date |
 | `internal/housekeep` | Retention for the audit log and player history; old releases in `cache/` |
 | `internal/backup` | Backups in `backups/`, restoring from them, server exports and imports |
 | `internal/thunderstore` | Thunderstore package list, downloads, and reading a mod's zip by ranges |

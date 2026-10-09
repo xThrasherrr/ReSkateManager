@@ -29,6 +29,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/backup"
 	"github.com/xThrasherrr/ReSkateManager/internal/config"
+	"github.com/xThrasherrr/ReSkateManager/internal/discord"
 	"github.com/xThrasherrr/ReSkateManager/internal/housekeep"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/lockfile"
@@ -206,9 +207,10 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 	}
 	notifier := &alerts.Notifier{Store: db, Log: log, Version: version}
 	notifier.Start(ctx)
+	status := &discord.Poster{Store: db, Reg: reg, Log: log, Version: version, Release: builds.Version}
 	a := &api.API{Cfg: cfg, Store: db, Auth: authSvc, Reg: reg, Updates: updates, Builds: builds, Admins: admins, Self: self, Log: log, Version: version,
 		ConfigPath: cfgPath, ServersDir: serversDir, SharedDir: sharedDir, DataDir: dataDir, CacheDir: cacheDir, Static: static, Backups: backups,
-		Thunderstore: thunderstoreClient(), Alerts: notifier, Exe: exe, Restart: func() { restart.request(reg, stop) }, Base: ctx}
+		Thunderstore: thunderstoreClient(), Alerts: notifier, Discord: status, Exe: exe, Restart: func() { restart.request(reg, stop) }, Base: ctx}
 	serverName := func(id string) string {
 		if in, ok := reg.Get(id); ok {
 			return in.Def().Name
@@ -301,6 +303,7 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 	jobs.Go(func() { updates.Run(ctx) })
 	jobs.Go(func() { self.Run(ctx) })
 	jobs.Go(func() { (&announce.Scheduler{Store: db, Reg: reg, Log: log}).Run(ctx) })
+	jobs.Go(func() { status.Run(ctx) })
 	jobs.Go(func() { (&perf.Recorder{Store: db, Reg: reg, Log: log}).Run(ctx) })
 	jobs.Go(func() { (&housekeep.Keeper{Store: db, CacheDir: cacheDir, Log: log}).Run(ctx) })
 	jobs.Go(func() { a.RunSweeps(ctx) })

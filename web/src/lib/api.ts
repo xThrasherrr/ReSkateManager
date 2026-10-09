@@ -357,6 +357,23 @@ export interface AlertSettings {
 	memMinutes: number; // ...for this long, and back down once under it as long
 }
 
+// The Discord status message: a bot posts the servers' status in a channel, and keeps that message up to date.
+export interface DiscordSettings {
+	tokenSet: boolean; // the token itself is never sent back
+	channel: string;
+	joinCodes: boolean;
+	title: string; // heads the message; '' is defaultTitle
+	defaultTitle: string;
+	invite?: string; // adds the saved token's bot to a Discord server
+	status: {
+		channel?: string; // the channel's name
+		link?: string; // the message in Discord
+		updated?: number; // unix ms of the last post or edit
+		problem?: string; // why the last try failed
+		stopped?: boolean; // it won't try again until the settings change
+	};
+}
+
 // How many days the audit log and player history are kept; 0 keeps them for good.
 export interface Retention {
 	auditDays: number;

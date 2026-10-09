@@ -34,6 +34,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/backup"
 	"github.com/xThrasherrr/ReSkateManager/internal/config"
+	"github.com/xThrasherrr/ReSkateManager/internal/discord"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 	"github.com/xThrasherrr/ReSkateManager/internal/thunderstore"
@@ -72,6 +73,9 @@ type API struct {
 	Thunderstore *thunderstore.Client
 	// Alerts sends the test alert from the Manager page; nil turns that off.
 	Alerts *alerts.Notifier
+	// Discord keeps the status message in a Discord channel; nil turns its
+	// settings off.
+	Discord *discord.Poster
 	// Backups makes and lists the backups, and restores servers from them;
 	// nil turns them off.
 	Backups *backup.Service
@@ -152,6 +156,9 @@ func (a *API) Handler() http.Handler {
 			r.With(a.ownerOnly).Get("/manager/alerts", a.alertSettings)
 			r.With(a.ownerOnly).Patch("/manager/alerts", a.saveAlertSettings)
 			r.With(a.ownerOnly).Post("/manager/alerts/test", a.testAlert)
+			r.With(a.ownerOnly).Get("/manager/discord", a.discordSettings)
+			r.With(a.ownerOnly).Patch("/manager/discord", a.saveDiscordSettings)
+			r.With(a.ownerOnly).Post("/manager/discord/test", a.testDiscord)
 			r.With(a.ownerOnly).Get("/manager/retention", a.retention)
 			r.With(a.ownerOnly).Patch("/manager/retention", a.saveRetention)
 			r.Post("/auth/password", a.changePassword)
