@@ -234,7 +234,7 @@ func TestSettingVerbsCoverDiff(t *testing.T) {
 		case bool:
 			tries = []any{!v}
 		case float64:
-			tries = []any{v + 1, v - 1}
+			tries = []any{v + 1, v - 1, v + 10}
 		case string:
 			tries = []any{"x", "#123456"}
 			for _, o := range fd.Options {
@@ -244,6 +244,10 @@ func TestSettingVerbsCoverDiff(t *testing.T) {
 			}
 		case []string:
 			tries = []any{[]any{"00000000000000cc"}, []any{"Isle of Grom"}, []any{"76561198000000003"}}
+		case []CustomVote:
+			// Only a vote the server has changes live.
+			f.Set(fd.Key, []any{map[string]any{"name": "restart", "command": "map {map}"}})
+			tries = []any{[]any{map[string]any{"name": "restart", "command": "map {map}", "enabled": false}}}
 		}
 		var p *Plan
 		for _, try := range tries {

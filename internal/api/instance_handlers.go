@@ -20,6 +20,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/announce"
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/perf"
@@ -475,7 +476,8 @@ var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "
 // Server/server_host.cpp), aliases included.
 var consolePerms = func() map[string]string {
 	m := map[string]string{"admin": auth.IngameAdmins, "admins": auth.IngameAdmins, "ban": auth.PlayersBan, "unban": auth.PlayersBan,
-		"kick": auth.PlayersKick, "say": auth.PlayersChat, "msg": auth.PlayersChat, "msg-party": auth.PlayersChat, "msg-admins": auth.PlayersChat}
+		"kick": auth.PlayersKick, "say": auth.PlayersChat, "announce": auth.PlayersChat, "msg": auth.PlayersChat, "msg-party": auth.PlayersChat,
+		"msg-admins": auth.PlayersChat}
 	for _, verb := range serverconfig.SettingVerbs {
 		m[verb] = auth.SettingsEdit
 	}
@@ -700,6 +702,9 @@ func (a *API) say(w http.ResponseWriter, r *http.Request) {
 	in := inst(r)
 	var req struct {
 		Message string `json:"message"`
+		// An announcement, posted as the scheduled ones are: a card on every
+		// player's screen too, where the server has them.
+		Announce bool `json:"announce"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -709,7 +714,13 @@ func (a *API) say(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "messages are 1-200 bytes")
 		return
 	}
-	reply, err := in.Command(r.Context(), "say "+msg, from(r).user.Username)
+	var reply string
+	var err error
+	if req.Announce {
+		reply, err = announce.Post(r.Context(), in, msg, from(r).user.Username)
+	} else {
+		reply, err = in.Command(r.Context(), "say "+msg, from(r).user.Username)
+	}
 	a.auditOutcome(r, in.ID(), "player.say", msg, err)
 	a.answerReply(w, r, reply, err)
 }

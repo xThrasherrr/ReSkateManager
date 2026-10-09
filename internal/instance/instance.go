@@ -592,7 +592,7 @@ func (in *Instance) onIdle() {
 func (in *Instance) handleLocked(e logparse.Entry) {
 	in.lastLine, _, _ = strings.Cut(e.Text, "\n")
 	if in.voteDone {
-		// A passed map or time vote logs its command's result straight after.
+		// A passed vote logs its command's result straight after.
 		in.voteDone = false
 		if !e.IsEvent() {
 			e.Kind, e.Tag = logparse.KindTagged, "vote"
@@ -748,7 +748,10 @@ func (in *Instance) Command(ctx context.Context, line, by string) (string, error
 	return in.send(ctx, line, by, false, nil)
 }
 
-var votePassedRe = regexp.MustCompile(`^\[vote\] The vote to (change the map|set the time of day) .* passed \(`)
+// votePassedRe is a vote that passed. What it ran logs its result straight
+// after: a map or time of day vote's command, or since 2.0.2 a custom vote's.
+// A kick vote's leave line comes there instead, which is an event anyway.
+var votePassedRe = regexp.MustCompile(`^\[vote\] The vote to .+ passed \(\d+ yes, \d+ no, \d+ needed\)\.$`)
 
 // replyShape accepts a reply whose first line matches re, or a refusal.
 func replyShape(re *regexp.Regexp) func(string) bool {

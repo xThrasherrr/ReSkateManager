@@ -251,18 +251,20 @@ func TestConsolePermissions(t *testing.T) {
 	p.post("/api/auth/logout", `{}`)
 	p.post("/api/auth/login", `{"username":"operator","password":"`+testPassword+`"}`)
 	for line, want := range map[string]int{
-		"password hunter2":   403,
-		"MAP Isle of Grom":   403,
-		"layers x=on":        403,
-		"layer x on":         403,
-		"kick 1":             403,
-		"msg skater hi":      403,
-		"noclip-allow on":    403, // the in-game menu's name for noclip
-		"tuning-enforce off": 403,
-		"frobnicate":         403, // unknown: maybe a newer server's setting
-		"status":             400, // allowed, but the server is not running
-		"players":            400,
-		"tpall":              400,
+		"password hunter2":    403,
+		"MAP Isle of Grom":    403,
+		"layers x=on":         403,
+		"layer x on":          403,
+		"kick 1":              403,
+		"msg skater hi":       403,
+		"noclip-allow on":     403, // the in-game menu's name for noclip
+		"tuning-enforce off":  403,
+		"announce hi":         403, // chat, as say (2.0.2)
+		"announcements clear": 403,
+		"frobnicate":          403, // unknown: maybe a newer server's setting
+		"status":              400, // allowed, but the server is not running
+		"players":             400,
+		"tpall":               400,
 	} {
 		body, _ := json.Marshal(map[string]string{"line": line})
 		if code, b := p.do("POST", "/api/instances/a/command", string(body)); code != want {

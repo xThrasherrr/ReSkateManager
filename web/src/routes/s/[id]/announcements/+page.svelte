@@ -105,7 +105,7 @@
 		}
 	}
 	function sendNow(a: Announcement) {
-		return busy.run(`send:${a.id}`, () => attempt(() => api.post(`/instances/${ctx.id}/say`, { message: a.message }), 'Sent'));
+		return busy.run(`send:${a.id}`, () => attempt(() => api.post(`/instances/${ctx.id}/say`, { message: a.message, announce: true }), 'Sent'));
 	}
 
 	function cadence(secs: number) {
@@ -132,7 +132,7 @@
 				{editing ? 'Edit announcement' : 'New announcement'}
 				<InfoTip
 					label="About announcements"
-					text={'Sent to chat as "Server" while players are on. When the server empties, the countdowns start over, so nobody who joins gets every message at once. Announcements on one server go out at least a minute apart.'}
+					text={`Sent to chat as "Server" while players are on. From ReSkate 2.0.2 they also show as a card on every player's screen, unless the card is off under Settings > Announcements, beside the server's own list. When the server empties, the countdowns start over, so nobody who joins gets every message at once. Announcements on one server go out at least a minute apart.`}
 				/>
 			</h2>
 			<p class="mt-0.5 text-xs text-faint">Point players at your Discord, rules or other servers.</p>
@@ -184,7 +184,7 @@
 						</div>
 						<div class="ml-auto flex items-center gap-2">
 							{#if ctx.can('players.chat')}
-								<button class="btn btn-sm" disabled={!running || busy.is()} title={running ? 'Send it to chat now' : 'The server is not running'} onclick={() => sendNow(a)}>
+								<button class="btn btn-sm" disabled={!running || busy.is()} title={running ? 'Send it now' : 'The server is not running'} onclick={() => sendNow(a)}>
 									<Icon name="send" size={12} /> Send now
 								</button>
 							{/if}

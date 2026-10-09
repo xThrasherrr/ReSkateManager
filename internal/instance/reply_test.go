@@ -34,8 +34,13 @@ func TestStrayLinesAreNotReplies(t *testing.T) {
 	w := queue(in, nil)
 	for _, l := range []string{
 		"[10:00:00] Server update 1.0.9 is ready; the server restarts to install it when nobody is on.",
-		"[10:00:01] [vote] The vote to change the map to Isle of Grom passed (3/4).",
+		"[10:00:01] [vote] The vote to change the map to Isle of Grom passed (3 yes, 0 no, 3 needed).",
 		"[10:00:01] Changing map to Isle of Grom",
+		// A custom vote (2.0.2) runs the owner's command, named by its description.
+		"[10:00:01] [vote] The vote to reload the current map passed (2 yes, 1 no, 2 needed).",
+		"[10:00:01] Changing map to Isle of Grom",
+		"[10:00:01] [vote] The vote to kick Eve passed (2 yes, 0 no, 2 needed).",
+		"[10:00:01] Eve left (You were kicked from this server by a vote.)",
 		"[10:00:02] Server renamed to Test.",
 	} {
 		in.onLine(l)
@@ -44,8 +49,14 @@ func TestStrayLinesAreNotReplies(t *testing.T) {
 	if text, ok := got(w); text != "Server renamed to Test." {
 		t.Errorf("reply %q (%v)", text, ok)
 	}
-	if c := in.Console(); c[len(c)-2].Kind != logparse.KindTagged || c[len(c)-2].Tag != "vote" {
-		t.Errorf("vote outcome logged as %+v", c[len(c)-2])
+	c := in.Console()
+	for _, i := range []int{len(c) - 6, len(c) - 4} {
+		if c[i].Kind != logparse.KindTagged || c[i].Tag != "vote" {
+			t.Errorf("vote outcome logged as %+v", c[i])
+		}
+	}
+	if c[len(c)-2].Kind != logparse.KindLeave {
+		t.Errorf("vote kick logged as %+v", c[len(c)-2])
 	}
 
 	// An in-game admin's result can't be told from a reply by order alone, so

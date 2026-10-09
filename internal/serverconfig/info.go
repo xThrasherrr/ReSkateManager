@@ -23,8 +23,20 @@ var GroupInfo = map[string]string{
 		"• /vote map <map>: change the map (only maps in the map pool).\n" +
 		"• /vote kick <player>: kick a player until the server restarts.\n" +
 		"• /vote tod <time>: set the time of day.\n" +
-		"Everyone else answers /yes or /no, and the starter counts as yes. Only one vote runs at a time.\n" +
-		"The pass percentage is of everyone connected, not of those who voted. A vote ends early as soon as it passes or can no longer pass.",
+		"• /vote <name>: one of the custom votes (/vote list shows them).\n" +
+		"Everyone else answers on the vote card at the right of their screen, or with /yes or /no. Only one vote or poll runs at a time.\n" +
+		"The pass percentage is of everyone connected, not of those who voted. A vote ends early as soon as it passes or can no longer pass.\n" +
+		"From ReSkate 2.0.2 each kind of vote can have its own length, cooldown and players needed; left at 0, it takes the length and cooldown here.",
+	"Announcements": "The server's own announcements: it posts these lines in chat one at a time, in order, while players are on, and shows each as a card at the top of every player's screen. Needs ReSkate 2.0.2.\n" +
+		"The Announcements tab is the manager's own: each message there has its own timer, and one can go to every server. On ReSkate 2.0.2 those show as a card too when the card is on here.\n" +
+		"In-game admins can edit these lines with /announcements, and post something once with /announce <text>.",
+	"Custom votes": "Votes of your own, each running a server command when it passes, as the console would. Players start one with /vote <name>; /vote list shows them with their descriptions.\n" +
+		"• {map} in the command is the current map: \"map {map}\" reloads it.\n" +
+		"• {arg} is the choice the starter picked: \"noclip {arg}\" with the choices on and off is started with /vote noclip on.\n" +
+		"A command can do anything the console can, so only owners see or change them. New, removed or edited votes apply on restart; turning one on or off and its limits apply live. Needs ReSkate 2.0.2.",
+	"Polls": "A poll asks everyone a question with up to six answers, and runs nothing:\n" +
+		"/poll Next map? | Grom | San Vansterdam | Stadium\n" +
+		"Players answer on the card or with /1, /2 and so on. It ends after the poll length, or sooner when whoever started it (or an admin) types /poll end. A poll and a vote can't run at once. Needs ReSkate 2.0.2.",
 }
 
 var fieldInfo = map[string]string{
@@ -60,6 +72,8 @@ var fieldInfo = map[string]string{
 		"The server still answers through the relays, for a player the port doesn't reach or one who turned direct connections off, so nobody is kept out. The server then sees the addresses of players who connect directly; players never see each other's. Needs ReSkate 1.1.7.",
 	"pack_ms": "How long a message to a player may wait to go in the same packet as the next ones. A full server sends each player hundreds of small messages a second; packed, the same updates take fewer packets, less bandwidth and less CPU.\n" +
 		"It adds up to that long to when an update arrives. Voice is never held back. 0 sends every message at once. Needs ReSkate 1.1.7.",
+	"threads": "How many threads share sending each update. Most of a full server's work is building each player's update of everyone else, which the threads do for several players at once; what is sent is the same whatever the number, and a quiet server sends from one anyway.\n" +
+		"0 uses one for each of the machine's processors but one, up to 8. 1 sends from a single thread, as before. The console says how many it uses when it starts. Needs ReSkate 2.0.2.",
 	"finger_distance":            "Past this many metres a player's fingers aren't sent moving: they stay as they were and move again once the player is nearer. Fingers are nearly half of every position update and can't be made out that far away. 0 always sends them. Needs ReSkate 1.1.7.",
 	"steam_debug":                "Logs what Steam's own networking says it's doing: each connection asked for, and what it refused or ignored and why. For finding out why players can't connect. It's a lot of text, so turn it off again afterwards. Needs ReSkate 1.1.7.",
 	"distances.full_rate_return": "Players closer than this always get the full rate. A player on a reduced rate goes back to full once they come this close.",
@@ -91,8 +105,16 @@ var fieldInfo = map[string]string{
 	"votes.kick.percent":        "The share of connected players whose yes passes a kick vote, rounded up. The player being kicked doesn't count or vote, and a kick always needs at least two yes votes.",
 	"votes.time_of_day.enabled": "Lets players start /vote tod <time>: morning, noon, afternoon, evening, night, weatherday, weathernight or default. Only works while World layer sync is on.",
 	"votes.time_of_day.percent": "The share of connected players whose yes passes a time of day vote, rounded up.",
-	"votes.seconds":             "How long a vote stays open. One that hasn't passed by then fails.",
-	"votes.cooldown_seconds":    "After starting a vote, a player waits this long before starting another. They can still vote on other players' votes.",
+	"votes.seconds":             "How long a vote stays open, unless that kind of vote has its own length. One that hasn't passed by then fails.",
+	"votes.cooldown_seconds":    "After starting a vote, a player waits this long before starting another, unless the vote they started has its own cooldown. They can still vote on other players' votes.",
+	"votes.starter_votes_yes":   "On, starting a vote counts as voting yes. Off, the starter votes like everyone else, so on a near-empty server a vote can't pass on its starter alone. Needs ReSkate 2.0.2.",
+	"votes.custom":              "Each has the name players type, a description for /vote list and the vote card, the server command it runs, and its choices when the command takes {arg}. Like the other votes, each has its own pass percentage, length, cooldown and players needed. Up to 16.",
+	"votes.polls":               "Who may start a poll with /poll: nobody, only in-game admins, or everyone. Everyone can answer one. Needs ReSkate 2.0.2.",
+	"votes.poll_seconds":        "How long a poll stays open, 10 to 600 seconds. Whoever started it, or an admin, can end it sooner with /poll end. Needs ReSkate 2.0.2.",
+
+	"announcements.messages":         "Posted in chat in turn, one each interval while players are on: the first, then the next, and back to the first after the last. Each is one chat line of up to 200 bytes; up to 32 of them. In-game admins can change them with /announcements add, remove and clear. Needs ReSkate 2.0.2.",
+	"announcements.interval_minutes": "How long between two of the messages above, 1 to 1440 minutes. The timer waits while nobody is on. 0 turns it off and keeps the messages for later. Needs ReSkate 2.0.2.",
+	"announcements.card":             "Each announcement also shows as a card at the top of every player's screen for a few seconds, longer for longer text. That covers the messages above, /announce, and the Announcements tab's messages. Off, they're only in chat. Needs ReSkate 2.0.2.",
 
 	"global_bans": "Players the ReSkate team has banned from multiplayer are refused when they join, and removed if they're already on. The server reads the list from api.reskate.dev when it starts and every ten minutes after.\n" +
 		"Off lets them in. Bans from the Players page apply either way.",
@@ -112,6 +134,13 @@ var fieldInfo = map[string]string{
 }
 
 func init() {
+	// Each kind of vote's own limits, from ReSkate 2.0.2.
+	for _, k := range []struct{ key, name string }{{"map", "map"}, {"kick", "kick"}, {"time_of_day", "time of day"}} {
+		pre := "votes." + k.key + "."
+		fieldInfo[pre+"seconds"] = "How long a " + k.name + " vote stays open: 10 to 300 seconds, or 0 for the vote length above. Needs ReSkate 2.0.2."
+		fieldInfo[pre+"cooldown_seconds"] = "How long whoever starts a " + k.name + " vote waits before starting another vote of any kind: up to 3600 seconds, or 0 for the cooldown above. Needs ReSkate 2.0.2."
+		fieldInfo[pre+"min_players"] = "Nobody can start a " + k.name + " vote until this many players are on, 1 to 249. Needs ReSkate 2.0.2."
+	}
 	for i := range Fields {
 		Fields[i].Info = fieldInfo[Fields[i].Key]
 	}

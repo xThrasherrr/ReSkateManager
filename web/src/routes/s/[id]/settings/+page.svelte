@@ -10,10 +10,13 @@
 	import InfoTip from '#lib/components/InfoTip.svelte';
 	import MapPool from '#lib/components/MapPool.svelte';
 	import ColourInput from '#lib/components/ColourInput.svelte';
+	import LinesInput from '#lib/components/LinesInput.svelte';
+	import CustomVotes from '#lib/components/CustomVotes.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
 	import { control, utf8Length } from '#lib/text.js';
+	import { maxVotes, voteProblems, type CustomVote } from '#lib/votes.js';
 
 	interface Result {
 		command: string;
@@ -158,6 +161,15 @@
 			if (f.maxLen && utf8Length(v) > f.maxLen) return `At most ${f.maxLen} bytes.`;
 		}
 		if (f.type === 'color' && !colour.test(String(v ?? ''))) return 'Enter a colour like #8E5CFF.';
+		if (f.type === 'lines' && Array.isArray(v)) {
+			if (f.max && v.length > f.max) return `At most ${f.max}.`;
+			if (v.some((l) => control.test(l))) return "They can't hold control characters.";
+			if (f.maxLen && v.some((l) => utf8Length(l) > f.maxLen!)) return `Each is at most ${f.maxLen} bytes.`;
+		}
+		if (f.type === 'votes' && Array.isArray(v)) {
+			if (v.length > maxVotes) return `At most ${maxVotes} votes.`;
+			if (voteProblems(v).some(Boolean)) return 'Fix the votes marked in red.';
+		}
 		return '';
 	}
 	const colour = /^#?[0-9a-f]{6}$/i;
@@ -214,7 +226,7 @@
 								</div>
 								{#if f.help}<p class="text-xs text-faint">{f.help}</p>{/if}
 							</div>
-							<div class={f.type === 'maps' || f.long ? 'sm:col-span-2' : ''}>
+							<div class={f.type === 'maps' || f.type === 'lines' || f.type === 'votes' || f.long ? 'sm:col-span-2' : ''}>
 								{#if f.type === 'bool'}
 									<label class="inline-flex cursor-pointer items-center gap-2">
 										<input id={f.key} type="checkbox" class="peer sr-only" disabled={locked} bind:checked={values[f.key]} />
@@ -248,6 +260,17 @@
 									/>
 								{:else if f.type === 'color'}
 									<ColourInput id={f.key} bind:value={values[f.key]} disabled={locked} />
+								{:else if f.type === 'lines'}
+									<LinesInput
+										id={f.key}
+										bind:value={values[f.key]}
+										max={f.max}
+										maxLen={f.maxLen}
+										disabled={locked}
+										placeholder={'Join our Discord: discord.gg/…\nBe nice: no griefing.'}
+									/>
+								{:else if f.type === 'votes'}
+									<CustomVotes id={f.key} bind:value={values[f.key]} saved={(saved[f.key] as CustomVote[] | undefined) ?? []} disabled={locked} />
 								{:else if f.type === 'list'}
 									<textarea
 										id={f.key}

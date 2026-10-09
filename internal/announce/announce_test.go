@@ -1,9 +1,17 @@
 package announce
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/instance"
+	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
@@ -95,5 +103,54 @@ func TestValidInterval(t *testing.T) {
 		if ValidInterval(seconds) != ok {
 			t.Errorf("ValidInterval(%d) = %v", seconds, !ok)
 		}
+	}
+}
+
+// An announcement goes out with announce, a card too, on a server that has
+// it, and with say on one that doesn't.
+func TestPost(t *testing.T) {
+	ctx := context.Background()
+	def := instance.Def{ID: "srv", Name: "Srv", Dir: t.TempDir()}
+	if out, err := exec.Command("go", "build", "-o", def.Exe(), "../instance/testdata/fakeserver").CombinedOutput(); err != nil {
+		t.Fatalf("build fake server: %v: %s", err, out)
+	}
+	in := instance.New(def, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := in.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		in.Stop(ctx)
+	})
+	for deadline := time.Now().Add(10 * time.Second); in.State() != instance.Running; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("state %s", in.State())
+		}
+	}
+
+	if reply, err := Post(ctx, in, "hi", "test"); err != nil || reply != "[chat] Server: hi" {
+		t.Errorf("before 2.0.2: %q, %v", reply, err)
+	}
+	// 2.0.2 writes its announcements, and logs the card's line before the reply.
+	if err := os.WriteFile(def.ConfigPath(), []byte(`{"announcements": {"messages": [], "interval_minutes": 0, "card": true}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := Post(ctx, in, "hello", "test"); err != nil || reply != "Announced." {
+		t.Errorf("2.0.2: %q, %v", reply, err)
+	}
+	found := false
+	for _, e := range in.Console() {
+		found = found || e.Kind == logparse.KindTagged && e.Tag == "announcement" && e.Text == "[announcement] hello"
+	}
+	if !found {
+		t.Error("no [announcement] line in the console")
+	}
+	// Taken back to an older release, under the file 2.0.2 wrote.
+	if err := os.WriteFile(filepath.Join(def.Dir, "before-2.0.2"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := Post(ctx, in, "again", "test"); err != nil || reply != "[chat] Server: again" {
+		t.Errorf("older again: %q, %v", reply, err)
 	}
 }

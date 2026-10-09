@@ -324,7 +324,8 @@ export interface Field {
 	key: string;
 	label: string;
 	group: string;
-	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps' | 'color'; // maps: map names, in order; color: "#RRGGBB"
+	// maps: map names, in order; color: "#RRGGBB"; lines: chat lines, in order; votes: CustomVote[] (#lib/votes.js)
+	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps' | 'color' | 'lines' | 'votes';
 	options?: string[];
 	min?: number;
 	max?: number;

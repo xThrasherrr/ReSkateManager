@@ -103,6 +103,15 @@ func main() {
 				time.Sleep(time.Second)
 			}
 			log(reply)
+		case "say":
+			log("[chat] Server: " + arg)
+		case "announce": // 2.0.2; test hook: a file "before-2.0.2" beside it makes it older
+			if _, err := os.Stat(filepath.Join(filepath.Dir(exe), "before-2.0.2")); err == nil {
+				log("Unknown command \"" + verb + "\". Type help.")
+				break
+			}
+			log("[announcement] " + arg)
+			log("Announced.")
 		case "players":
 			text := fmt.Sprintf("%d players", len(players))
 			for id, name := range players {

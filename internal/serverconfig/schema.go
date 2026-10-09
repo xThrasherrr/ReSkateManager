@@ -23,6 +23,8 @@ const (
 	TypeList   FieldType = "list"  // list of strings
 	TypeMaps   FieldType = "maps"  // ordered list of map names
 	TypeColor  FieldType = "color" // "#RRGGBB"
+	TypeLines  FieldType = "lines" // ordered list of chat lines, kept as written
+	TypeVotes  FieldType = "votes" // the owner's custom votes ([]CustomVote)
 )
 
 // Field describes one setting of ReSkateServer.json for the settings page
@@ -78,6 +80,30 @@ var parkLayouts = func() map[string][]string {
 
 var checkModes = []string{"off", "warn", "kick"}
 
+// A vote's own length and cooldown, from ReSkate 2.0.2; 0 is the votes' own.
+const (
+	votesOwnSeconds  = "0 is the vote length above; otherwise 10 to 300."
+	votesOwnCooldown = "How long its starter waits to start another vote. 0 is the cooldown above."
+	// maxVotePlayers is the most players a vote can ask to be on: one below
+	// the protocol's 250 (multiplayer_player_limit).
+	maxVotePlayers = 249
+)
+
+// CustomVote is one of the owner's own votes (votes.custom, ReSkate 2.0.2).
+// "/vote <name> [choice]" runs Command, as the console would, when it passes:
+// {map} in it is the current map, {arg} the choice picked from Choices.
+type CustomVote struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Command     string   `json:"command"`
+	Choices     []string `json:"choices"`
+	Enabled     bool     `json:"enabled"`
+	Percent     int      `json:"percent"`
+	Seconds     int      `json:"seconds"`          // 0: votes.seconds
+	Cooldown    int      `json:"cooldown_seconds"` // 0: votes.cooldown_seconds
+	MinPlayers  int      `json:"min_players"`
+}
+
 // Fields is the editable schema, in display order.
 var Fields = []Field{
 	{Key: "name", Label: "Server name", Group: "General", Type: TypeString, MaxLen: 64, Help: "Shown in the server browser. Letters, numbers, spaces and - _ / [ ] ( ) only.", Default: defaultServerName},
@@ -100,6 +126,7 @@ var Fields = []Field{
 	{Key: "send_rate", Label: "Send rate per player (KB/s)", Group: "Network", Type: TypeInt, Min: 128, Max: 16384, Help: "Steam's relays carry about 1100; above that, more is lost.", Default: 900.0},
 	{Key: "crowd_budget", Label: "Crowd budget (updates a second)", Group: "Network", Type: TypeInt, Min: 0, Max: 20000, Help: "The most position updates one player is sent. 0 is no limit; otherwise 300 to 20000.", Default: 600.0},
 	{Key: "pack_ms", Label: "Packing delay (ms)", Group: "Network", Type: TypeInt, Min: 0, Max: 50, Restart: true, Help: "How long a message may wait to share a packet. 0 sends each at once.", Default: 10.0},
+	{Key: "threads", Label: "Sending threads", Group: "Network", Type: TypeInt, Min: 0, Max: 32, Restart: true, Help: "0 is one for each processor but one, up to 8. 1 sends from a single thread.", Default: 0.0},
 	{Key: "finger_distance", Label: "Finger distance (m)", Group: "Network", Type: TypeInt, Min: 0, Max: 10000, Restart: true, Help: "Past this, a player's fingers aren't sent moving. 0 always sends them.", Default: 25.0},
 	{Key: "port", Label: "Game port (UDP)", Group: "Network", Type: TypeInt, Min: 1, Max: 65535, Restart: true, Default: 27015.0},
 	{Key: "query_port", Label: "Query port (UDP)", Group: "Network", Type: TypeInt, Min: 1, Max: 65535, Restart: true, Default: 27016.0},
@@ -131,14 +158,31 @@ var Fields = []Field{
 	{Key: "parks.historic", Label: "Piers 1 / Historic", Group: "Parks", Type: TypeEnum, Options: parkLayouts["historic"], Default: "megapark_05"},
 	{Key: "parks.financial", Label: "Piers 2 / Financial", Group: "Parks", Type: TypeEnum, Options: parkLayouts["financial"], Default: "flumppark_08"},
 
-	{Key: "votes.map.enabled", Label: "Map votes", Group: "Votes", Type: TypeBool, Default: false},
-	{Key: "votes.map.percent", Label: "Map vote % to pass", Group: "Votes", Type: TypeInt, Min: 1, Max: 100, Default: 60.0},
-	{Key: "votes.kick.enabled", Label: "Kick votes", Group: "Votes", Type: TypeBool, Default: false},
-	{Key: "votes.kick.percent", Label: "Kick vote % to pass", Group: "Votes", Type: TypeInt, Min: 1, Max: 100, Default: 60.0},
-	{Key: "votes.time_of_day.enabled", Label: "Time of day votes", Group: "Votes", Type: TypeBool, Help: "Needs world layer sync.", Default: false},
-	{Key: "votes.time_of_day.percent", Label: "Time of day vote % to pass", Group: "Votes", Type: TypeInt, Min: 1, Max: 100, Default: 50.0},
-	{Key: "votes.seconds", Label: "Vote length (s)", Group: "Votes", Type: TypeInt, Min: 10, Max: 300, Default: 30.0},
-	{Key: "votes.cooldown_seconds", Label: "Cooldown between a player's votes (s)", Group: "Votes", Type: TypeInt, Min: 0, Max: 3600, Default: 60.0},
+	{Key: "announcements.messages", Label: "Announcement messages", Group: "Announcements", Type: TypeLines, Max: 32, MaxLen: 200, Help: "One per line, up to 32. The server posts them in turn.", Default: []string{}},
+	{Key: "announcements.interval_minutes", Label: "Minutes between announcements", Group: "Announcements", Type: TypeInt, Min: 0, Max: 1440, Help: "While players are on. 0 is off.", Default: 0.0},
+	{Key: "announcements.card", Label: "Show announcements as a card", Group: "Announcements", Type: TypeBool, Help: "At the top of every player's screen, as well as in chat.", Default: true},
+
+	{Key: "votes.seconds", Label: "Vote length (s)", Group: "Votes", Type: TypeInt, Min: 10, Max: 300, Help: "For votes that don't set their own.", Default: 30.0},
+	{Key: "votes.cooldown_seconds", Label: "Cooldown between a player's votes (s)", Group: "Votes", Type: TypeInt, Min: 0, Max: 3600, Help: "For votes that don't set their own.", Default: 60.0},
+	{Key: "votes.starter_votes_yes", Label: "Starting a vote votes yes", Group: "Votes", Type: TypeBool, Help: "Off, whoever starts a vote still has to vote.", Default: true},
+	{Key: "votes.map.enabled", Label: "Map votes", Group: "Map votes", Type: TypeBool, Default: false},
+	{Key: "votes.map.percent", Label: "Map vote % to pass", Group: "Map votes", Type: TypeInt, Min: 1, Max: 100, Default: 60.0},
+	{Key: "votes.map.seconds", Label: "Map vote length (s)", Group: "Map votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},
+	{Key: "votes.map.cooldown_seconds", Label: "Cooldown after a map vote (s)", Group: "Map votes", Type: TypeInt, Min: 0, Max: 3600, Help: votesOwnCooldown, Default: 0.0},
+	{Key: "votes.map.min_players", Label: "Players on to start a map vote", Group: "Map votes", Type: TypeInt, Min: 1, Max: maxVotePlayers, Default: 1.0},
+	{Key: "votes.kick.enabled", Label: "Kick votes", Group: "Kick votes", Type: TypeBool, Default: false},
+	{Key: "votes.kick.percent", Label: "Kick vote % to pass", Group: "Kick votes", Type: TypeInt, Min: 1, Max: 100, Default: 60.0},
+	{Key: "votes.kick.seconds", Label: "Kick vote length (s)", Group: "Kick votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},
+	{Key: "votes.kick.cooldown_seconds", Label: "Cooldown after a kick vote (s)", Group: "Kick votes", Type: TypeInt, Min: 0, Max: 3600, Help: votesOwnCooldown, Default: 0.0},
+	{Key: "votes.kick.min_players", Label: "Players on to start a kick vote", Group: "Kick votes", Type: TypeInt, Min: 1, Max: maxVotePlayers, Default: 1.0},
+	{Key: "votes.time_of_day.enabled", Label: "Time of day votes", Group: "Time of day votes", Type: TypeBool, Help: "Needs world layer sync.", Default: false},
+	{Key: "votes.time_of_day.percent", Label: "Time of day vote % to pass", Group: "Time of day votes", Type: TypeInt, Min: 1, Max: 100, Default: 50.0},
+	{Key: "votes.time_of_day.seconds", Label: "Time of day vote length (s)", Group: "Time of day votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},
+	{Key: "votes.time_of_day.cooldown_seconds", Label: "Cooldown after a time of day vote (s)", Group: "Time of day votes", Type: TypeInt, Min: 0, Max: 3600, Help: votesOwnCooldown, Default: 0.0},
+	{Key: "votes.time_of_day.min_players", Label: "Players on to start a time of day vote", Group: "Time of day votes", Type: TypeInt, Min: 1, Max: maxVotePlayers, Default: 1.0},
+	{Key: "votes.custom", Label: "Custom votes", Group: "Custom votes", Type: TypeVotes, Owner: true, Help: "Votes of your own, each running a server command when it passes. New, removed or edited ones apply on restart.", Default: []CustomVote{}},
+	{Key: "votes.polls", Label: "Who may start polls", Group: "Polls", Type: TypeEnum, Options: []string{"off", "admins", "everyone"}, Default: "admins"},
+	{Key: "votes.poll_seconds", Label: "Poll length (s)", Group: "Polls", Type: TypeInt, Min: 10, Max: 600, Default: 60.0},
 
 	{Key: "global_bans", Label: "Turn away players the ReSkate team banned", Group: "Anti-cheat", Type: TypeBool, Restart: true, Help: "The server's own bans apply either way.", Default: true},
 	{Key: "speed_check", Label: "Speedhack check", Group: "Anti-cheat", Type: TypeEnum, Options: checkModes, Default: "warn"},

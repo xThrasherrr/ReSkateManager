@@ -54,6 +54,12 @@ func TestClassify(t *testing.T) {
 		{"[steam] No longer signed in to Steam: players already on stay, but nobody can join until it is back.", KindTagged, "", "", nil},
 		{"[direct] Steam: connection closed", KindTagged, "", "", nil},
 		{"[afk] Thrasher was removed after 15 min away.", KindTagged, "", "", nil}, // 2.0.0
+		// 2.0.2: an announcement is logged before the reply to the announce that posted it.
+		{"[announcement] Join our Discord", KindTagged, "", "", nil},
+		{"[poll] Thrasher started a poll: Next map? Grom | Stadium", KindTagged, "", "", nil},
+		{`[poll] Poll "Next map?" ended: Grom 2, Stadium 1 (Grom wins).`, KindTagged, "", "", nil},
+		{"[network] The server is behind: 120 poses and effects that arrived late were not passed on. Players see each other at a lower rate until it catches up; if this keeps coming, the server has more players than its CPU can carry.", KindTagged, "", "", nil},
+		{`Threads: 4 share the sending of each pass ("threads"; this machine has 8 processors).`, KindStartup, "", "", nil},
 		{"No steam_token: the server browser can be set to show only servers that have one, and then this server is not in it.", KindStartup, "", "", nil},
 		{"Join code: ABCD-EFGH (password required)", KindJoinCode, "", "", map[string]string{"code": "ABCD-EFGH", "password": "1"}},
 		{"Everyone has loaded Isle of Grom.", KindLoaded, "", "", map[string]string{"map": "Isle of Grom"}},

@@ -1,12 +1,14 @@
-// Package announce sends each server's timed chat announcements.
+// Package announce sends each server's timed announcements.
 package announce
 
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
@@ -69,12 +71,28 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			continue
 		}
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		if _, err := in.Command(cctx, "say "+a.Message, "announcements"); err != nil && ctx.Err() == nil {
+		if _, err := Post(cctx, in, a.Message, "announcements"); err != nil && ctx.Err() == nil {
 			s.Log.Warn("send announcement", "instance", in.ID(), "id", a.ID, "err", err)
 		}
 		cancel()
 	}
 	s.clock = next
+}
+
+// Post sends an announcement to a running server, as `by`: with announce on
+// a server from ReSkate 2.0.2 on, which also shows it as a card on every
+// player's screen (unless the server's announcements.card is off), else with
+// say.
+func Post(ctx context.Context, in *instance.Instance, msg, by string) (string, error) {
+	if serverconfig.Announces(in.Def().ConfigPath()) {
+		reply, err := in.Command(ctx, "announce "+msg, by)
+		// A server taken back to an older release can leave the file saying
+		// otherwise.
+		if err != nil || !strings.HasPrefix(reply, "Unknown command ") {
+			return reply, err
+		}
+	}
+	return in.Command(ctx, "say "+msg, by)
 }
 
 // For picks the enabled announcements that apply to one server.

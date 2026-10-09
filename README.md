@@ -65,7 +65,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Server settings and maps
 
-- **Settings editor:** a form for every `ReSkateServer.json` setting. Most changes apply live through the server's own console commands. A few with no command (`max_players`, ports, `steam_token`, `global_bans`) go through a safe stop → write → start instead. Only owners can see or change a server's `steam_token`.
+- **Settings editor:** a form for every `ReSkateServer.json` setting. Most changes apply live through the server's own console commands. A few with no command (`max_players`, ports, `steam_token`, `global_bans`) go through a safe stop → write → start instead. Only owners can see or change a server's `steam_token` or its custom votes, which run server commands.
 - **Map pool and rotation:** pick which maps players can vote for and how long the server stays on each. Edits apply live, admin changes included. The manager warns before you disable or delete a mod whose map is in a pool, since the server won't start without it.
 - **World controls:** time of day and every world layer per map, applied live or saved for the next start (needs `world-layers.json` next to the server).
 
@@ -91,7 +91,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
   - Every action is recorded in an audit log.
   - Sign-ins are rate-limited (10 failures from one address in 5 minutes, or 20 against one account in 15). Sessions last 14 days; changing a password or linked Steam account signs out that user's other sessions.
   - **Run console commands** alone covers read-only and player-movement commands (`status`, `players`, `maps`, etc.). Kick, ban, admin and chat commands need their own permission, and everything else, settings included, needs **Change server settings**.
-- **Announcements:** timed chat messages, such as a Discord invite, for one server or all of them, sent only while players are online.
+- **Announcements:** timed chat messages, such as a Discord invite, for one server or all of them, sent only while players are online. From ReSkate 2.0.2 they also show as a card on every player's screen; the server's own list of announcements is on its settings page.
 - **Discord alerts:** a webhook notifies a channel on a crash, repeated crashes or a server stopping itself; on a server or manager update installing or failing; on a failed scheduled backup; and on low disk space (10 GB free by default) or sustained high memory (90% for 10 minutes by default, the container limit included in Docker) — each firing once when it starts and once when it clears. Any alert type can be turned off, and a test button checks the webhook.
 - **Discord status message:** a bot keeps one message in a channel up to date with each server's state, players, map, join code, ReSkate version, uptime and next restart. It's edited at most once a minute, shows when it was last updated (so an old time means the manager isn't running), and marks every server offline when the manager stops. Owners set it up under **Manager**:
   1. In the [Discord Developer Portal](https://discord.com/developers/applications), create an application, then on its **Bot** page reset the token and copy it.

@@ -161,7 +161,7 @@ func writeAtomic(path string, data []byte) error {
 // sections says where a sectioned file keeps each flat key (load_config in
 // Server/server_config.cpp, 1.1.7). A nested key goes by its first part, so
 // "distances.half_rate_start" is in network.distances. Keys not listed, the
-// votes, are in the same place in both layouts.
+// votes and 2.0.2's announcements, are in the same place in both layouts.
 var sections = map[string]string{
 	"name": "server.name", "password": "server.password", "welcome": "server.welcome_message", "listed": "server.listed",
 	"max_players": "server.max_players", "port": "server.port", "query_port": "server.query_port",
@@ -185,7 +185,7 @@ var sections = map[string]string{
 
 	"send_rate": "network.send_rate", "crowd_budget": "network.crowd_budget", "distances": "network.distances",
 	"use_steam_relay": "network.use_steam_relay", "pack_ms": "network.pack_ms", "finger_distance": "network.finger_distance",
-	"steam_debug": "network.steam_debug",
+	"steam_debug": "network.steam_debug", "threads": "network.threads",
 }
 
 // Removed are the flat settings a sectioned server no longer has: reserved
@@ -336,6 +336,18 @@ func (f *File) Values() map[string]any {
 		}
 	}
 	return out
+}
+
+// Announces reports whether the server whose config is at path has the
+// announce command, which came with its announcements in ReSkate 2.0.2: a
+// running server has written every setting it knows into the file.
+func Announces(path string) bool {
+	f, err := Read(path)
+	if err != nil {
+		return false
+	}
+	_, ok := f.Get("announcements.card")
+	return ok
 }
 
 // Ban is one of the server's bans. Admins and bans have their own pages.
@@ -506,26 +518,8 @@ func normalize(fd Field, raw any) (any, error) {
 		}
 		return b, nil
 	case TypeInt, TypeNumber:
-		var n float64
-		switch v := raw.(type) {
-		case json.Number:
-			x, err := v.Float64()
-			if err != nil {
-				return nil, err
-			}
-			n = x
-		case float64:
-			n = v
-		case string:
-			x, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-			if err != nil {
-				return nil, fmt.Errorf("%s must be a number", fd.Label)
-			}
-			n = x
-		default:
-			return nil, fmt.Errorf("%s must be a number", fd.Label)
-		}
-		if math.IsNaN(n) || math.IsInf(n, 0) {
+		n, ok := asNumber(raw)
+		if !ok {
 			return nil, fmt.Errorf("%s must be a number", fd.Label)
 		}
 		if fd.Type == TypeInt && n != math.Trunc(n) {
@@ -539,6 +533,9 @@ func normalize(fd Field, raw any) (any, error) {
 		}
 		if fd.Key == "bone_scale_limit" && n != 0 && n < 1 {
 			return nil, fmt.Errorf("%s must be 0 (no limit) or 1 to %g", fd.Label, fd.Max)
+		}
+		if ownSeconds(fd.Key) && n != 0 && n < minVoteSeconds {
+			return nil, fmt.Errorf("%s must be 0 (the vote length) or %d to %g", fd.Label, minVoteSeconds, fd.Max)
 		}
 		return n, nil
 	case TypeEnum:
@@ -652,8 +649,228 @@ func normalize(fd Field, raw any) (any, error) {
 			}
 		}
 		return out, nil
+	case TypeLines:
+		var items []any
+		switch v := raw.(type) {
+		case []any:
+			items = v
+		case []string:
+			for _, s := range v {
+				items = append(items, s)
+			}
+		default:
+			return nil, fmt.Errorf("%s must be a list", fd.Label)
+		}
+		// Like load_config, skip what isn't text. The console's add trims a
+		// line, so it is kept trimmed; repeats are the owner's to keep.
+		out := []string{}
+		for _, x := range items {
+			s, ok := x.(string)
+			if s = strings.TrimSpace(s); !ok || s == "" {
+				continue
+			}
+			if !ValidChatText(s) || fd.MaxLen > 0 && len(s) > fd.MaxLen {
+				return nil, fmt.Errorf("%s: each must be one chat line of at most %d bytes (%q is not)", fd.Label, fd.MaxLen, s)
+			}
+			out = append(out, s)
+		}
+		if fd.Max > 0 && len(out) > int(fd.Max) {
+			return nil, fmt.Errorf("%s holds at most %g", fd.Label, fd.Max)
+		}
+		return out, nil
+	case TypeVotes:
+		return customVotes(raw)
 	}
 	return nil, errors.New("unknown field type")
+}
+
+// asNumber reads a number as JSON, the panel or a hand-written file gives it.
+func asNumber(raw any) (float64, bool) {
+	var n float64
+	switch v := raw.(type) {
+	case json.Number:
+		x, err := v.Float64()
+		if err != nil {
+			return 0, false
+		}
+		n = x
+	case float64:
+		n = v
+	case string:
+		x, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return 0, false
+		}
+		n = x
+	default:
+		return 0, false
+	}
+	return n, !math.IsNaN(n) && !math.IsInf(n, 0)
+}
+
+// Limits of 2.0.2's custom votes (Server/server_config.h,
+// Extension/Multiplayer/Net/protocol.h).
+const (
+	maxCustomVotes   = 16
+	maxVoteChoices   = 8
+	maxVoteNameBytes = 16
+	maxVoteDescBytes = 80
+	maxVoteCommand   = 320 // max_admin_text
+	defaultVotePct   = 60
+	minVoteSeconds   = 10
+	maxVoteSeconds   = 300
+	maxVoteCooldown  = 3600
+	commandExample   = `e.g. "map {map}"`
+)
+
+// ownSeconds reports whether key is one vote's own length (votes.map.seconds),
+// which is 0 for the votes' length, never 1 to 9.
+func ownSeconds(key string) bool {
+	return slices.Contains([]string{"votes.map.seconds", "votes.kick.seconds", "votes.time_of_day.seconds"}, key)
+}
+
+// validVoteName is valid_server_vote_name: 1 to 16 of a-z, 0-9, - and _.
+func validVoteName(s string) bool {
+	if s == "" || len(s) > maxVoteNameBytes {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; !('a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// voteNameFree is custom_vote_name_free: not a word /vote already takes, and
+// not a number, which answers a poll.
+func voteNameFree(s string) bool {
+	if slices.Contains([]string{"map", "kick", "tod", "time", "yes", "y", "no", "n", "poll", "list"}, s) {
+		return false
+	}
+	return strings.Trim(s, "0123456789") != ""
+}
+
+// customVotes reads votes.custom as load_config does (a vote needs no more
+// than its name and command; the rest take the server's defaults) and checks
+// it as custom_votes_error does, since the server won't start on one it
+// refuses.
+func customVotes(raw any) ([]CustomVote, error) {
+	if list, ok := raw.([]CustomVote); ok {
+		raw = jsonValue(Field{Type: TypeVotes}, list)
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, errors.New("custom votes must be a list")
+	}
+	if len(items) > maxCustomVotes {
+		return nil, fmt.Errorf("at most %d custom votes", maxCustomVotes)
+	}
+	out := []CustomVote{}
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, errors.New("each custom vote must be an object")
+		}
+		v := CustomVote{Choices: []string{}, Enabled: true, Percent: defaultVotePct, MinPlayers: 1}
+		text := func(key string) (string, error) {
+			x, ok := m[key]
+			if !ok || x == nil {
+				return "", nil
+			}
+			s, ok := x.(string)
+			if !ok {
+				return "", fmt.Errorf("a custom vote's %s must be text", key)
+			}
+			return strings.TrimSpace(s), nil
+		}
+		whole := func(key string, min, max int, into *int) error {
+			x, ok := m[key]
+			if !ok {
+				return nil
+			}
+			n, ok := asNumber(x)
+			if !ok || n != math.Trunc(n) || n < float64(min) || n > float64(max) {
+				return fmt.Errorf("custom vote %q: %s must be a whole number, %d to %d", v.Name, key, min, max)
+			}
+			*into = int(n)
+			return nil
+		}
+		var err error
+		if v.Name, err = text("name"); err != nil {
+			return nil, err
+		}
+		v.Name = strings.ToLower(v.Name)
+		if !validVoteName(v.Name) {
+			return nil, fmt.Errorf("a custom vote's name is 1 to %d lowercase letters, digits, - or _ (%q is not)", maxVoteNameBytes, v.Name)
+		}
+		if !voteNameFree(v.Name) {
+			return nil, fmt.Errorf("custom vote %q: that name is one of the server's own votes", v.Name)
+		}
+		if slices.ContainsFunc(out, func(o CustomVote) bool { return o.Name == v.Name }) {
+			return nil, fmt.Errorf("two custom votes are called %q", v.Name)
+		}
+		if v.Description, err = text("description"); err != nil {
+			return nil, err
+		}
+		if v.Description != "" && (len(v.Description) > maxVoteDescBytes || !ValidChatText(v.Description)) {
+			return nil, fmt.Errorf("custom vote %q: the description must be one chat line of at most %d bytes", v.Name, maxVoteDescBytes)
+		}
+		if v.Command, err = text("command"); err != nil {
+			return nil, err
+		}
+		if v.Command == "" || len(v.Command) > maxVoteCommand || !utf8.ValidString(v.Command) || strings.ContainsFunc(v.Command, isControl) {
+			return nil, fmt.Errorf("custom vote %q: the command must be one server command of at most %d bytes, %s", v.Name, maxVoteCommand, commandExample)
+		}
+		if x, ok := m["choices"]; ok && x != nil {
+			list, ok := x.([]any)
+			if !ok {
+				return nil, fmt.Errorf("custom vote %q: the choices must be a list", v.Name)
+			}
+			for _, c := range list {
+				s, _ := c.(string) // load_config skips what isn't text
+				if s = strings.ToLower(strings.TrimSpace(s)); s == "" || slices.Contains(v.Choices, s) {
+					continue
+				}
+				if !validVoteName(s) {
+					return nil, fmt.Errorf("custom vote %q: each choice is 1 to %d lowercase letters, digits, - or _ (%q is not)", v.Name, maxVoteNameBytes, s)
+				}
+				v.Choices = append(v.Choices, s)
+			}
+		}
+		if len(v.Choices) > maxVoteChoices {
+			return nil, fmt.Errorf("custom vote %q: at most %d choices", v.Name, maxVoteChoices)
+		}
+		arg := strings.Contains(v.Command, "{arg}")
+		if arg && len(v.Choices) == 0 {
+			return nil, fmt.Errorf("custom vote %q: a command with {arg} needs choices to fill it", v.Name)
+		}
+		if !arg && len(v.Choices) > 0 {
+			return nil, fmt.Errorf("custom vote %q: choices need {arg} in the command, where the choice goes", v.Name)
+		}
+		if x, ok := m["enabled"]; ok {
+			if v.Enabled, ok = x.(bool); !ok {
+				return nil, fmt.Errorf("custom vote %q: enabled must be true or false", v.Name)
+			}
+		}
+		if err := whole("percent", 1, 100, &v.Percent); err != nil {
+			return nil, err
+		}
+		if err := whole("seconds", 0, maxVoteSeconds, &v.Seconds); err != nil {
+			return nil, err
+		}
+		if v.Seconds != 0 && v.Seconds < minVoteSeconds {
+			return nil, fmt.Errorf("custom vote %q: seconds must be 0 (the votes' length) or %d to %d", v.Name, minVoteSeconds, maxVoteSeconds)
+		}
+		if err := whole("cooldown_seconds", 0, maxVoteCooldown, &v.Cooldown); err != nil {
+			return nil, err
+		}
+		if err := whole("min_players", 1, maxVotePlayers, &v.MinPlayers); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 // jsonValue is how a normalised value is stored in the file.
@@ -663,10 +880,24 @@ func jsonValue(fd Field, v any) any {
 		return json.Number(strconv.FormatInt(int64(v.(float64)), 10))
 	case TypeNumber:
 		return json.Number(strconv.FormatFloat(v.(float64), 'f', -1, 64))
-	case TypeList, TypeMaps:
+	case TypeList, TypeMaps, TypeLines:
 		list := []any{}
 		for _, s := range v.([]string) {
 			list = append(list, s)
+		}
+		return list
+	case TypeVotes:
+		// Every key, as the server writes them, so it adds none on its next start.
+		list := []any{}
+		for _, cv := range v.([]CustomVote) {
+			choices := []any{}
+			for _, c := range cv.Choices {
+				choices = append(choices, c)
+			}
+			n := func(i int) json.Number { return json.Number(strconv.Itoa(i)) }
+			list = append(list, map[string]any{"name": cv.Name, "description": cv.Description, "command": cv.Command,
+				"choices": choices, "enabled": cv.Enabled, "percent": n(cv.Percent), "seconds": n(cv.Seconds),
+				"cooldown_seconds": n(cv.Cooldown), "min_players": n(cv.MinPlayers)})
 		}
 		return list
 	}
@@ -729,7 +960,7 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 		return nil, err
 	}
 
-	distances, colors := false, false
+	distances, colors, newVotes := false, false, false
 	// The running server takes reserved slots only below its own max players,
 	// so with a new max they wait for the restart too.
 	_, newMax := p.Changed["max_players"]
@@ -738,7 +969,13 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 		if !ok {
 			continue
 		}
-		if fd.Restart || (fd.Key == "reserved_slots" && newMax) {
+		// No command adds, removes or rewrites a custom vote, only changes
+		// one's limits.
+		if fd.Key == "votes.custom" {
+			old, _ := curVals[fd.Key].([]CustomVote)
+			newVotes = !slices.EqualFunc(old, v.([]CustomVote), sameVote)
+		}
+		if fd.Restart || (fd.Key == "reserved_slots" && newMax) || (fd.Key == "votes.custom" && newVotes) {
 			p.Restart[fd.Key] = v
 			continue
 		}
@@ -857,14 +1094,40 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 			p.Commands = append(p.Commands, "activity-log "+onOff(v))
 		case "parks.construction", "parks.historic", "parks.financial":
 			p.Commands = append(p.Commands, "park "+strings.TrimPrefix(fd.Key, "parks.")+" "+v.(string))
+		case "announcements.messages":
+			old, _ := curVals[fd.Key].([]string)
+			p.Commands = append(p.Commands, announcementCommands(old, v.([]string))...)
+		case "announcements.interval_minutes":
+			if v.(float64) == 0 {
+				p.Commands = append(p.Commands, "announcements interval off")
+			} else {
+				p.Commands = append(p.Commands, "announcements interval "+num(v))
+			}
+		case "announcements.card":
+			p.Commands = append(p.Commands, "announcements card "+onOff(v))
 		case "votes.map.enabled", "votes.kick.enabled", "votes.time_of_day.enabled":
 			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" "+onOff(v))
 		case "votes.map.percent", "votes.kick.percent", "votes.time_of_day.percent":
 			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" "+num(v))
+		case "votes.map.seconds", "votes.kick.seconds", "votes.time_of_day.seconds":
+			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" seconds "+num(v))
+		case "votes.map.cooldown_seconds", "votes.kick.cooldown_seconds", "votes.time_of_day.cooldown_seconds":
+			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" cooldown "+num(v))
+		case "votes.map.min_players", "votes.kick.min_players", "votes.time_of_day.min_players":
+			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" min-players "+num(v))
 		case "votes.seconds":
 			p.Commands = append(p.Commands, "votes seconds "+num(v))
 		case "votes.cooldown_seconds":
 			p.Commands = append(p.Commands, "votes cooldown "+num(v))
+		case "votes.starter_votes_yes":
+			p.Commands = append(p.Commands, "votes starter-yes "+onOff(v))
+		case "votes.custom":
+			old, _ := curVals[fd.Key].([]CustomVote)
+			p.Commands = append(p.Commands, customVoteCommands(old, v.([]CustomVote))...)
+		case "votes.polls":
+			p.Commands = append(p.Commands, "votes polls "+v.(string))
+		case "votes.poll_seconds":
+			p.Commands = append(p.Commands, "votes poll-seconds "+num(v))
 		case "speed_check":
 			p.Commands = append(p.Commands, "speed-check "+v.(string))
 		case "score_check":
@@ -899,7 +1162,7 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 var SettingVerbs = []string{"name", "map", "map-pool", "rotation", "password", "welcome", "listed", "reserved", "rate", "crowd", "tps", "distances",
 	"voice", "voice-range", "placement", "objects", "object-limit", "object-scaling", "bone-scale", "effects", "noclip", "nobail", "boosts", "tuning",
 	"parties", "party-size", "afk-kick", "announce-throwdowns", "activity-log", "park", "votes", "speed-check", "score-check", "score-allow",
-	"layer-sync", "tod", "layers", "layer", "chat-color", "chat-colour",
+	"layer-sync", "tod", "layers", "layer", "chat-color", "chat-colour", "announcements",
 	"voice-allow", "object-placement", "world-layer-sync", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce"}
 
 // knownMaps checks a map pool against the server's maps and spells each as
@@ -966,6 +1229,64 @@ func poolCommands(cur, want, all []string) ([]string, error) {
 	return cmds, nil
 }
 
+// announcementCommands plans the commands that turn the announcements from
+// cur into want (announcements_command in Server/server_votes.cpp). The
+// server only appends one, removes one by its place or clears them, so the
+// ones kept are those of cur that start want in order, the others are removed
+// from the last up, which keeps the places of those before them, and the rest
+// of want is added.
+func announcementCommands(cur, want []string) []string {
+	if len(want) == 0 {
+		return []string{"announcements clear"}
+	}
+	kept, drop := 0, []int{}
+	for i, m := range cur {
+		if kept < len(want) && m == want[kept] {
+			kept++
+		} else {
+			drop = append(drop, i)
+		}
+	}
+	var cmds []string
+	if kept == 0 && len(cur) > 0 {
+		cmds = append(cmds, "announcements clear")
+	} else {
+		for _, i := range slices.Backward(drop) {
+			cmds = append(cmds, "announcements remove "+strconv.Itoa(i+1))
+		}
+	}
+	for _, m := range want[kept:] {
+		cmds = append(cmds, "announcements add "+m)
+	}
+	return cmds
+}
+
+// customVoteCommands plans the commands that change custom votes' limits,
+// for votes that are otherwise the same (sameVote): "votes <name> ...".
+func customVoteCommands(cur, want []CustomVote) []string {
+	var cmds []string
+	for i, w := range want {
+		c := cur[i]
+		pre := "votes " + w.Name + " "
+		if c.Enabled != w.Enabled {
+			cmds = append(cmds, pre+onOff(w.Enabled))
+		}
+		if c.Percent != w.Percent {
+			cmds = append(cmds, pre+strconv.Itoa(w.Percent))
+		}
+		if c.Seconds != w.Seconds {
+			cmds = append(cmds, pre+"seconds "+strconv.Itoa(w.Seconds))
+		}
+		if c.Cooldown != w.Cooldown {
+			cmds = append(cmds, pre+"cooldown "+strconv.Itoa(w.Cooldown))
+		}
+		if c.MinPlayers != w.MinPlayers {
+			cmds = append(cmds, pre+"min-players "+strconv.Itoa(w.MinPlayers))
+		}
+	}
+	return cmds
+}
+
 func voteKind(key string) string {
 	switch {
 	case strings.HasPrefix(key, "votes.map."):
@@ -990,7 +1311,21 @@ func equal(a, b any) bool {
 	if aok || bok {
 		return aok && bok && slices.Equal(as, bs)
 	}
+	av, aok := a.([]CustomVote)
+	bv, bok := b.([]CustomVote)
+	if aok || bok {
+		return aok && bok && slices.EqualFunc(av, bv, func(x, y CustomVote) bool {
+			return sameVote(x, y) && x.Enabled == y.Enabled && x.Percent == y.Percent && x.Seconds == y.Seconds &&
+				x.Cooldown == y.Cooldown && x.MinPlayers == y.MinPlayers
+		})
+	}
 	return a == b
+}
+
+// sameVote reports whether two custom votes are the same vote: what only a
+// restart changes, as no command adds, removes or rewrites one.
+func sameVote(x, y CustomVote) bool {
+	return x.Name == y.Name && x.Description == y.Description && x.Command == y.Command && slices.Equal(x.Choices, y.Choices)
 }
 
 // validate mirrors the cross-field checks in config_error().
