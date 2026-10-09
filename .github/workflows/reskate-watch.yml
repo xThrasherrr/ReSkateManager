@@ -1,18 +1,19 @@
 name: ReSkate watch
 
-# Every hour, looks for a new ReSkate release and files what it changes for
-# the manager (cmd/reskate-watch) as an issue labelled reskate. The newest
-# such issue says which release was reported last.
+# Every hour, looks for a new ReSkate release and checks what it changes for
+# the manager (cmd/reskate-watch). A release that needs work is filed as an
+# issue labelled reskate; every report is kept as an artifact named after its
+# release, which is how a run knows the release was checked already.
 on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       from:
-        description: Compare from this ReSkate release, and report the latest even if it was already
+        description: Compare from this ReSkate release, and check the latest even if it was already
         required: false
       dry_run:
-        description: Only show the report in the run's summary; file no issue
+        description: Only show the report in the run's summary; file and keep nothing
         type: boolean
         default: false
 
@@ -29,6 +30,7 @@ jobs:
   find:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       issues: read
     outputs:
       from: ${{ steps.find.outputs.from }}
@@ -41,20 +43,24 @@ jobs:
           FROM: ${{ inputs.from }}
         run: |
           latest=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
-          last=$(gh issue list --label reskate --state all --limit 1 --json body --jq '.[0].body // ""' |
+          artifacts="repos/$GITHUB_REPOSITORY/actions/artifacts"
+          checked=$(gh api "$artifacts?name=reskate-watch-$latest" --jq .total_count)
+          reported=$(gh issue list --label reskate --state all --limit 1 --json body --jq '.[0].body // ""' |
             sed -n 's/^<!-- reskate-watch \(.*\) -->$/\1/p')
           if [ -n "$FROM" ]; then
             from=$FROM
-          elif [ "$last" = "$latest" ]; then
-            echo "ReSkate $latest was reported already."
+          elif [ "$checked" != 0 ] || [ "$reported" = "$latest" ]; then
+            echo "ReSkate $latest was checked already."
             exit 0
-          elif [ -n "$last" ]; then
-            from=$last
           else
-            # The first run: compare with the release before.
-            from=$(gh api "repos/$UPSTREAM/releases" --jq '[.[] | select(.draft or .prerelease | not) | .tag_name][1]')
+            # The last release checked, newest first; on the first run, the release before.
+            from=$(gh api "$artifacts?per_page=100" \
+              --jq '[.artifacts[].name | select(startswith("reskate-watch-"))][0] // "" | ltrimstr("reskate-watch-")')
+            if [ -z "$from" ]; then
+              from=$(gh api "repos/$UPSTREAM/releases" --jq '[.[] | select(.draft or .prerelease | not) | .tag_name][1]')
+            fi
           fi
-          echo "Reporting ReSkate $latest, compared with $from."
+          echo "Checking ReSkate $latest, compared with $from."
           echo "from=$from" >> "$GITHUB_OUTPUT"
           echo "to=$latest" >> "$GITHUB_OUTPUT"
 
@@ -94,26 +100,28 @@ jobs:
             echo "$eof"
           } >> "$GITHUB_OUTPUT"
 
-  # Files the report. A release with nothing to apply is filed closed, so
-  # every release is on record and only work stays open, assigned.
+  # Files a release that needs work, then keeps the report. The report is
+  # kept last, so a release whose issue couldn't be filed is checked again.
   file:
-    needs: check
+    needs: [find, check]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
       - env:
+          BODY: ${{ needs.check.outputs.body }}
+        run: printf '%s\n' "$BODY" > report.md
+      - if: needs.check.outputs.open == 'true'
+        env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TITLE: ${{ needs.check.outputs.title }}
-          OPEN: ${{ needs.check.outputs.open }}
-          BODY: ${{ needs.check.outputs.body }}
         run: |
           gh label create reskate --force --color 5319e7 --description "What a ReSkate release changes for the manager"
-          printf '%s\n' "$BODY" > body.md
-          if [ "$OPEN" = true ]; then
-            gh issue create --title "$TITLE" --label reskate --assignee "$GITHUB_REPOSITORY_OWNER" --body-file body.md
-          else
-            gh issue close "$(gh issue create --title "$TITLE" --label reskate --body-file body.md)" --reason completed
-          fi
+          gh issue create --title "$TITLE" --label reskate --assignee "$GITHUB_REPOSITORY_OWNER" --body-file report.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: reskate-watch-${{ needs.find.outputs.to }}
+          path: report.md
+          retention-days: 90
