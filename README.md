@@ -285,6 +285,7 @@ Without Task: `cd web && pnpm install && pnpm build`, then `go build ./cmd/ReSka
 | Path | Purpose |
 | --- | --- |
 | `cmd/ReSkateManager` | Entry point and Windows tray |
+| `cmd/reskate-watch` | What a new ReSkate release changes for the manager; filed hourly as an issue by the ReSkate watch workflow |
 | `internal/supervisor` | Process, pipes, graceful stop, Windows job object |
 | `internal/logparse` | stdout → typed entries; `players` and `maps` replies, `[network]` summaries |
 | `internal/logfile` | Logs that rotate themselves: `console.log`, `data/manager.log` |
