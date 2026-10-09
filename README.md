@@ -8,60 +8,95 @@
     <a href="https://github.com/xThrasherrr/ReSkateManager/releases/latest"><img src="https://img.shields.io/github/v/release/xThrasherrr/ReSkateManager" alt="Latest release" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/xThrasherrr/ReSkateManager" alt="License: GPL-3.0" /></a>
   </p>
-
-  <p>
-    <a href="#features">Features</a> ·
-    <a href="#getting-started">Getting started</a> ·
-    <a href="#configuration">Configuration</a> ·
-    <a href="#troubleshooting">Troubleshooting</a> ·
-    <a href="#development">Development</a> ·
-    <a href="#contributing">Contributing</a> ·
-    <a href="#license">License</a>
-  </p>
 </div>
 
 ---
 
-ReSkateManager is a single program that starts your ReSkate servers, keeps them up to date, and gives your staff a web panel to run them. It runs on Windows, on Linux and in Docker, and manages several servers side by side, each in its own folder with its own ports.
+ReSkateManager is a single program that starts your ReSkate servers, keeps them up to date, and gives your staff a web panel to run them. It runs on Windows, Linux and Docker, and manages several servers side by side, each in its own folder with its own ports.
 
 ![The ReSkateManager panel: the server dashboard, the Thunderstore mod browser and the live console on a phone](.github/showcase.jpg)
 
+## Table of contents
+
+- [Features](#features)
+  - [Console and logs](#console-and-logs)
+  - [Players and server control](#players-and-server-control)
+  - [Performance and monitoring](#performance-and-monitoring)
+  - [Server settings and maps](#server-settings-and-maps)
+  - [Mods](#mods)
+  - [Updates and backups](#updates-and-backups)
+  - [Users, roles and alerts](#users-roles-and-alerts)
+- [Getting started](#getting-started)
+  - [Windows](#windows)
+  - [Linux](#linux)
+  - [Docker](#docker)
+- [Configuration](#configuration)
+  - [Where everything is stored](#where-everything-is-stored)
+  - [Exposing the panel](#exposing-the-panel)
+  - [Settings, environment and flags](#settings-environment-and-flags)
+- [Backups and restoring](#backups-and-restoring)
+- [Troubleshooting](#troubleshooting)
+- [How it works](#how-it-works)
+- [Development](#development)
+  - [Requirements](#requirements)
+  - [Common tasks](#common-tasks)
+  - [Project layout](#project-layout)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Features
 
-- **Live console:** server output streamed live and color-coded by type, with filters and search. Run commands with history and Tab completion, or switch to server chat. It opens on the newest lines, and **Clear** hides what's there, in your browser only.
-- **Logs:** read a server's logs in the panel, beyond what the console holds: its own `ReSkateServer.log`, or everything the console showed while the manager ran it, Steam's own lines included. Pick a time range, filter by line type and search, then export the lines shown or download a whole log file.
+### Console and logs
+
+- **Live console:** server output streamed live and color-coded by type, with filters and search. Run commands with history and Tab completion, or switch to server chat. It opens on the newest lines, and **Clear** only hides output in your browser.
+- **Logs:** read a server's own `ReSkateServer.log`, or everything the console showed while the manager ran it, Steam's lines included. Filter by time range and line type, search, then export what's shown or download a whole log file.
+
+### Players and server control
+
 - **Player management:** see who's online and who has played. Kick, ban, unban and manage in-game admins.
+- **Crash recovery:** a crashed server restarts automatically, with backoff, up to five tries in a row.
+- **Scheduled restarts:** restart a server at set times of day, or after so many hours up. Players get a warning in chat 10, 5 and 1 minute before; a server with nobody on restarts straight away.
+
+### Performance and monitoring
+
 - **Performance:** CPU, memory and player charts from the last hour up to 7 days, plus a summary of each run. Every server process is sampled every 30 s.
-- **Network health:** bandwidth in and out, the worst player's ping, how long a message waits in the server's send queue, sends that were lost, and how busy the server's main loop is, charted on each server's Performance tab. They come from the summary the server logs once a minute while players are on (ReSkate 1.1.5 or newer, with **Log player activity** on), so they show what was happening before players noticed trouble.
-- **Host performance:** one page for the machine the manager runs on: its CPU and memory over time with each server's share stacked under them, the manager's own memory, servers running and players online. Memory the system only holds as cache counts as free, so a Linux box that filled its spare RAM with cache doesn't look full. In Docker it shows the whole host, plus the container's memory limit when it has one. Below that, each drive the manager keeps things on: free space, and what its servers, shared mods, backups, server releases, logs and database take up, measured when you look (at most every 10 minutes). Owners see it, and a role can grant it.
-- **Announcements:** timed chat messages, such as a Discord invite, for one server or all of them. They only go out while players are online.
-- **Settings editor:** a form for every `ReSkateServer.json` setting. Changes apply live through the server's own console commands. Settings with no command (`max_players`, ports, `steam_token`, `global_bans`) are applied with a safe stop → write → start. Only owners see or change a server's `steam_token`: it isn't sent to anyone else, their exports leave it out, and their restores and imports keep the one the server had.
-- **Map pool and rotation:** pick the maps players can vote for, such as only Skate 3 maps, in the order the server rotates through them, and how many minutes it stays on each. Edits apply live, and changes in-game admins make show up too. The Mods pages warn before you disable or delete a mod whose map is in a pool, since the server won't start without it. A server build from before map pools shows these settings as needing a server update.
+- **Network health:** bandwidth in and out, the worst player's ping, send-queue delay, lost sends and how busy the server's main loop is — charted on each server's Performance tab. Needs ReSkate 1.1.5+ with **Log player activity** on, so it shows what was happening before players noticed trouble.
+- **Host performance:** one page for the machine the manager runs on — its CPU and memory over time with each server's share stacked underneath, the manager's own memory, servers running and players online. Memory the system only holds as cache counts as free. In Docker it shows the whole host plus the container's memory limit, if any. Below that, each drive the manager uses: free space, and what servers, shared mods, backups, releases and logs take up (refreshed at most every 10 minutes). Owners see this page by default; a role can grant it to others.
+
+### Server settings and maps
+
+- **Settings editor:** a form for every `ReSkateServer.json` setting. Most changes apply live through the server's own console commands. A few with no command (`max_players`, ports, `steam_token`, `global_bans`) go through a safe stop → write → start instead. Only owners can see or change a server's `steam_token`.
+- **Map pool and rotation:** pick which maps players can vote for and how long the server stays on each. Edits apply live, admin changes included. The manager warns before you disable or delete a mod whose map is in a pool, since the server won't start without it.
 - **World controls:** time of day and every world layer per map, applied live or saved for the next start (needs `world-layers.json` next to the server).
-- **Mod browser:** search Thunderstore's ReSkate mods in the panel, then tick any of your servers and the shared mods to install one on all of them at once. The browser looks inside each mod to show the maps it adds before you download it, and can list only the mods that add maps. Any version can be installed, and installing a mod a server already has swaps the version. A server that uses the shared mods loads the shared copy instead of downloading its own.
-- **Mods:** upload map mods as zips from the panel. They go up in chunks, so large maps get past proxy upload limits such as Cloudflare's. Enable, disable or delete mods, pick a mod's map as the server's map, and update a mod when Thunderstore has a newer version. **Update all** updates every outdated mod on a server, or in the shared mods, one after another; the manager runs them itself, so they carry on with the panel closed.
-- **Shared mods:** keep one copy of a mod for several servers. Each server loads all of them, only the ones picked for it (mods shared later arrive turned off, which suits a server that runs one map), or none, and any one can be turned on or off per server. Starting to use them, or moving a server's mod into them, swaps the copies servers already hold of the same version for links, so the space comes back.
-- **Updates:** install new server releases on demand or automatically once a server is empty. Each download is verified against the release's SHA-256 hashes. A running server's header and its **Updates** tab show which ReSkate release it is, told from its program's SHA-256 the way the server tells itself, once the manager has looked that release up or installed it. Owners can update the manager itself from the panel, and it brings back up the servers that were running. The binary it replaces stays beside it as `.old` for the new one's first ten minutes, to go back to by hand. A server update that fails part way puts the old release's files back.
+
+### Mods
+
+- **Mod browser:** search Thunderstore's ReSkate mods, tick any of your servers and the shared mods, and install one on all of them at once. Shows the maps a mod adds before you download it, and can filter to mods that add maps.
+- **Mods:** upload map mods as zips, sent in chunks so large maps clear proxy upload limits such as Cloudflare's. Enable, disable or delete mods, set a mod's map as the server's map, and update one mod or every outdated mod (**Update all**) in the background.
+- **Shared mods:** keep one copy of a mod for several servers. Each server loads all, some, or none of them. Moving a server's mod into the shared pool (or turning shared mods on) swaps duplicate copies for links, reclaiming space.
+
+### Updates and backups
+
+- **Updates:** install new server releases on demand or automatically once a server is empty, each verified against the release's SHA-256 hashes. Owners can update the manager itself from the panel, which brings its servers back up afterward. The old binary stays as `.old` for ten minutes; a server update that fails partway restores the previous files.
+- **Backups:** daily backups of the database, settings and each server's config, kept for the last seven — mods can be included too. Full details in [Backups and restoring](#backups-and-restoring).
+- **Move a server:** export a server as a zip (settings, announcements and mods) and import it on another manager. Also covered in [Backups and restoring](#backups-and-restoring).
+- **Housekeeping:** the audit log is kept 90 days and player history 180 days, both adjustable on the Manager page. Performance samples keep a week, and the release cache keeps the two newest downloads.
+
+### Users, roles and alerts
+
 - **Users and roles:**
   - Sign in with Steam or a password.
-  - Roles grant access per server or on all servers.
-  - A role with "Be an in-game admin" makes its users in-game admins on those servers through their linked Steam account. Admins added by hand are left alone.
+  - Roles grant access per server or on all servers, and decide which tabs of a server someone sees.
+  - A role with "Be an in-game admin" syncs its users to in-game admin on those servers through their linked Steam account; admins added by hand are left alone.
   - Every action is recorded in an audit log.
-  - A role decides which tabs of a server someone sees. Without the console, a server opens on the first tab they have.
-  - Failed sign-ins are limited: after 10 from one address in 5 minutes, or 20 against one account in 15, sign-in waits. Sessions last 14 days, and changing a password or the linked Steam account signs out that user's other sessions.
-  - **Run console commands** alone runs commands that look things up, such as `status`, `players` and `maps`, and a few that move players around. Kick, ban, admin and chat commands also need the matching permission, such as **Kick players**, and every other command, settings included, needs **Change server settings**.
-- **Crash recovery:** a crashed server restarts with backoff, up to five tries in a row.
-- **Scheduled restarts:** restart a server at set times of day, or after so many hours up. Players get a warning in chat 10, 5 and 1 minute before; a server with nobody on restarts straight away.
-- **Discord alerts:** a webhook posts to a channel when a server crashes, keeps crashing or stops on its own, when a server update installs or fails, when the manager updates, and when a scheduled backup fails. Also when a drive holding the manager's or a server's folder falls under a set amount of free space (10 GB by default), and when memory stays at or above a set share (90% for 10 minutes by default; in Docker, the container's limit too if it is fuller), each once as it happens and once more when it is back to normal. Each kind can be turned off, and a test button checks the webhook.
-- **Backups:** once a day the manager backs up its database and settings, and each server's config and world layers, keeping the last seven. Mods can be included too. It also backs up before a server update, before it updates itself and before it upgrades its database. Restore a server's config and mods from its page, download backups to keep them elsewhere, and restore everything with one command (see [Backups and restoring](#backups-and-restoring)).
-- **Move a server:** export a server as a zip, with its settings, announcements and mods, and import it on another manager.
-- **Housekeeping:** the audit log is kept 90 days and player history 180 days, both adjustable on the Manager page. Performance samples, the machine's included, keep a week, and the cache keeps the two newest server releases.
+  - Sign-ins are rate-limited (10 failures from one address in 5 minutes, or 20 against one account in 15). Sessions last 14 days; changing a password or linked Steam account signs out that user's other sessions.
+  - **Run console commands** alone covers read-only and player-movement commands (`status`, `players`, `maps`, etc.). Kick, ban, admin and chat commands need their own permission, and everything else, settings included, needs **Change server settings**.
+- **Announcements:** timed chat messages, such as a Discord invite, for one server or all of them, sent only while players are online.
+- **Discord alerts:** a webhook notifies a channel on a crash, repeated crashes or a server stopping itself; on a server or manager update installing or failing; on a failed scheduled backup; and on low disk space (10 GB free by default) or sustained high memory (90% for 10 minutes by default, the container limit included in Docker) — each firing once when it starts and once when it clears. Any alert type can be turned off, and a test button checks the webhook.
 
 ## Getting started
 
 Download the latest build from the [releases page](https://github.com/xThrasherrr/ReSkateManager/releases/latest). On first run the manager prints a one-time **setup PIN**. Open the panel and enter it to create the owner account.
-
-Before 0.9 the program was called `reskate-manager`. An install from then that updates itself keeps that file name, so use it wherever this page says `ReSkateManager`. The Linux service and the Docker image kept their names.
 
 Release candidates, such as `1.0.0-rc.1`, are published as pre-releases. A release never updates itself to one, and the image's `latest` tag stays on the last release. A candidate updates itself to the next candidate, then to the release. To try one in Docker, use its tag, such as `ghcr.io/xthrasherrr/reskate-manager:1.0.0-rc.1`.
 
@@ -102,7 +137,9 @@ docker compose logs manager      # the setup PIN is printed here
 
 ## Configuration
 
-Everything the manager keeps sits next to the executable, or under the directory given with `--root`:
+Everything the manager keeps sits next to the executable, or under the directory given with `--root`.
+
+### Where everything is stored
 
 ```
 data/manager.toml   settings (listen address, public URL, TLS)
@@ -114,6 +151,8 @@ shared/Mods/        shared mods, linked into the Mods/ of each server that uses 
 backups/            backups, one zip each
 cache/              downloaded server releases (the newest two are kept)
 ```
+
+### Exposing the panel
 
 The panel listens on `0.0.0.0:40125` by default. To expose it to the internet, serve it over HTTPS:
 
@@ -206,13 +245,6 @@ A backup is a zip in `backups/`, laid out like the manager's folder: `data/manag
 - **"cannot listen on …":** another program holds the port. Change `listen` in `data/manager.toml`.
 
 If the panel says it can't reach the manager, the manager stopped or is restarting, or a proxy in front of it is down. The panel keeps trying, and picks up again once the manager answers.
-
-## Server versions
-
-The manager works with ReSkate server **1.0.8 and newer**, on Windows and on Linux.
-
-- Settings a server's release doesn't have yet show as needing a server update: global bans came in 1.1.1, the map pool and rotation in 1.1.2, `steam_token` in 1.1.4, reserved slots, the object limit, send rate and crowd budget in 1.1.5, the limit on resized body parts in 1.1.6, and Steam relays only (direct connections), the packing delay, finger distance and the Steam networking log in 1.1.7.
-- Network health needs 1.1.5 or newer.
 
 ## How it works
 
