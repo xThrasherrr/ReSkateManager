@@ -83,10 +83,78 @@ func TestCheckLost(t *testing.T) {
 }
 
 func TestCommands(t *testing.T) {
-	got := commands("status | net [player] | say <text>\nlisted on|off | votes [map|kick]")
-	want := map[string][]string{"status": {"status"}, "net": {"net [player]"}, "say": {"say <text>"}, "listed": {"listed on|off"}, "votes": {"votes [map|kick]"}}
+	got := commands("status | net [player] | say <text>\nlisted on|off | votes [map|kick]\npoll <question> | <answer> | <answer>... | poll end")
+	want := map[string][]string{"status": {"status"}, "net": {"net [player]"}, "say": {"say <text>"}, "listed": {"listed on|off"}, "votes": {"votes [map|kick]"},
+		"poll": {"poll <question> | <answer> | <answer>...", "poll end"}}
 	if !maps.EqualFunc(got, want, slices.Equal) {
 		t.Errorf("commands = %q, want %q", got, want)
+	}
+}
+
+// 2.0.3's announce-to puts its player inside the tag's bracket, which only
+// the log parser itself can say it reads.
+func TestTagLines(t *testing.T) {
+	src := `log_("[announcement" + (target ? " -> " + guest_name(*target) : std::string()) + "] " + line);
+log_("[vote] " + label);
+write_log("[afk" + "] b");`
+	got := tagLines(src)
+	if want := map[string]string{"[announcement": "[announcement -> x] x", "[afk": "[afk] bx"}; !maps.Equal(got, want) {
+		t.Errorf("tagLines = %q, want %q", got, want)
+	}
+	if !parsed(got["[announcement"]) || parsed("[announcements -> x] x") || parsed("") {
+		t.Error("parsed doesn't follow the log parser")
+	}
+}
+
+// Where the host logs what a command it ran itself answers: a passed vote's
+// since 1.1.x, a chat command's and a poll-run's since 2.0.3.
+func TestSelfRuns(t *testing.T) {
+	src := `void Host::run_custom_command(Guest &guest, const CustomCommand &c, std::string_view argument) {
+    for (const auto &run : runs)
+        log_(command(fill(fill(run, "{player}", std::to_string(id)),
+                          "{map}", config_.map)));
+}
+std::string Host::start_poll(Guest *starter) {
+    log_("[poll] command(" + x + ")");
+}
+void Host::check_vote(bool expired) {
+    if (top) log_(command(fill(done.run, "{answer})", leaders.front())));
+    switch (vote.kind) {
+    case VoteKind::map: log_( command("map " + done.value)); break;
+    }
+}`
+	want := []string{
+		`Host::run_custom_command: command(fill(fill(run, "{player}", std::to_string(id)), "{map}", config_.map))`,
+		`Host::check_vote: command(fill(done.run, "{answer})", leaders.front()))`,
+		`Host::check_vote: command("map " + done.value)`,
+	}
+	if got := selfRuns(src); !slices.Equal(got, want) {
+		t.Errorf("selfRuns:\n got %q\nwant %q", got, want)
+	}
+}
+
+// A new command counts as taken up once the panel's console decides who may
+// run it, whatever words the manager happens to have: 2.0.3's vote and poll
+// are also log tags.
+func TestNewCommands(t *testing.T) {
+	r := &report{From: "v2.0.2", To: "v2.0.3",
+		old: &upstream{cmds: map[string][]string{"status": {"status"}}, lines: map[string]bool{}},
+		cur: &upstream{cmds: map[string][]string{"status": {"status"}, "vote": {"vote <map|kick>"}, "frobnicate": {"frobnicate <n>"}},
+			lines: map[string]bool{}}}
+	r.srcDir = t.TempDir() // no git: the background details are skipped
+	r.checkSource(&usage{frags: map[string][]string{}, words: map[string]bool{"vote": true, "frobnicate": true}})
+	if want := []string{"New command `\"frobnicate <n>\"`"}; !slices.Equal(r.Adds, want) {
+		t.Errorf("adds %q, want %q", r.Adds, want)
+	}
+}
+
+func TestNarrowed(t *testing.T) {
+	was := []string{"announcements [list|add <text>|remove <n>|clear|interval <minutes>|off|card on|off]"}
+	if !narrowed("announcements [list|add <text>|remove <n>|clear|interval <minutes>|off]", was) {
+		t.Error("a form that only dropped card on|off is new")
+	}
+	if narrowed("announcements [list|add <text>|pin <n>]", was) {
+		t.Error("a form with pin isn't new")
 	}
 }
 

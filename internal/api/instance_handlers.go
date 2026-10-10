@@ -513,6 +513,19 @@ func consolePerm(line string) string {
 	return auth.SettingsEdit
 }
 
+// ConsoleVerbs are the console commands the panel has decided on: those
+// console.exec alone may run, those that need a finer permission too, and
+// the owners'. One a newer server adds needs settings.edit until it's here,
+// so cmd/reskate-watch reports each new command that isn't.
+func ConsoleVerbs() []string {
+	out := slices.Concat(consoleOnly, ownerCommands)
+	for verb := range consolePerms {
+		out = append(out, verb)
+	}
+	slices.Sort(out)
+	return out
+}
+
 // permLabel names a permission as the Users page does.
 func permLabel(key string) string {
 	for _, p := range auth.AllPerms {

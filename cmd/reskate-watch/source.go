@@ -8,18 +8,23 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/xThrasherrr/ReSkateManager/internal/api"
+	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
 )
 
 // upstream is the dedicated server's source at one release: every string
 // literal in Server/ (its tests aside), the console's commands and the
 // README.
 type upstream struct {
-	strings map[string]bool
-	all     string              // every literal, NUL between them, for substring searches
-	help    string              // the `help` reply, which lists the commands
-	cmds    map[string][]string // each command's forms in the help, by verb; just the verb when it has none
-	lines   map[string]bool     // how the lines the server logs start: the first literal it logs
-	readme  string
+	strings  map[string]bool
+	all      string              // every literal, NUL between them, for substring searches
+	help     string              // the `help` reply, which lists the commands
+	cmds     map[string][]string // each command's forms in the help, by verb; just the verb when it has none
+	lines    map[string]bool     // how the lines the server logs start: the first literal it logs
+	tagLines map[string]string   // of those, the ones that add to a tag's bracket, each with a line it writes
+	selfRuns map[string]string   // where the server logs the answer to a command it runs itself, by file
+	readme   string
 }
 
 func (r *report) loadSource(src string) error {
@@ -45,7 +50,7 @@ func readUpstream(src, tag string) (*upstream, error) {
 	if err != nil {
 		return nil, err
 	}
-	u := &upstream{strings: map[string]bool{}, lines: map[string]bool{}}
+	u := &upstream{strings: map[string]bool{}, lines: map[string]bool{}, tagLines: map[string]string{}, selfRuns: map[string]string{}}
 	verbs := map[string]bool{}
 	for name := range strings.FieldsSeq(list) {
 		if strings.HasPrefix(name, "Server/Test/") || !slices.Contains([]string{".cpp", ".h", ".hpp", ".cc", ".inl"}, path.Ext(name)) {
@@ -66,6 +71,10 @@ func readUpstream(src, tag string) (*upstream, error) {
 		}
 		for _, s := range logStarts(text) {
 			u.lines[s] = true
+		}
+		maps.Copy(u.tagLines, tagLines(text))
+		for _, run := range selfRuns(text) {
+			u.selfRuns[run] = name
 		}
 	}
 	if strings.Count(u.help, " | ") < 10 {
@@ -92,10 +101,13 @@ func (r *report) checkSource(use *usage) {
 	if len(newCmds) == 0 {
 		r.Notes = append(r.Notes, "The server's commands weren't found in its source, so new ones weren't looked for.")
 	}
+	// A new command is taken up once the panel's console has decided who may
+	// run it: the watcher is built from the same tree as the manager it reads.
+	decided := api.ConsoleVerbs()
 	for _, verb := range slices.Sorted(maps.Keys(newCmds)) {
 		forms, was := newCmds[verb], oldCmds[verb]
 		if was == nil {
-			if !use.sends(verb) {
+			if !slices.Contains(decided, verb) {
 				r.Adds = append(r.Adds, "New command "+codes(forms))
 			}
 			continue
@@ -103,7 +115,7 @@ func (r *report) checkSource(use *usage) {
 		var added []string
 		for _, f := range forms {
 			// A command the help didn't list before is known only by its verb.
-			if f != verb && !slices.Contains(was, f) && !slices.Contains(was, verb) && !use.sendsForm(f) {
+			if f != verb && !slices.Contains(was, f) && !slices.Contains(was, verb) && !use.sendsForm(f) && !narrowed(f, was) {
 				added = append(added, f)
 			}
 		}
@@ -132,7 +144,7 @@ func (r *report) checkSource(use *usage) {
 	var heads []string
 	lines := map[string][]string{} // by their "Word: ", when they have one
 	for _, s := range slices.Sorted(maps.Keys(r.cur.lines)) {
-		if r.old.lines[s] || tagRe.MatchString(s) || !meaningful(s) || use.starts(s) {
+		if r.old.lines[s] || tagRe.MatchString(s) || !meaningful(s) || use.starts(s) || parsed(r.cur.tagLines[s]) {
 			continue
 		}
 		head := s
@@ -154,6 +166,13 @@ func (r *report) checkSource(use *usage) {
 	for _, s := range slices.Sorted(maps.Keys(r.cur.strings)) {
 		if flagRe.MatchString(s) && !r.old.strings[s] {
 			r.Adds = append(r.Adds, "New command-line flag "+code(s))
+		}
+	}
+	for _, run := range slices.Sorted(maps.Keys(r.cur.selfRuns)) {
+		if _, was := r.old.selfRuns[run]; !was {
+			fn, call, _ := strings.Cut(run, ": ")
+			r.Adds = append(r.Adds, fmt.Sprintf("The server logs the answer to a command it runs itself, in %s (%s): %s, which the manager could take for the reply to one of its own",
+				inline(fn), inline(r.cur.selfRuns[run]), inline(call)))
 		}
 	}
 
@@ -195,7 +214,88 @@ var (
 	verbRe = regexp.MustCompile(`\b(?:name|verb) == "([a-z][a-z0-9]*(?:-[a-z0-9]+)*)"`)
 	// A call that logs a line: write_log in main.cpp, log_ in the host.
 	logRe = regexp.MustCompile(`\b(?:write_log|log_)\(`)
+	// A line that opens a tag's bracket and adds to it: "[announcement" + " -> " + name + "] ".
+	openTagRe = regexp.MustCompile(`^\[[a-z][a-z ]*[a-z]$`)
+	// The host logging what a command it ran itself answers: a passed vote's,
+	// and since 2.0.3 a chat command's and a poll-run's. The console's own
+	// replies are main.cpp's write_log(host.command(line)).
+	selfRunRe = regexp.MustCompile(`\blog_\(\s*command\(`)
+	// A function's definition, which starts its line: "void Host::check_vote(".
+	funcRe = regexp.MustCompile(`(?m)^[A-Za-z_][^\n;{}()]*?\b([A-Za-z_]\w*(?:::\w+)*)\(`)
 )
+
+// parsed reports whether the manager's log parser makes something of a line
+// the server writes, rather than plain text.
+func parsed(line string) bool {
+	if line == "" {
+		return false
+	}
+	e := logparse.Entry{Text: line}
+	logparse.Classify(&e)
+	return e.Kind != logparse.KindRaw
+}
+
+// tagLines finds the log calls whose line opens a tag's bracket and adds to
+// it before closing it, which the textual checks can't judge: each start with
+// a line it writes, its next literal filled out with x.
+func tagLines(text string) map[string]string {
+	out := map[string]string{}
+	for _, m := range logRe.FindAllStringIndex(text, -1) {
+		var lits []string
+		for i := m[1]; i < len(text) && text[i] != ';' && len(lits) < 2; i++ {
+			if text[i] == '"' {
+				s, next := quoted(text, i, '"')
+				lits, i = append(lits, s), next-1
+			}
+		}
+		if len(lits) < 2 || !openTagRe.MatchString(lits[0]) {
+			continue
+		}
+		line := lits[0] + lits[1] + "x"
+		if !strings.Contains(lits[1], "]") {
+			line += "] x"
+		}
+		out[lits[0]] = line
+	}
+	return out
+}
+
+// selfRuns finds where the host logs the answer to a command it runs itself,
+// each as its function and the command it runs: "Host::check_vote:
+// command(done.value)".
+func selfRuns(text string) []string {
+	defs := funcRe.FindAllStringSubmatchIndex(text, -1)
+	var out []string
+	for _, m := range selfRunRe.FindAllStringIndex(text, -1) {
+		fn := "?"
+		for _, d := range defs {
+			if d[0] < m[0] {
+				fn = text[d[2]:d[3]]
+			}
+		}
+		// The call, to its closing parenthesis; one in a literal doesn't count.
+		at := strings.LastIndex(text[:m[1]], "command(")
+		depth, i := 0, at
+		for i < len(text) {
+			c := text[i]
+			if c == '"' || c == '\'' {
+				_, i = quoted(text, i, c)
+				continue
+			}
+			if c == '(' {
+				depth++
+			} else if c == ')' {
+				if depth--; depth == 0 {
+					i++
+					break
+				}
+			}
+			i++
+		}
+		out = append(out, fn+": "+strings.Join(strings.Fields(text[at:i]), " "))
+	}
+	return out
+}
 
 // hostCommand is the body of Host::command, which runs the console's
 // commands, in a source file, or "" when the file doesn't define it. Braces
@@ -248,18 +348,47 @@ func hostCommand(src string) string {
 }
 
 // commands reads the help reply ("status | net [player] | ...") into each
-// command's forms by its verb.
+// command's forms by its verb. A form with a | of its own ("poll <question> |
+// <answer>..." in 2.0.3) leaves pieces that start with a <placeholder>, not a
+// verb: they belong to the form before them.
 func commands(help string) map[string][]string {
 	out := map[string][]string{}
 	for line := range strings.SplitSeq(help, "\n") {
+		var forms []string
 		for entry := range strings.SplitSeq(line, " | ") {
-			entry = strings.TrimSpace(entry)
-			if verb, _, _ := strings.Cut(entry, " "); verb != "" && !slices.Contains(out[verb], entry) {
-				out[verb] = append(out[verb], entry)
+			if entry = strings.TrimSpace(entry); strings.HasPrefix(entry, "<") && len(forms) > 0 {
+				forms[len(forms)-1] += " | " + entry
+			} else {
+				forms = append(forms, entry)
+			}
+		}
+		for _, form := range forms {
+			if verb, _, _ := strings.Cut(form, " "); verb != "" && !slices.Contains(out[verb], form) {
+				out[verb] = append(out[verb], form)
 			}
 		}
 	}
 	return out
+}
+
+// narrowed reports whether a command's form has only words its old forms had,
+// so it takes nothing new: 2.0.3's announcements only dropped "card on|off".
+func narrowed(form string, was []string) bool {
+	words := func(f string) []string {
+		return strings.FieldsFunc(f, func(r rune) bool { return strings.ContainsRune(" []<>|", r) })
+	}
+	old := map[string]bool{}
+	for _, f := range was {
+		for _, w := range words(f) {
+			old[w] = true
+		}
+	}
+	for _, w := range words(form) {
+		if !old[w] {
+			return false
+		}
+	}
+	return true
 }
 
 // codes shows each of list as code, joined.
