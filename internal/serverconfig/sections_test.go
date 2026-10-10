@@ -12,7 +12,8 @@ import (
 	"testing"
 )
 
-// A config as ReSkate 1.1.7 and later write it (layout in Server/server_config.cpp).
+// A config as ReSkate 2.0.3 writes it (layout in Server/server_config.cpp), in
+// the sections of 1.1.7 and later.
 const sectionedConfig = `{
   "server": {"name": "Sectioned", "password": "", "welcome_message": "hi", "chat_color": "#8E5CFF", "chat_text_color": "d9c8ff",
     "listed": true, "max_players": 32, "port": 27017, "query_port": 27018, "steam_token": "TOKEN", "auto_update": false, "activity_log": true},
@@ -22,9 +23,9 @@ const sectionedConfig = `{
     "layers": {"grom_tod_1_night": "on"}},
   "players": {"allow_boosts": false, "allow_no_bail": true, "allow_noclip": false, "allow_parties": true, "party_size": 4,
     "afk_kick_minutes": 5, "allow_voice_chat": true, "voice_range": 30, "object_placement": "admins", "object_limit": 10,
-    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false},
+    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false, "word_warnings": 3},
   "anti_cheat": {"speed_hack": "kick", "modified_scoring": "off", "allowed_scoring_mods": ["00000000deadbeef"],
-    "enforce_tuning": true, "bone_scale_limit": 2},
+    "enforce_tuning": true, "bone_scale_limit": 2, "bone_reach_limit": 1.0},
   "network": {"use_steam_relay": true, "send_rate": 48, "crowd_budget": 0, "pack_ms": 10, "threads": 0, "finger_distance": 25,
     "distances": {"full_rate_return": 20, "half_rate_start": 30, "half_rate_return": 40, "low_rate_start": 60}, "steam_debug": false},
   "votes": {"map": {"enabled": true, "percent": 60, "seconds": 0, "cooldown_seconds": 0, "min_players": 1},
@@ -33,7 +34,8 @@ const sectionedConfig = `{
     "seconds": 30, "cooldown_seconds": 120, "starter_votes_yes": true, "polls": "admins", "poll_seconds": 60,
     "custom": [{"name": "restart", "description": "Reload the current map", "command": "map {map}", "choices": [],
       "enabled": true, "percent": 60, "seconds": 0, "cooldown_seconds": 0, "min_players": 1}]},
-  "announcements": {"messages": ["Join our Discord", "Be nice"], "interval_minutes": 10, "card": true}
+  "announcements": {"messages": ["Join our Discord", "Be nice"], "interval_minutes": 10},
+  "commands": [{"name": "discord", "reply": "Join us: discord.gg/x", "command": [], "admin": false}]
 }`
 
 func readSectioned(t *testing.T) (*File, string) {
@@ -279,7 +281,7 @@ func TestAnnouncements(t *testing.T) {
 		{map[string]any{"announcements.messages": []any{"Something else"}}, []string{"announcements clear", "announcements add Something else"}},
 		{map[string]any{"announcements.messages": []any{}}, []string{"announcements clear"}},
 		{map[string]any{"announcements.messages": []any{" Join our Discord ", "", "Be nice"}}, nil}, // the same, as the console keeps them
-		{map[string]any{"announcements.interval_minutes": 0.0, "announcements.card": false}, []string{"announcements interval off", "announcements card off"}},
+		{map[string]any{"announcements.interval_minutes": 0.0}, []string{"announcements interval off"}},
 		{map[string]any{"announcements.interval_minutes": 30.0}, []string{"announcements interval 30"}},
 	} {
 		p, err := Diff(f, tt.want, nil)
@@ -411,6 +413,143 @@ func TestSectionedRemoved(t *testing.T) {
 	}
 	if _, err := Diff(&File{Root: map[string]any{"max_players": json.Number("32")}}, map[string]any{"reserved_slots": 2.0}, nil); err != nil {
 		t.Errorf("an older server: %v", err)
+	}
+}
+
+// The announcements' card is 2.0.2's alone: 2.0.3 writes them without it,
+// and a server before 2.0.2 has no announcements at all.
+func TestCardRemoved(t *testing.T) {
+	f, path := readSectioned(t)
+	if g := f.Gone(); !slices.Equal(g, []string{"announcements.card", "reserved_slots"}) {
+		t.Errorf("2.0.3 lacks %q", g)
+	}
+	if _, err := Diff(f, map[string]any{"announcements.card": false}, nil); err == nil || !strings.Contains(err.Error(), "2.0.3") {
+		t.Errorf("the card planned for 2.0.3: %v", err)
+	}
+	if !Announces(path) {
+		t.Error("2.0.3 announces")
+	}
+	f.Set("announcements.card", true) // as 2.0.2 writes it
+	if g := f.Gone(); slices.Contains(g, "announcements.card") {
+		t.Errorf("2.0.2 lacks %q", g)
+	}
+	if p, err := Diff(f, map[string]any{"announcements.card": false}, nil); err != nil || !slices.Equal(p.Commands, []string{"announcements card off"}) {
+		t.Errorf("the card on 2.0.2 planned %+v, %v", p, err)
+	}
+	older := &File{Root: map[string]any{"name": "Old"}}
+	if slices.Contains(older.Gone(), "announcements.card") || older.announces() {
+		t.Error("a server before 2.0.2 lost a card it never had")
+	}
+	if p := Paths(); p["announcements.card"] != "" {
+		t.Error("Paths() has the card the newest server no longer writes")
+	}
+}
+
+// 2.0.3's bone reach changes live; its word warnings wait for a restart. The
+// server keeps the reach as a float and writes it back as one.
+func TestPlayerSettings203(t *testing.T) {
+	f, _ := readSectioned(t)
+	if v := f.Values(); v["bone_reach_limit"] != 1.0 || v["word_warnings"] != 3.0 {
+		t.Errorf("read %v %v", v["bone_reach_limit"], v["word_warnings"])
+	}
+	p, err := Diff(f, map[string]any{"bone_reach_limit": 0.7, "word_warnings": 0.0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(p.Commands, []string{"bone-reach 0.7"}) || len(p.Restart) != 1 || p.Restart["word_warnings"] != 0.0 {
+		t.Fatalf("planned %+v", p)
+	}
+	f.Set("bone_reach_limit", json.Number("0.699999988079071")) // the server's 0.7f
+	if v := f.Values()["bone_reach_limit"]; v != 0.7 {
+		t.Errorf("0.7f read as %v", v)
+	}
+	f.ApplyOffline(p.Restart)
+	if got, _ := f.at("players.word_warnings"); got != json.Number("0") {
+		t.Errorf("players.word_warnings = %v", got)
+	}
+	if p, err = Diff(f, map[string]any{"bone_reach_limit": 0.0}, nil); err != nil || !slices.Equal(p.Commands, []string{"bone-reach off"}) {
+		t.Errorf("bone_reach_limit 0 planned %+v, %v", p, err)
+	}
+	for _, bad := range []map[string]any{{"bone_reach_limit": 0.4}, {"bone_reach_limit": 20.5}, {"word_warnings": 11.0}, {"word_warnings": 1.5}} {
+		if _, err := Diff(f, bad, nil); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+}
+
+// 2.0.3's chat commands wait for a restart, are the owners', and what the
+// server refuses to start with is refused.
+func TestCustomCommands(t *testing.T) {
+	f, _ := readSectioned(t)
+	discord := CustomCommand{Name: "discord", Reply: "Join us: discord.gg/x", Command: []string{}}
+	if got := f.Values()["commands"]; !equal(got, []CustomCommand{discord}) {
+		t.Fatalf("read %+v", got)
+	}
+	if !OwnerOnly("commands") {
+		t.Error("chat commands run console commands, so they are the owners'")
+	}
+	// Written in by hand, a command can be one string, and needs no admin.
+	rules := map[string]any{"name": " Rules ", "command": "announce-to {player} No griefing!"}
+	p, err := Diff(f, map[string]any{"commands": []any{map[string]any{"name": "discord", "reply": "Join us: discord.gg/x"}, rules}}, nil)
+	if err != nil || len(p.Commands) != 0 || p.Restart["commands"] == nil {
+		t.Fatalf("adding a command planned %+v, %v", p, err)
+	}
+	f.ApplyOffline(p.Restart)
+	got, _ := f.at("commands")
+	b, _ := json.Marshal(got)
+	if want := `[{"admin":false,"command":[],"name":"discord","reply":"Join us: discord.gg/x"},` +
+		`{"admin":false,"command":["announce-to {player} No griefing!"],"name":"rules","reply":""}]`; string(b) != want {
+		t.Errorf("wrote %s\nwant %s", b, want)
+	}
+	if p, err = Diff(f, map[string]any{"commands": []any{map[string]any{"name": "discord", "reply": "Join us: discord.gg/x"}, rules}}, nil); err != nil || len(p.Changed) != 0 {
+		t.Errorf("the same commands planned %+v, %v", p, err)
+	}
+	if runs := CommandRuns(""); len(runs) != 0 {
+		t.Errorf("no config, runs %v", runs)
+	}
+
+	cmd := func(change map[string]any) map[string]any {
+		m := map[string]any{"name": "discord", "reply": "Join us"}
+		maps.Copy(m, change)
+		return m
+	}
+	many := make([]any, 33)
+	for i := range many {
+		many[i] = cmd(map[string]any{"name": fmt.Sprintf("c%d", i)})
+	}
+	nine := make([]any, 9)
+	for i := range nine {
+		nine[i] = "say hi"
+	}
+	for _, bad := range []any{
+		many,
+		[]any{"discord"},
+		[]any{cmd(map[string]any{"name": "help"})}, // the chat's own
+		[]any{cmd(map[string]any{"name": "kick"})}, // admins' /kick
+		[]any{cmd(map[string]any{"name": "42"})},   // a number answers a poll
+		[]any{cmd(map[string]any{"name": "dis cord"})},
+		[]any{cmd(nil), cmd(nil)},
+		[]any{cmd(map[string]any{"reply": ""})}, // neither a reply nor a command
+		[]any{cmd(map[string]any{"reply": strings.Repeat("x", 201)})},
+		[]any{cmd(map[string]any{"command": ""})},
+		[]any{cmd(map[string]any{"command": []any{"say a\nquit"}})},
+		[]any{cmd(map[string]any{"command": []any{strings.Repeat("x", 321)}})},
+		[]any{cmd(map[string]any{"command": nine})},
+		[]any{cmd(map[string]any{"command": 5.0})},
+		[]any{cmd(map[string]any{"admin": "yes"})},
+	} {
+		if _, err := Diff(f, map[string]any{"commands": bad}, nil); err == nil {
+			t.Errorf("%.80v accepted", bad)
+		}
+	}
+}
+
+func TestCommandRuns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ReSkateServer.json")
+	os.WriteFile(path, []byte(`{"commands": [{"name": "rules", "reply": "", "command": ["say a", "say b"], "admin": false},
+		{"name": "discord", "reply": "hi", "command": [], "admin": false}]}`), 0o600)
+	if runs := CommandRuns(path); runs["rules"] != 2 || runs["discord"] != 0 || len(runs) != 2 {
+		t.Errorf("runs %v", runs)
 	}
 }
 

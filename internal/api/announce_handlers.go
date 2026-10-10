@@ -26,6 +26,7 @@ type announcementReq struct {
 	Message    string `json:"message"`
 	Interval   int    `json:"interval"` // seconds
 	Enabled    bool   `json:"enabled"`
+	ChatOnly   bool   `json:"chatOnly"`
 }
 
 // fill validates req into an announcement for the server in the URL.
@@ -46,7 +47,7 @@ func (a *API) fill(w http.ResponseWriter, r *http.Request, req announcementReq, 
 	if !a.mayManage(w, r, out.Instance) {
 		return false
 	}
-	out.Message, out.Interval, out.Enabled = msg, req.Interval, req.Enabled
+	out.Message, out.Interval, out.Enabled, out.ChatOnly = msg, req.Interval, req.Enabled, req.ChatOnly
 	return true
 }
 

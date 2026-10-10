@@ -27,9 +27,13 @@ var GroupInfo = map[string]string{
 		"Everyone else answers on the vote card at the right of their screen, or with /yes or /no. Only one vote or poll runs at a time.\n" +
 		"The pass percentage is of everyone connected, not of those who voted. A vote ends early as soon as it passes or can no longer pass.\n" +
 		"From ReSkate 2.0.2 each kind of vote can have its own length, cooldown and players needed; left at 0, it takes the length and cooldown here.",
-	"Announcements": "The server's own announcements: it posts these lines in chat one at a time, in order, while players are on, and shows each as a card at the top of every player's screen. Needs ReSkate 2.0.2.\n" +
-		"The Announcements tab is the manager's own: each message there has its own timer, and one can go to every server. On ReSkate 2.0.2 those show as a card too when the card is on here.\n" +
-		"In-game admins can edit these lines with /announcements, and post something once with /announce <text>.",
+	"Announcements": "The server's own announcements: it posts these lines one at a time, in order, while players are on, each as a card at the top of every player's screen. Needs ReSkate 2.0.2, which also puts them in chat; from 2.0.3 they're a card only.\n" +
+		"The Announcements tab is the manager's own: each message there has its own timer, and one can go to every server. Those with Card on go out as these do (on 2.0.2, only while the card is on here); with Card off, they go to chat only.\n" +
+		"In-game admins can edit these lines with /announcements, and post something once with /announce <text>, or to one player with /announce-to <player> <text> from ReSkate 2.0.3.",
+	"Chat commands": "Commands of your own that players type in chat, such as /discord or /rules. Each sends a reply back to whoever typed it, runs server commands as the console would, or both:\n" +
+		"• {player} in a command is the SteamID64 of whoever typed it: \"announce-to {player} No griefing!\" shows them a card.\n" +
+		"• {map} is the current map, and {arg} the rest of what they typed.\n" +
+		"They aren't listed in /help, so tell players about them. Mind what {arg} lets players put into a command: a command can do anything the console can, so only owners see or change them. They apply on restart. Needs ReSkate 2.0.3.",
 	"Custom votes": "Votes of your own, each running a server command when it passes, as the console would. Players start one with /vote <name>; /vote list shows them with their descriptions.\n" +
 		"• {map} in the command is the current map: \"map {map}\" reloads it.\n" +
 		"• {arg} is the choice the starter picked: \"noclip {arg}\" with the choices on and off is started with /vote noclip on.\n" +
@@ -88,6 +92,7 @@ var fieldInfo = map[string]string{
 	"object_limit":         "How many objects one player can have placed at a time, 1 to 1024. A player at the limit deletes one of theirs to place another. Admins are never limited.\nFrom ReSkate 2.0.0, a player who places more than twice the limit plus 100 in a minute (a modified game animating objects by respawning them) has all theirs deleted, and nothing they place is shared for a minute. The console says who.",
 	"allow_object_scaling": "Lets players place objects bigger or smaller than their own size. Off, every player's objects are shared at their own size and the size controls in their park editor are turned off. Admins can still resize theirs. Needs ReSkate 2.0.0.",
 	"bone_scale_limit":     "The most a mod may scale one part of a skater, such as a big-head mod, as others see it: 1 to 8 times, or 0 for no limit. The default is 2: the game's own skater height is a bone scale, so at 1 every skater shows at one height. The player with the mod still sees it on their own screen. Needs ReSkate 1.1.6.",
+	"bone_reach_limit":     "How far, in metres, a bone of a skater's body or board may be from the one it hangs from, as others see it: 0.5 to 20, or 0 for no limit. The game never moves them (the longest, a thigh, is 0.44), so the default of 1 changes nothing for an ordinary player and stops a hacked game from stretching its skater across the map. Each player's own game also holds what it's shown to 2. Needs ReSkate 2.0.3.",
 	"sync_effects":         "Lets players see each other's skater effects: sparks and dust where a skater touches the world, and the trails and fire of costumes and skateboards. Off, the server passes none of them on, which saves a little traffic and drawing on a busy server. Effects already showing stay until that player's skater is shown again. Needs ReSkate 2.0.0.",
 	"noclip":               "Lets players fly with noclip and teleport to others with /tp. Admins always can.",
 	"no_bail":              "Lets players turn on No Bail, which stops them wiping out. Admins always can.",
@@ -112,12 +117,16 @@ var fieldInfo = map[string]string{
 	"votes.polls":               "Who may start a poll with /poll: nobody, only in-game admins, or everyone. Everyone can answer one. Needs ReSkate 2.0.2.",
 	"votes.poll_seconds":        "How long a poll stays open, 10 to 600 seconds. Whoever started it, or an admin, can end it sooner with /poll end. Needs ReSkate 2.0.2.",
 
-	"announcements.messages":         "Posted in chat in turn, one each interval while players are on: the first, then the next, and back to the first after the last. Each is one chat line of up to 200 bytes; up to 32 of them. In-game admins can change them with /announcements add, remove and clear. Needs ReSkate 2.0.2.",
+	"announcements.messages":         "Posted in turn, one each interval while players are on: the first, then the next, and back to the first after the last. Each is one chat line of up to 200 bytes; up to 32 of them. In-game admins can change them with /announcements add, remove and clear. Needs ReSkate 2.0.2.",
 	"announcements.interval_minutes": "How long between two of the messages above, 1 to 1440 minutes. The timer waits while nobody is on. 0 turns it off and keeps the messages for later. Needs ReSkate 2.0.2.",
-	"announcements.card":             "Each announcement also shows as a card at the top of every player's screen for a few seconds, longer for longer text. That covers the messages above, /announce, and the Announcements tab's messages. Off, they're only in chat. Needs ReSkate 2.0.2.",
+	"announcements.card":             "Each announcement also shows as a card at the top of every player's screen for a few seconds, longer for longer text. That covers the messages above, /announce, and the Announcements tab's messages that have Card on. Off, they're only in chat. ReSkate 2.0.2 only: 2.0.3 took this setting out and shows every announcement as a card, not in chat.",
+
+	"commands": "Each has the name players type after the /, an optional reply sent back to them, up to 8 server commands it runs, and whether only in-game admins may use it. Up to 32. A name can't be one the server already has, such as /help, /vote or /kick.",
 
 	"global_bans": "Players the ReSkate team has banned from multiplayer are refused when they join, and removed if they're already on. The server reads the list from api.reskate.dev when it starts and every ten minutes after.\n" +
 		"Off lets them in. Bans from the Players page apply either way.",
+	"word_warnings": "The ReSkate team keeps a list of words that aren't allowed in chat at all, read with the global bans whether those are on or not. A message with one is never passed on, whatever this is, and its player is warned.\n" +
+		"After this many warnings, 1 to 10, the next one kicks them; they can join again, and are kicked again at the next. Warnings last until the server restarts. 0 warns and kicks nobody, and the message is still not passed on. Needs ReSkate 2.0.3.",
 	"speed_check": "Catches players whose game runs faster than normal (Cheat Engine's speedhack and the like), judged by the timing of what their game sends.\n" +
 		"• warn: takes them out of throwdowns and coop challenges until their speed is normal again, and tells the admins.\n" +
 		"• kick: removes them from the server.\n" +

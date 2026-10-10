@@ -161,7 +161,8 @@ func writeAtomic(path string, data []byte) error {
 // sections says where a sectioned file keeps each flat key (load_config in
 // Server/server_config.cpp, 1.1.7). A nested key goes by its first part, so
 // "distances.half_rate_start" is in network.distances. Keys not listed, the
-// votes and 2.0.2's announcements, are in the same place in both layouts.
+// votes, 2.0.2's announcements and 2.0.3's commands, are in the same place in
+// both layouts.
 var sections = map[string]string{
 	"name": "server.name", "password": "server.password", "welcome": "server.welcome_message", "listed": "server.listed",
 	"max_players": "server.max_players", "port": "server.port", "query_port": "server.query_port",
@@ -178,19 +179,46 @@ var sections = map[string]string{
 	"voice_range": "players.voice_range", "object_placement": "players.object_placement",
 	"object_limit": "players.object_limit", "announce_throwdowns": "players.announce_throwdowns",
 	"afk_kick_minutes": "players.afk_kick_minutes", "allow_object_scaling": "players.allow_object_scaling", "sync_effects": "players.sync_effects",
+	"word_warnings": "players.word_warnings",
 
 	"speed_check": "anti_cheat.speed_hack", "score_check": "anti_cheat.modified_scoring",
 	"score_allow": "anti_cheat.allowed_scoring_mods", "enforce_tuning": "anti_cheat.enforce_tuning",
-	"bone_scale_limit": "anti_cheat.bone_scale_limit",
+	"bone_scale_limit": "anti_cheat.bone_scale_limit", "bone_reach_limit": "anti_cheat.bone_reach_limit",
 
 	"send_rate": "network.send_rate", "crowd_budget": "network.crowd_budget", "distances": "network.distances",
 	"use_steam_relay": "network.use_steam_relay", "pack_ms": "network.pack_ms", "finger_distance": "network.finger_distance",
 	"steam_debug": "network.steam_debug", "threads": "network.threads",
 }
 
-// Removed are the flat settings a sectioned server no longer has: reserved
-// slots are kept for each listed player instead.
-var Removed = []string{"reserved_slots"}
+// removed are the settings newer servers no longer have, by the release that
+// took each out and how to tell a file it wrote. Reserved slots went with the
+// sections, as slots are kept for each listed player instead. The card went
+// in 2.0.3, which shows every announcement as one; that server writes its
+// announcements without it, and an older one with it or not at all.
+var removed = map[string]struct {
+	since string
+	gone  func(*File) bool
+}{
+	"reserved_slots": {"1.1.7", (*File).Sectioned},
+	"announcements.card": {"2.0.3", func(f *File) bool {
+		_, card := f.Get("announcements.card")
+		return !card && f.announces()
+	}},
+}
+
+// Removed lists the settings the newest servers no longer have.
+var Removed = slices.Sorted(maps.Keys(removed))
+
+// Gone lists the settings the server that wrote the file no longer has.
+func (f *File) Gone() []string {
+	out := []string{}
+	for _, key := range Removed {
+		if removed[key].gone(f) {
+			out = append(out, key)
+		}
+	}
+	return out
+}
 
 // Sectioned reports whether the file is laid out in sections, as servers from
 // ReSkate 1.1.7 on write it.
@@ -343,11 +371,29 @@ func (f *File) Values() map[string]any {
 // running server has written every setting it knows into the file.
 func Announces(path string) bool {
 	f, err := Read(path)
-	if err != nil {
-		return false
-	}
-	_, ok := f.Get("announcements.card")
+	return err == nil && f.announces()
+}
+
+// announces reports whether the file has the announcements of ReSkate 2.0.2
+// on. Their card went in 2.0.3; the timer is in both.
+func (f *File) announces() bool {
+	_, ok := f.Get("announcements.interval_minutes")
 	return ok
+}
+
+// CommandRuns says how many server commands each of the owner's chat commands
+// in the config at path runs, by its name.
+func CommandRuns(path string) map[string]int {
+	out := map[string]int{}
+	f, err := Read(path)
+	if err != nil {
+		return out
+	}
+	list, _ := f.Values()["commands"].([]CustomCommand)
+	for _, c := range list {
+		out[c.Name] = len(c.Command)
+	}
+	return out
 }
 
 // Ban is one of the server's bans. Admins and bans have their own pages.
@@ -525,6 +571,11 @@ func normalize(fd Field, raw any) (any, error) {
 		if fd.Type == TypeInt && n != math.Trunc(n) {
 			return nil, fmt.Errorf("%s must be a whole number", fd.Label)
 		}
+		if fd.Type == TypeNumber {
+			// The server keeps these as floats and writes 0.7 back as
+			// 0.699999988079071, so both are read as the float they make.
+			n, _ = strconv.ParseFloat(strconv.FormatFloat(n, 'g', -1, 32), 64)
+		}
 		if n < fd.Min || (fd.Max != 0 && n > fd.Max) {
 			return nil, fmt.Errorf("%s must be %g to %g", fd.Label, fd.Min, fd.Max)
 		}
@@ -533,6 +584,9 @@ func normalize(fd Field, raw any) (any, error) {
 		}
 		if fd.Key == "bone_scale_limit" && n != 0 && n < 1 {
 			return nil, fmt.Errorf("%s must be 0 (no limit) or 1 to %g", fd.Label, fd.Max)
+		}
+		if fd.Key == "bone_reach_limit" && n != 0 && n < 0.5 {
+			return nil, fmt.Errorf("%s must be 0 (no limit) or 0.5 to %g", fd.Label, fd.Max)
 		}
 		if ownSeconds(fd.Key) && n != 0 && n < minVoteSeconds {
 			return nil, fmt.Errorf("%s must be 0 (the vote length) or %d to %g", fd.Label, minVoteSeconds, fd.Max)
@@ -680,6 +734,8 @@ func normalize(fd Field, raw any) (any, error) {
 		return out, nil
 	case TypeVotes:
 		return customVotes(raw)
+	case TypeCommands:
+		return customCommands(raw)
 	}
 	return nil, errors.New("unknown field type")
 }
@@ -715,7 +771,7 @@ const (
 	maxVoteChoices   = 8
 	maxVoteNameBytes = 16
 	maxVoteDescBytes = 80
-	maxVoteCommand   = 320 // max_admin_text
+	maxAdminText     = 320 // the longest server command a vote or chat command runs
 	defaultVotePct   = 60
 	minVoteSeconds   = 10
 	maxVoteSeconds   = 300
@@ -819,8 +875,8 @@ func customVotes(raw any) ([]CustomVote, error) {
 		if v.Command, err = text("command"); err != nil {
 			return nil, err
 		}
-		if v.Command == "" || len(v.Command) > maxVoteCommand || !utf8.ValidString(v.Command) || strings.ContainsFunc(v.Command, isControl) {
-			return nil, fmt.Errorf("custom vote %q: the command must be one server command of at most %d bytes, %s", v.Name, maxVoteCommand, commandExample)
+		if !validAdminText(v.Command) {
+			return nil, fmt.Errorf("custom vote %q: the command must be one server command of at most %d bytes, %s", v.Name, maxAdminText, commandExample)
 		}
 		if x, ok := m["choices"]; ok && x != nil {
 			list, ok := x.([]any)
@@ -873,6 +929,121 @@ func customVotes(raw any) ([]CustomVote, error) {
 	return out, nil
 }
 
+// validAdminText is valid_admin_text: one server command of at most 320
+// bytes of UTF-8, with no control characters.
+func validAdminText(s string) bool {
+	return s != "" && len(s) <= maxAdminText && utf8.ValidString(s) && !strings.ContainsFunc(s, isControl)
+}
+
+// Limits of 2.0.3's chat commands (Server/server_config.h).
+const (
+	maxCustomCommands = 32
+	maxCommandRuns    = 8
+)
+
+// commandNameFree is custom_command_name_free: not one of the chat's own
+// commands, nor a server command admins type as /<command>, and not a
+// number, which answers a poll.
+func commandNameFree(s string) bool {
+	if slices.Contains([]string{"help", "party", "p", "w", "whisper", "tell", "poll", "vote", "yes", "y", "no", "n", "tp",
+		"activity-log", "admin", "admins", "afk-kick", "announce", "announce-throwdowns", "announce-to", "announcements",
+		"ban", "bans", "bone-scale", "boosts", "boosts-allow", "chat-color", "chat-colour", "clear-objects", "crowd",
+		"distances", "effects", "kick", "layer", "layer-sync", "layers", "listed", "map", "map-pool", "maps", "msg",
+		"msg-admins", "msg-party", "name", "net", "nobail", "nobail-allow", "noclip", "noclip-allow", "object-limit",
+		"object-placement", "object-scaling", "objects", "park", "parties", "party-size", "password", "placement",
+		"players", "rate", "reserved", "rotation", "say", "score-allow", "score-check", "speed-check", "status", "tod",
+		"tpall", "tphere", "tps", "tuning", "tuning-enforce", "unban", "voice", "voice-allow", "voice-range",
+		"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update"}, s) {
+		return false
+	}
+	return strings.Trim(s, "0123456789") != ""
+}
+
+// customCommands reads commands as load_config does (a command is one string
+// or a list of them) and checks them as custom_commands_error does, since the
+// server won't start on one it refuses.
+func customCommands(raw any) ([]CustomCommand, error) {
+	if list, ok := raw.([]CustomCommand); ok {
+		raw = jsonValue(Field{Type: TypeCommands}, list)
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, errors.New("chat commands must be a list")
+	}
+	if len(items) > maxCustomCommands {
+		return nil, fmt.Errorf("at most %d chat commands", maxCustomCommands)
+	}
+	out := []CustomCommand{}
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, errors.New("each chat command must be an object")
+		}
+		c := CustomCommand{Command: []string{}}
+		text := func(key string) (string, error) {
+			s, ok := m[key].(string)
+			if !ok && m[key] != nil {
+				return "", fmt.Errorf("a chat command's %s must be text", key)
+			}
+			return strings.TrimSpace(s), nil
+		}
+		var err error
+		if c.Name, err = text("name"); err != nil {
+			return nil, err
+		}
+		c.Name = strings.ToLower(c.Name)
+		if !validVoteName(c.Name) {
+			return nil, fmt.Errorf("a chat command's name is 1 to %d lowercase letters, digits, - or _ (%q is not)", maxVoteNameBytes, c.Name)
+		}
+		if !commandNameFree(c.Name) {
+			return nil, fmt.Errorf("chat command /%s: that name is one of the server's own commands", c.Name)
+		}
+		if slices.ContainsFunc(out, func(o CustomCommand) bool { return o.Name == c.Name }) {
+			return nil, fmt.Errorf("two chat commands are called /%s", c.Name)
+		}
+		if c.Reply, err = text("reply"); err != nil {
+			return nil, err
+		}
+		if c.Reply != "" && !ValidChatText(c.Reply) {
+			return nil, fmt.Errorf("chat command /%s: the reply must be one chat line of at most 200 bytes", c.Name)
+		}
+		var runs []any
+		switch v := m["command"].(type) {
+		case nil:
+		case string:
+			runs = []any{v} // one, which can't be empty
+		case []any:
+			for _, x := range v {
+				if s, _ := x.(string); strings.TrimSpace(s) != "" { // load_config skips the rest
+					runs = append(runs, s)
+				}
+			}
+		default:
+			return nil, fmt.Errorf("chat command /%s: the command must be text or a list of them", c.Name)
+		}
+		for _, x := range runs {
+			if s := strings.TrimSpace(x.(string)); validAdminText(s) {
+				c.Command = append(c.Command, s)
+			} else {
+				return nil, fmt.Errorf("chat command /%s: each command must be one server command of at most %d bytes, e.g. \"announce-to {player} Hi\"", c.Name, maxAdminText)
+			}
+		}
+		if len(c.Command) > maxCommandRuns {
+			return nil, fmt.Errorf("chat command /%s: at most %d server commands", c.Name, maxCommandRuns)
+		}
+		if c.Reply == "" && len(c.Command) == 0 {
+			return nil, fmt.Errorf("chat command /%s: it needs a reply, a command, or both", c.Name)
+		}
+		if x, ok := m["admin"]; ok {
+			if c.Admin, ok = x.(bool); !ok {
+				return nil, fmt.Errorf("chat command /%s: admin must be true or false", c.Name)
+			}
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
 // jsonValue is how a normalised value is stored in the file.
 func jsonValue(fd Field, v any) any {
 	switch fd.Type {
@@ -898,6 +1069,17 @@ func jsonValue(fd Field, v any) any {
 			list = append(list, map[string]any{"name": cv.Name, "description": cv.Description, "command": cv.Command,
 				"choices": choices, "enabled": cv.Enabled, "percent": n(cv.Percent), "seconds": n(cv.Seconds),
 				"cooldown_seconds": n(cv.Cooldown), "min_players": n(cv.MinPlayers)})
+		}
+		return list
+	case TypeCommands:
+		// As the server writes them: the command always a list.
+		list := []any{}
+		for _, cc := range v.([]CustomCommand) {
+			runs := []any{}
+			for _, r := range cc.Command {
+				runs = append(runs, r)
+			}
+			list = append(list, map[string]any{"name": cc.Name, "reply": cc.Reply, "command": runs, "admin": cc.Admin})
 		}
 		return list
 	}
@@ -926,15 +1108,15 @@ type Plan struct {
 // start. A changed map pool must name only those, since the server refuses
 // to start with any other, and planning one live may need the whole list.
 func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
-	curVals := cur.Values()
+	curVals, gone := cur.Values(), cur.Gone()
 	p := &Plan{Restart: map[string]any{}, Changed: map[string]any{}}
 	for key, raw := range want {
 		fd, ok := FieldByKey(key)
 		if !ok {
 			return nil, fmt.Errorf("unknown setting %q", key)
 		}
-		if cur.Sectioned() && slices.Contains(Removed, key) {
-			return nil, fmt.Errorf("the server no longer has %s: ReSkate 1.1.7 took it out", strings.ToLower(fd.Label))
+		if slices.Contains(gone, key) {
+			return nil, fmt.Errorf("the server no longer has %s: ReSkate %s took it out", strings.ToLower(fd.Label), removed[key].since)
 		}
 		v, err := normalize(fd, raw)
 		if err != nil {
@@ -1068,6 +1250,12 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 			} else {
 				p.Commands = append(p.Commands, "bone-scale "+num(v))
 			}
+		case "bone_reach_limit":
+			if v.(float64) == 0 {
+				p.Commands = append(p.Commands, "bone-reach off")
+			} else {
+				p.Commands = append(p.Commands, "bone-reach "+num(v))
+			}
 		case "sync_effects":
 			p.Commands = append(p.Commands, "effects "+onOff(v))
 		case "noclip":
@@ -1160,7 +1348,7 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 // them (the in-game menu's, and chat-colour). Typed into the console, they
 // need the same permission as the settings pages.
 var SettingVerbs = []string{"name", "map", "map-pool", "rotation", "password", "welcome", "listed", "reserved", "rate", "crowd", "tps", "distances",
-	"voice", "voice-range", "placement", "objects", "object-limit", "object-scaling", "bone-scale", "effects", "noclip", "nobail", "boosts", "tuning",
+	"voice", "voice-range", "placement", "objects", "object-limit", "object-scaling", "bone-scale", "bone-reach", "effects", "noclip", "nobail", "boosts", "tuning",
 	"parties", "party-size", "afk-kick", "announce-throwdowns", "activity-log", "park", "votes", "speed-check", "score-check", "score-allow",
 	"layer-sync", "tod", "layers", "layer", "chat-color", "chat-colour", "announcements",
 	"voice-allow", "object-placement", "world-layer-sync", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce"}
@@ -1317,6 +1505,13 @@ func equal(a, b any) bool {
 		return aok && bok && slices.EqualFunc(av, bv, func(x, y CustomVote) bool {
 			return sameVote(x, y) && x.Enabled == y.Enabled && x.Percent == y.Percent && x.Seconds == y.Seconds &&
 				x.Cooldown == y.Cooldown && x.MinPlayers == y.MinPlayers
+		})
+	}
+	ac, aok := a.([]CustomCommand)
+	bc, bok := b.([]CustomCommand)
+	if aok || bok {
+		return aok && bok && slices.EqualFunc(ac, bc, func(x, y CustomCommand) bool {
+			return x.Name == y.Name && x.Reply == y.Reply && slices.Equal(x.Command, y.Command) && x.Admin == y.Admin
 		})
 	}
 	return a == b

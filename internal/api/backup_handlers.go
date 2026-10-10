@@ -428,7 +428,7 @@ func (a *API) importServer(ctx context.Context, rd *backup.Reader, perms auth.Pe
 		if msg == "" || len(msg) > 200 || !announce.ValidInterval(an.Interval) {
 			continue
 		}
-		next := store.Announcement{Instance: id, Message: msg, Interval: an.Interval, Enabled: an.Enabled}
+		next := store.Announcement{Instance: id, Message: msg, Interval: an.Interval, Enabled: an.Enabled, ChatOnly: an.ChatOnly}
 		if err := a.Store.SaveAnnouncement(ctx, &next); err != nil {
 			a.Log.Warn("announcement of an imported server", "err", err)
 		}

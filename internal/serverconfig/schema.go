@@ -15,16 +15,17 @@ type FieldType string
 
 // The kinds of setting, as the settings page draws them.
 const (
-	TypeString FieldType = "string"
-	TypeInt    FieldType = "int"
-	TypeNumber FieldType = "number"
-	TypeBool   FieldType = "bool"
-	TypeEnum   FieldType = "enum"
-	TypeList   FieldType = "list"  // list of strings
-	TypeMaps   FieldType = "maps"  // ordered list of map names
-	TypeColor  FieldType = "color" // "#RRGGBB"
-	TypeLines  FieldType = "lines" // ordered list of chat lines, kept as written
-	TypeVotes  FieldType = "votes" // the owner's custom votes ([]CustomVote)
+	TypeString   FieldType = "string"
+	TypeInt      FieldType = "int"
+	TypeNumber   FieldType = "number"
+	TypeBool     FieldType = "bool"
+	TypeEnum     FieldType = "enum"
+	TypeList     FieldType = "list"     // list of strings
+	TypeMaps     FieldType = "maps"     // ordered list of map names
+	TypeColor    FieldType = "color"    // "#RRGGBB"
+	TypeLines    FieldType = "lines"    // ordered list of chat lines, kept as written
+	TypeVotes    FieldType = "votes"    // the owner's custom votes ([]CustomVote)
+	TypeCommands FieldType = "commands" // the owner's chat commands ([]CustomCommand)
 )
 
 // Field describes one setting of ReSkateServer.json for the settings page
@@ -104,6 +105,17 @@ type CustomVote struct {
 	MinPlayers  int      `json:"min_players"`
 }
 
+// CustomCommand is one of the owner's own chat commands (commands, ReSkate
+// 2.0.3). "/<name> [text]" sends Reply back to whoever typed it and runs
+// Command's lines as the console: {player} in them is their SteamID64, {map}
+// the current map, {arg} the rest of what they typed.
+type CustomCommand struct {
+	Name    string   `json:"name"`
+	Reply   string   `json:"reply"`
+	Command []string `json:"command"`
+	Admin   bool     `json:"admin"` // only admins may use it
+}
+
 // Fields is the editable schema, in display order.
 var Fields = []Field{
 	{Key: "name", Label: "Server name", Group: "General", Type: TypeString, MaxLen: 64, Help: "Shown in the server browser. Letters, numbers, spaces and - _ / [ ] ( ) only.", Default: defaultServerName},
@@ -143,6 +155,7 @@ var Fields = []Field{
 	{Key: "object_limit", Label: "Objects each player may place", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1024, Help: "0 is no limit. Admins are not limited.", Default: 100.0},
 	{Key: "allow_object_scaling", Label: "Players may resize objects", Group: "Gameplay", Type: TypeBool, Help: "Off shares every placed object at its own size. Admins always can.", Default: true},
 	{Key: "bone_scale_limit", Label: "Resized body parts, at most (times)", Group: "Gameplay", Type: TypeNumber, Min: 0, Max: 8, Help: "How far a mod may resize part of a skater for the others. 0 is no limit.", Default: 2.0},
+	{Key: "bone_reach_limit", Label: "Stretched body parts, at most (m)", Group: "Gameplay", Type: TypeNumber, Min: 0, Max: 20, Help: "How far a bone may be from the one it hangs from, for the others. 0 is no limit; otherwise 0.5 to 20.", Default: 1.0},
 	{Key: "sync_effects", Label: "Players see each other's skater effects", Group: "Gameplay", Type: TypeBool, Help: "Sparks, dust, and the trails and fire of costumes and boards.", Default: true},
 	{Key: "noclip", Label: "Players may noclip and teleport", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "no_bail", Label: "Players may use No Bail", Group: "Gameplay", Type: TypeBool, Default: true},
@@ -161,6 +174,8 @@ var Fields = []Field{
 	{Key: "announcements.messages", Label: "Announcement messages", Group: "Announcements", Type: TypeLines, Max: 32, MaxLen: 200, Help: "One per line, up to 32. The server posts them in turn.", Default: []string{}},
 	{Key: "announcements.interval_minutes", Label: "Minutes between announcements", Group: "Announcements", Type: TypeInt, Min: 0, Max: 1440, Help: "While players are on. 0 is off.", Default: 0.0},
 	{Key: "announcements.card", Label: "Show announcements as a card", Group: "Announcements", Type: TypeBool, Help: "At the top of every player's screen, as well as in chat.", Default: true},
+
+	{Key: "commands", Label: "Chat commands", Group: "Chat commands", Type: TypeCommands, Owner: true, Restart: true, Help: "Your own /commands, such as /discord or /rules. They apply on restart.", Default: []CustomCommand{}},
 
 	{Key: "votes.seconds", Label: "Vote length (s)", Group: "Votes", Type: TypeInt, Min: 10, Max: 300, Help: "For votes that don't set their own.", Default: 30.0},
 	{Key: "votes.cooldown_seconds", Label: "Cooldown between a player's votes (s)", Group: "Votes", Type: TypeInt, Min: 0, Max: 3600, Help: "For votes that don't set their own.", Default: 60.0},
@@ -185,6 +200,7 @@ var Fields = []Field{
 	{Key: "votes.poll_seconds", Label: "Poll length (s)", Group: "Polls", Type: TypeInt, Min: 10, Max: 600, Default: 60.0},
 
 	{Key: "global_bans", Label: "Turn away players the ReSkate team banned", Group: "Anti-cheat", Type: TypeBool, Restart: true, Help: "The server's own bans apply either way.", Default: true},
+	{Key: "word_warnings", Label: "Warnings before a kick for words not allowed", Group: "Anti-cheat", Type: TypeInt, Min: 0, Max: 10, Restart: true, Help: "A message with one is never passed on. 0 warns and kicks nobody.", Default: 3.0},
 	{Key: "speed_check", Label: "Speedhack check", Group: "Anti-cheat", Type: TypeEnum, Options: checkModes, Default: "warn"},
 	{Key: "score_check", Label: "Scoring mod check", Group: "Anti-cheat", Type: TypeEnum, Options: checkModes, Default: "warn"},
 	{Key: "score_allow", Label: "Allowed scoring fingerprints", Group: "Anti-cheat", Type: TypeList, Help: "16 hex digits each, as the console prints them.", Default: []string{}},

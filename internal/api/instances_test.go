@@ -261,10 +261,39 @@ func TestConsolePermissions(t *testing.T) {
 		"tuning-enforce off":  403,
 		"announce hi":         403, // chat, as say (2.0.2)
 		"announcements clear": 403,
+		"announce-to bob hi":  403, // 2.0.3
+		"poll Next? | a | b":  403,
+		"vote kick bob":       403,
+		"vote map grom":       403,
+		"bone-reach 2":        403,
 		"frobnicate":          403, // unknown: maybe a newer server's setting
 		"status":              400, // allowed, but the server is not running
 		"players":             400,
 		"tpall":               400,
+	} {
+		body, _ := json.Marshal(map[string]string{"line": line})
+		if code, b := p.do("POST", "/api/instances/a/command", string(body)); code != want {
+			t.Errorf("%q: %d %s, want %d", line, code, b, want)
+		}
+	}
+
+	// A kick vote is a kick; poll-run runs a command of its own, so it is
+	// the owners' even beside every other permission.
+	p.post("/api/auth/logout", `{}`)
+	p.post("/api/auth/login", `{"username":"owner","password":"`+testPassword+`"}`)
+	code, b = p.do("POST", "/api/roles", `{"name":"Everything","permissions":["console.view","console.exec","players.kick","players.chat","settings.edit"]}`)
+	if code != http.StatusOK {
+		t.Fatalf("create role: %d %s", code, b)
+	}
+	json.Unmarshal(b, &role)
+	p.createUser("lead", grant(role.ID))
+	p.post("/api/auth/logout", `{}`)
+	p.post("/api/auth/login", `{"username":"lead","password":"`+testPassword+`"}`)
+	for line, want := range map[string]int{
+		"vote kick bob":                         400,
+		"announce-to bob hi":                    400,
+		"poll-run tod {answer} | Time? | a | b": 403,
+		"POLL-RUN tod {answer} | Time? | a | b": 403,
 	} {
 		body, _ := json.Marshal(map[string]string{"line": line})
 		if code, b := p.do("POST", "/api/instances/a/command", string(body)); code != want {

@@ -3,6 +3,8 @@ package instance
 import (
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -80,6 +82,58 @@ func TestStrayLinesAreNotReplies(t *testing.T) {
 	in.onIdle()
 	if _, ok := got(w); !ok {
 		t.Error("a refusal did not end the wait")
+	}
+}
+
+// 2.0.3 runs commands of its own: the owner's chat commands, and the
+// console's poll-run for its winning answer. Their results aren't replies.
+func TestServerRunCommandsAreNotReplies(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "ReSkateServer.json"), []byte(`{"commands": [
+		{"name": "rules", "reply": "", "command": ["announce-to {player} No griefing!", "say Rules: be nice"], "admin": false}]}`), 0o600)
+	in := New(Def{ID: "t", Dir: dir}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	in.asm = logparse.NewAssembler()
+
+	feed := func(lines ...string) {
+		for _, l := range lines {
+			in.onLine(l)
+		}
+		in.onIdle()
+	}
+	w := queue(in, nil)
+	feed(
+		"[10:00:00] [command] Bob: /rules",
+		"[10:00:00] [command] Bob /rules",
+		"[10:00:00] [announcement -> Bob] No griefing!",
+		"[10:00:00] Announced to Bob.",
+		"[10:00:00] [chat] Server: Rules: be nice",
+		"[10:00:01] Poll started; the winning answer runs: tod {answer}",
+	)
+	if text, _ := got(w); text != "Poll started; the winning answer runs: tod {answer}" {
+		t.Fatalf("poll-run's reply %q", text)
+	}
+	w = queue(in, nil)
+	feed(
+		`[10:00:31] [poll] Poll "Time of day?" ended: morning 1, night 2 (night wins).`,
+		"[10:00:31] Time of day: night.",
+		"[10:00:32] Server renamed to Test.",
+	)
+	if text, _ := got(w); text != "Server renamed to Test." {
+		t.Errorf("reply %q", text)
+	}
+	tags := map[string]string{}
+	for _, e := range in.Console() {
+		tags[e.Text] = e.Tag
+	}
+	if tags["Announced to Bob."] != "command" || tags["[chat] Server: Rules: be nice"] != "command" || tags["Time of day: night."] != "poll" {
+		t.Errorf("results tagged %q", tags)
+	}
+
+	// A poll that wasn't a poll-run runs nothing after it.
+	w = queue(in, nil)
+	feed(`[10:01:31] [poll] Poll "Next map?" ended: Grom 2 (Grom wins).`, "[10:01:32] Server renamed to Test.")
+	if text, _ := got(w); text != "Server renamed to Test." {
+		t.Errorf("reply after a poll %q", text)
 	}
 }
 

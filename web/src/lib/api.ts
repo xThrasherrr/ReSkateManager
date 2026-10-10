@@ -261,6 +261,7 @@ export interface Announcement {
 	message: string;
 	interval: number; // seconds
 	enabled: boolean;
+	chatOnly?: boolean; // without ReSkate 2.0.2's card
 }
 
 export interface Grant {
@@ -325,7 +326,7 @@ export interface Field {
 	label: string;
 	group: string;
 	// maps: map names, in order; color: "#RRGGBB"; lines: chat lines, in order; votes: CustomVote[] (#lib/votes.js)
-	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps' | 'color' | 'lines' | 'votes';
+	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps' | 'color' | 'lines' | 'votes' | 'commands';
 	options?: string[];
 	min?: number;
 	max?: number;

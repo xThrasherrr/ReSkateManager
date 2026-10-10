@@ -96,6 +96,12 @@ func TestLifecycleRepliesAndRoster(t *testing.T) {
 	if _, err := in.Command(context.Background(), "quit", "test"); err == nil {
 		t.Error("quit passed through")
 	}
+	// Nor as what a poll-run runs for its winning answer (2.0.3).
+	for _, line := range []string{"poll-run update | Update now? | yes | no", "Poll-Run {answer} | What now? | play | QUIT"} {
+		if _, err := in.Command(context.Background(), line, "test"); err == nil {
+			t.Errorf("%q passed through", line)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := in.Stop(ctx); err != nil {

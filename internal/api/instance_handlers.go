@@ -454,8 +454,12 @@ func (a *API) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := from(r)
-	if p := consolePerm(strings.Fields(line)[0]); p != "" && !c.perms.Can(p, in.ID()) {
+	if p := consolePerm(line); p != "" && !c.perms.Can(p, in.ID()) {
 		writeErr(w, 403, "that command needs a permission you don't have: "+permLabel(p))
+		return
+	}
+	if verb, _, _ := strings.Cut(line, " "); slices.Contains(ownerCommands, strings.ToLower(verb)) && !c.perms.Owner {
+		writeErr(w, 403, "only owners can run "+strings.ToLower(verb)+": it runs a server command of its own")
 		return
 	}
 	reply, err := in.Command(r.Context(), line, c.user.Username)
@@ -476,21 +480,32 @@ var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "
 // Server/server_host.cpp), aliases included.
 var consolePerms = func() map[string]string {
 	m := map[string]string{"admin": auth.IngameAdmins, "admins": auth.IngameAdmins, "ban": auth.PlayersBan, "unban": auth.PlayersBan,
-		"kick": auth.PlayersKick, "say": auth.PlayersChat, "announce": auth.PlayersChat, "msg": auth.PlayersChat, "msg-party": auth.PlayersChat,
-		"msg-admins": auth.PlayersChat}
+		"kick": auth.PlayersKick, "say": auth.PlayersChat, "announce": auth.PlayersChat, "announce-to": auth.PlayersChat,
+		"msg": auth.PlayersChat, "msg-party": auth.PlayersChat, "msg-admins": auth.PlayersChat, "poll": auth.PlayersChat,
+		// The console starts votes too (2.0.3): they change what their
+		// settings would, and a kick vote (consolePerm) kicks.
+		"vote": auth.SettingsEdit}
 	for _, verb := range serverconfig.SettingVerbs {
 		m[verb] = auth.SettingsEdit
 	}
 	return m
 }()
 
-// consolePerm is the permission a console command needs besides console.exec,
+// ownerCommands are the console commands only owners may run: poll-run
+// (2.0.3) runs any command for the winning answer, as custom votes do.
+var ownerCommands = []string{"poll-run"}
+
+// consolePerm is the permission a console line needs besides console.exec,
 // "" for none. A command the manager doesn't know needs settings.edit, so one
 // a newer server adds can't change settings for someone who may not.
-func consolePerm(verb string) string {
-	verb = strings.ToLower(verb)
+func consolePerm(line string) string {
+	fields := strings.Fields(strings.ToLower(line))
+	verb := fields[0]
 	if slices.Contains(consoleOnly, verb) {
 		return ""
+	}
+	if verb == "vote" && len(fields) > 1 && fields[1] == "kick" {
+		return auth.PlayersKick
 	}
 	if p, ok := consolePerms[verb]; ok {
 		return p
@@ -702,8 +717,9 @@ func (a *API) say(w http.ResponseWriter, r *http.Request) {
 	in := inst(r)
 	var req struct {
 		Message string `json:"message"`
-		// An announcement, posted as the scheduled ones are: a card on every
-		// player's screen too, where the server has them.
+		// An announcement, posted as the scheduled ones with Card on are: a
+		// card on every player's screen where the server has them, too (2.0.2)
+		// or instead of chat (2.0.3).
 		Announce bool `json:"announce"`
 	}
 	if !readJSON(w, r, &req) {
@@ -714,13 +730,7 @@ func (a *API) say(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "messages are 1-200 bytes")
 		return
 	}
-	var reply string
-	var err error
-	if req.Announce {
-		reply, err = announce.Post(r.Context(), in, msg, from(r).user.Username)
-	} else {
-		reply, err = in.Command(r.Context(), "say "+msg, from(r).user.Username)
-	}
+	reply, err := announce.Post(r.Context(), in, msg, from(r).user.Username, req.Announce)
 	a.auditOutcome(r, in.ID(), "player.say", msg, err)
 	a.answerReply(w, r, reply, err)
 }
@@ -734,11 +744,8 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "the server has no config yet; start it once")
 		return
 	}
-	// Settings a server laid out in sections no longer has.
-	gone := []string{}
-	if f.Sectioned() {
-		gone = serverconfig.Removed
-	}
+	// Settings the server that wrote the file no longer has.
+	gone := f.Gone()
 	// A running server has written every setting it knows into the file (it
 	// adds missing ones at start), so a key still missing is newer than it.
 	unknown := []string{}

@@ -23,10 +23,10 @@ const (
 	KindJoin      Kind = "join"      // <name> joined (<id>[, admin]), N/M players[, loaded in X s]
 	KindLeave     Kind = "leave"     // <name> left (<reason>) [<how it ended>]
 	KindChat      Kind = "chat"      // [chat] <name>: <text>
-	KindCommand   Kind = "command"   // [command] <name>: /<text>   (a player's chat command)
+	KindCommand   Kind = "command"   // [command] <name>: /<text>   (a player's chat command; [command] <name> /<text> as one of the owner's runs)
 	KindAdmin     Kind = "admin"     // [admin] <name>: <text>      (an in-game admin's server command)
 	KindPartyChat Kind = "partychat" // [party chat] <name>: <text>
-	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk]
+	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [words], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk]
 	KindReady     Kind = "ready"     // <name> is up on <map> for N players.
 	KindSteam     Kind = "steam"     // Steam ID <id>[ (<how it got it>)], public IP <ip>.
 	KindJoinCode  Kind = "joincode"  // Join code: <code>[ (password required)]
@@ -49,14 +49,17 @@ type Entry struct {
 }
 
 var (
-	stampRe    = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] ?(.*)$`)
-	tagRe      = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk)\] (.*)$`)
-	joinRe     = regexp.MustCompile(`^(.+) joined \((\d+)(, admin)?\), (\d+)/(\d+) players(?:, loaded in (\d+) s)?$`)
-	leaveRe    = regexp.MustCompile(`^(.+) left \((.*)\)(?: \[.*\])?$`) // then how the connection ended, since 1.1.5
-	readyRe    = regexp.MustCompile(`^(.+) is up on (.+) for (\d+) players\.$`)
-	steamRe    = regexp.MustCompile(`^Steam ID (\d+)(?: \([^)]*\))?, public IP (.*)\.$`) // the (...) since 1.1.4
-	joinCodeRe = regexp.MustCompile(`^Join code: (\S+)( \(password required\))?$`)
-	loadedRe   = regexp.MustCompile(`^Everyone has loaded (.+)\.$`)
+	stampRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] ?(.*)$`)
+	// Since 2.0.3 a tag can name the one player a line was for: "[announcement -> Bob] ...".
+	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk)(?: -> (.+?))?\] (.*)$`)
+	// One of the owner's chat commands running (2.0.3): "<name> /<command>[ <text>]".
+	customCommandRe = regexp.MustCompile(`^(.+?) /([a-z0-9_-]{1,16})(?: .*)?$`)
+	joinRe          = regexp.MustCompile(`^(.+) joined \((\d+)(, admin)?\), (\d+)/(\d+) players(?:, loaded in (\d+) s)?$`)
+	leaveRe         = regexp.MustCompile(`^(.+) left \((.*)\)(?: \[.*\])?$`) // then how the connection ended, since 1.1.5
+	readyRe         = regexp.MustCompile(`^(.+) is up on (.+) for (\d+) players\.$`)
+	steamRe         = regexp.MustCompile(`^Steam ID (\d+)(?: \([^)]*\))?, public IP (.*)\.$`) // the (...) since 1.1.4
+	joinCodeRe      = regexp.MustCompile(`^Join code: (\S+)( \(password required\))?$`)
+	loadedRe        = regexp.MustCompile(`^Everyone has loaded (.+)\.$`)
 	// The server names the player by SteamID64 in its reply, whatever the
 	// command was given; a player's name can't pass for one.
 	adminRe = regexp.MustCompile(`^(7656119\d{10}) is (an admin|no longer an admin)\.$`)
@@ -79,7 +82,8 @@ var startupPrefixes = []string{"Signing in to Steam", "Wrote a default ", "Added
 	"Could not open the server", "The server name \"", "The server name is allowed again", "Server update ",
 	"Update check failed: ", "Restarting to install server update ", "Nobody is on; restarting", "Installing server update ",
 	"Could not start the updated server", "This is a local build", "Server error: ", "Could not save the config: ",
-	"Global bans", "The global ban list could not be read", "No steam_token: ", "The server browser now shows only servers with a steam_token",
+	"Global bans", "The global ban list could not be read", "The ReSkate team's lists (global bans and chat words) could not be read",
+	"Word lists: ", "No steam_token: ", "The server browser now shows only servers with a steam_token",
 	"The server browser shows servers without a steam_token again", "Connection: ", "Steam networking debug output is on",
 	"steam_debug: ", "Threads: "}
 
@@ -89,7 +93,7 @@ func Classify(e *Entry) {
 	e.Kind = KindRaw
 	if m := tagRe.FindStringSubmatch(first); m != nil {
 		e.Tag = m[1]
-		body := m[2]
+		body := m[3]
 		switch e.Tag {
 		case "chat", "command", "admin", "party chat":
 			e.Kind = map[string]Kind{"chat": KindChat, "command": KindCommand, "admin": KindAdmin, "party chat": KindPartyChat}[e.Tag]
@@ -97,8 +101,17 @@ func Classify(e *Entry) {
 				e.Name = name
 				e.Fields = map[string]string{"message": msg}
 			}
+			// Typed, a command is logged "<name>: /<text>"; one of the owner's
+			// is logged again as it runs, without the colon.
+			if e.Tag == "command" && !strings.HasPrefix(e.Fields["message"], "/") {
+				e.Name, e.Fields = "", nil
+				if c := customCommandRe.FindStringSubmatch(body); c != nil {
+					e.Name = c[1]
+					e.Fields = map[string]string{"message": body[len(c[1])+1:], "custom": c[2]}
+				}
+			}
 		default:
-			e.Kind = KindTagged
+			e.Kind, e.Name = KindTagged, m[2]
 		}
 		return
 	}

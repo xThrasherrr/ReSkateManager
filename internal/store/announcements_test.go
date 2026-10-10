@@ -33,11 +33,14 @@ func TestAnnouncements(t *testing.T) {
 		t.Fatalf("Announcements() has %d", len(got))
 	}
 
-	a.Enabled, a.Interval = false, 120
+	if got[0].ChatOnly {
+		t.Fatal("new announcement is chat only")
+	}
+	a.Enabled, a.Interval, a.ChatOnly = false, 120, true
 	if err := s.SaveAnnouncement(ctx, &a); err != nil {
 		t.Fatal(err)
 	}
-	if x, err := s.Announcement(ctx, a.ID); err != nil || x.Enabled || x.Interval != 120 {
+	if x, err := s.Announcement(ctx, a.ID); err != nil || x.Enabled || x.Interval != 120 || !x.ChatOnly {
 		t.Fatalf("after update = %+v, %v", x, err)
 	}
 

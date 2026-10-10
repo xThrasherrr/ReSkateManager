@@ -213,7 +213,7 @@ func TestExportAndImport(t *testing.T) {
 	dir := in.Def().Dir
 	writeFile(t, filepath.Join(dir, "ReSkateServer.json"), `{"name":"A","port":27015,"query_port":27016}`)
 	writeOwnMod(t, filepath.Join(dir, "Mods", "bbcity"), "1.0.0")
-	ann := store.Announcement{Instance: "a", Message: "Join our Discord", Interval: 600, Enabled: true}
+	ann := store.Announcement{Instance: "a", Message: "Join our Discord", Interval: 600, Enabled: true, ChatOnly: true}
 	if err := a.Store.SaveAnnouncement(context.Background(), &ann); err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestExportAndImport(t *testing.T) {
 	if !strings.Contains(strings.Join(res.Notes, " "), "ports") {
 		t.Errorf("notes: %v", res.Notes)
 	}
-	if list, _ := a.Store.Announcements(context.Background(), "a-2"); len(list) != 1 || list[0].Instance != "a-2" {
+	if list, _ := a.Store.Announcements(context.Background(), "a-2"); len(list) != 1 || list[0].Instance != "a-2" || !list[0].ChatOnly {
 		t.Errorf("announcements: %+v", list)
 	}
 	if defs, _ := a.Store.Instances(context.Background()); len(defs) != 2 {

@@ -337,12 +337,13 @@ type Announcement struct {
 	Message  string `json:"message"`
 	Interval int    `json:"interval"` // seconds
 	Enabled  bool   `json:"enabled"`
+	ChatOnly bool   `json:"chatOnly,omitempty"` // without ReSkate 2.0.2's card
 }
 
 // Announcements lists one server's announcements and those for every server,
 // or all of them when instanceID is "".
 func (s *Store) Announcements(ctx context.Context, instanceID string) ([]Announcement, error) {
-	q := "SELECT id, instance_id, message, interval, enabled FROM announcements"
+	q := "SELECT id, instance_id, message, interval, enabled, chat_only FROM announcements"
 	var args []any
 	if instanceID != "" {
 		q += " WHERE instance_id IN (?, ?)"
@@ -356,7 +357,7 @@ func (s *Store) Announcements(ctx context.Context, instanceID string) ([]Announc
 	out := []Announcement{}
 	for rows.Next() {
 		var a Announcement
-		if err := rows.Scan(&a.ID, &a.Instance, &a.Message, &a.Interval, &a.Enabled); err != nil {
+		if err := rows.Scan(&a.ID, &a.Instance, &a.Message, &a.Interval, &a.Enabled, &a.ChatOnly); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -367,8 +368,8 @@ func (s *Store) Announcements(ctx context.Context, instanceID string) ([]Announc
 // Announcement finds an announcement by ID.
 func (s *Store) Announcement(ctx context.Context, id int64) (Announcement, error) {
 	var a Announcement
-	err := s.DB.QueryRowContext(ctx, "SELECT id, instance_id, message, interval, enabled FROM announcements WHERE id = ?", id).
-		Scan(&a.ID, &a.Instance, &a.Message, &a.Interval, &a.Enabled)
+	err := s.DB.QueryRowContext(ctx, "SELECT id, instance_id, message, interval, enabled, chat_only FROM announcements WHERE id = ?", id).
+		Scan(&a.ID, &a.Instance, &a.Message, &a.Interval, &a.Enabled, &a.ChatOnly)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrNotFound
 	}
@@ -378,16 +379,16 @@ func (s *Store) Announcement(ctx context.Context, id int64) (Announcement, error
 // SaveAnnouncement inserts a (when a.ID is 0, setting it) or updates it.
 func (s *Store) SaveAnnouncement(ctx context.Context, a *Announcement) error {
 	if a.ID == 0 {
-		res, err := s.DB.ExecContext(ctx, "INSERT INTO announcements(instance_id, message, interval, enabled, created_at) VALUES(?, ?, ?, ?, ?)",
-			a.Instance, a.Message, a.Interval, a.Enabled, time.Now().Unix())
+		res, err := s.DB.ExecContext(ctx, "INSERT INTO announcements(instance_id, message, interval, enabled, chat_only, created_at) VALUES(?, ?, ?, ?, ?, ?)",
+			a.Instance, a.Message, a.Interval, a.Enabled, a.ChatOnly, time.Now().Unix())
 		if err != nil {
 			return err
 		}
 		a.ID, err = res.LastInsertId()
 		return err
 	}
-	res, err := s.DB.ExecContext(ctx, "UPDATE announcements SET instance_id = ?, message = ?, interval = ?, enabled = ? WHERE id = ?",
-		a.Instance, a.Message, a.Interval, a.Enabled, a.ID)
+	res, err := s.DB.ExecContext(ctx, "UPDATE announcements SET instance_id = ?, message = ?, interval = ?, enabled = ?, chat_only = ? WHERE id = ?",
+		a.Instance, a.Message, a.Interval, a.Enabled, a.ChatOnly, a.ID)
 	if err != nil {
 		return err
 	}

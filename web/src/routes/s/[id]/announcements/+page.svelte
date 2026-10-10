@@ -48,6 +48,7 @@
 	let every = $state(30);
 	let unit = $state(60);
 	let everywhere = $state(false);
+	let card = $state(true);
 	let saving = $state(false);
 
 	const encoder = new TextEncoder();
@@ -61,6 +62,7 @@
 		every = 30;
 		unit = 60;
 		everywhere = false;
+		card = true;
 	}
 	function edit(a: Announcement) {
 		editing = a;
@@ -68,19 +70,21 @@
 		unit = a.interval % 3600 === 0 ? 3600 : 60;
 		every = a.interval / unit;
 		everywhere = a.instance === '*';
+		card = !a.chatOnly;
 	}
 
-	const body = (a: { message: string; interval: number; enabled: boolean; instance: string }) => ({
+	const body = (a: { message: string; interval: number; enabled: boolean; instance: string; chatOnly?: boolean }) => ({
 		message: a.message,
 		interval: a.interval,
 		enabled: a.enabled,
-		allServers: a.instance === '*'
+		allServers: a.instance === '*',
+		chatOnly: !!a.chatOnly
 	});
 
 	async function save(e: SubmitEvent) {
 		e.preventDefault();
 		saving = true;
-		const next = { message: message.trim(), interval, enabled: editing?.enabled ?? true, instance: everywhere ? '*' : ctx.id };
+		const next = { message: message.trim(), interval, enabled: editing?.enabled ?? true, instance: everywhere ? '*' : ctx.id, chatOnly: !card };
 		const ok = editing
 			? await attempt(() => api.patch(`/instances/${ctx.id}/announcements/${editing!.id}`, body(next)), 'Saved')
 			: await attempt(() => api.post(`/instances/${ctx.id}/announcements`, body(next)), 'Added');
@@ -105,7 +109,7 @@
 		}
 	}
 	function sendNow(a: Announcement) {
-		return busy.run(`send:${a.id}`, () => attempt(() => api.post(`/instances/${ctx.id}/say`, { message: a.message, announce: true }), 'Sent'));
+		return busy.run(`send:${a.id}`, () => attempt(() => api.post(`/instances/${ctx.id}/say`, { message: a.message, announce: !a.chatOnly }), 'Sent'));
 	}
 
 	function cadence(secs: number) {
@@ -119,7 +123,9 @@
 	const running = $derived(ctx.live.state?.state === 'running');
 
 	guardUnsaved(() =>
-		editing ? message !== editing.message || interval !== editing.interval || everywhere !== (editing.instance === '*') : message.trim() !== ''
+		editing
+			? message !== editing.message || interval !== editing.interval || everywhere !== (editing.instance === '*') || card === !!editing.chatOnly
+			: message.trim() !== ''
 	);
 </script>
 
@@ -132,7 +138,7 @@
 				{editing ? 'Edit announcement' : 'New announcement'}
 				<InfoTip
 					label="About announcements"
-					text={`Sent to chat as "Server" while players are on. From ReSkate 2.0.2 they also show as a card on every player's screen, unless the card is off under Settings > Announcements, beside the server's own list. When the server empties, the countdowns start over, so nobody who joins gets every message at once. Announcements on one server go out at least a minute apart.`}
+					text={`Sent as "Server" while players are on. With Card on, from ReSkate 2.0.2 they show as a card on every player's screen: in chat too on 2.0.2, unless the card is off under Settings > Announcements, beside the server's own list; only as a card from 2.0.3. With Card off, or on an older server, they go to chat. When the server empties, the countdowns start over, so nobody who joins gets every message at once. Announcements on one server go out at least a minute apart.`}
 				/>
 			</h2>
 			<p class="mt-0.5 text-xs text-faint">Point players at your Discord, rules or other servers.</p>
@@ -154,6 +160,15 @@
 					<option value={true}>every server</option>
 				</select>
 				{#if !allServers}<InfoTip label="Why not every server" text="Announcements for every server need this permission on all servers." />{/if}
+				<label class="ml-2 flex cursor-pointer items-center gap-2">
+					<input type="checkbox" class="peer sr-only" bind:checked={card} />
+					<span class="switch"></span>
+					<span class="text-muted">Card</span>
+				</label>
+				<InfoTip
+					label="About the card"
+					text="On, it shows as a card on every player's screen, on ReSkate 2.0.2 and later: in chat too on 2.0.2, unless the card is off under Settings > Announcements; only as a card from 2.0.3. Off, it goes to chat only."
+				/>
 				<div class="ml-auto flex gap-2">
 					{#if editing}<button type="button" class="btn" onclick={reset}>Cancel</button>{/if}
 					<button class="btn btn-primary" disabled={!valid || saving}>
@@ -179,6 +194,7 @@
 							<div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
 								<span>{cadence(a.interval)}</span>
 								{#if a.instance === '*'}<span class="sticker sticker-info">every server</span>{/if}
+								{#if a.chatOnly}<span class="sticker sticker-pink">chat only</span>{/if}
 								{#if !a.enabled}<span class="text-faint">paused</span>{/if}
 							</div>
 						</div>

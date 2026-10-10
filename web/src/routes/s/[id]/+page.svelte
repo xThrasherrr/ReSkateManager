@@ -50,8 +50,9 @@
 	const commands = [
 		'status', 'net', 'players', 'say', 'msg', 'msg-party', 'msg-admins', 'kick', 'ban', 'unban', 'bans', 'map', 'maps', 'name',
 		'password', 'welcome', 'chat-color', 'listed',
-		'voice', 'voice-range', 'distances', 'crowd', 'rate', 'placement', 'objects', 'object-scaling', 'effects', 'clear-objects', 'noclip',
-		'nobail', 'boosts', 'tuning', 'tpall', 'tphere', 'votes', 'vote-cancel', 'park', 'layer-sync', 'layer', 'layers', 'tod', 'activity-log',
+		'voice', 'voice-range', 'distances', 'crowd', 'rate', 'bone-scale', 'bone-reach', 'placement', 'objects', 'object-scaling', 'effects',
+		'clear-objects', 'noclip', 'nobail', 'boosts', 'tuning', 'tpall', 'tphere', 'votes', 'vote-cancel', 'vote', 'poll', 'poll-run',
+		'announce', 'announce-to', 'announcements', 'map-pool', 'rotation', 'park', 'layer-sync', 'layer', 'layers', 'tod', 'activity-log',
 		'announce-throwdowns', 'parties', 'party-size', 'afk-kick', 'speed-check', 'score-check', 'score-allow', 'reserved', 'admin', 'admins', 'help'
 	];
 

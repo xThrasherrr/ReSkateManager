@@ -71,7 +71,7 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 			continue
 		}
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		if _, err := Post(cctx, in, a.Message, "announcements"); err != nil && ctx.Err() == nil {
+		if _, err := Post(cctx, in, a.Message, "announcements", !a.ChatOnly); err != nil && ctx.Err() == nil {
 			s.Log.Warn("send announcement", "instance", in.ID(), "id", a.ID, "err", err)
 		}
 		cancel()
@@ -79,12 +79,13 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 	s.clock = next
 }
 
-// Post sends an announcement to a running server, as `by`: with announce on
-// a server from ReSkate 2.0.2 on, which also shows it as a card on every
-// player's screen (unless the server's announcements.card is off), else with
-// say.
-func Post(ctx context.Context, in *instance.Instance, msg, by string) (string, error) {
-	if serverconfig.Announces(in.Def().ConfigPath()) {
+// Post sends an announcement to a running server, as `by`. With card, on a
+// server from ReSkate 2.0.2 on, it goes with announce, which shows it as a
+// card on every player's screen: as well as in chat on 2.0.2 (unless the
+// server's announcements.card is off), instead of it from 2.0.3. Otherwise it
+// goes with say, to chat only.
+func Post(ctx context.Context, in *instance.Instance, msg, by string, card bool) (string, error) {
+	if card && serverconfig.Announces(in.Def().ConfigPath()) {
 		reply, err := in.Command(ctx, "announce "+msg, by)
 		// A server taken back to an older release can leave the file saying
 		// otherwise.

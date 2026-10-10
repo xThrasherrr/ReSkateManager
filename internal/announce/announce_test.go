@@ -107,7 +107,7 @@ func TestValidInterval(t *testing.T) {
 }
 
 // An announcement goes out with announce, a card too, on a server that has
-// it, and with say on one that doesn't.
+// it, and with say on one that doesn't or when it's chat only.
 func TestPost(t *testing.T) {
 	ctx := context.Background()
 	def := instance.Def{ID: "srv", Name: "Srv", Dir: t.TempDir()}
@@ -129,15 +129,18 @@ func TestPost(t *testing.T) {
 		}
 	}
 
-	if reply, err := Post(ctx, in, "hi", "test"); err != nil || reply != "[chat] Server: hi" {
+	if reply, err := Post(ctx, in, "hi", "test", true); err != nil || reply != "[chat] Server: hi" {
 		t.Errorf("before 2.0.2: %q, %v", reply, err)
 	}
 	// 2.0.2 writes its announcements, and logs the card's line before the reply.
 	if err := os.WriteFile(def.ConfigPath(), []byte(`{"announcements": {"messages": [], "interval_minutes": 0, "card": true}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if reply, err := Post(ctx, in, "hello", "test"); err != nil || reply != "Announced." {
+	if reply, err := Post(ctx, in, "hello", "test", true); err != nil || reply != "Announced." {
 		t.Errorf("2.0.2: %q, %v", reply, err)
+	}
+	if reply, err := Post(ctx, in, "chat only", "test", false); err != nil || reply != "[chat] Server: chat only" {
+		t.Errorf("2.0.2, chat only: %q, %v", reply, err)
 	}
 	found := false
 	for _, e := range in.Console() {
@@ -146,11 +149,18 @@ func TestPost(t *testing.T) {
 	if !found {
 		t.Error("no [announcement] line in the console")
 	}
-	// Taken back to an older release, under the file 2.0.2 wrote.
+	// 2.0.3 writes them without the card, and shows every one as a card.
+	if err := os.WriteFile(def.ConfigPath(), []byte(`{"announcements": {"messages": [], "interval_minutes": 0}, "commands": []}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if reply, err := Post(ctx, in, "hello", "test", true); err != nil || reply != "Announced." {
+		t.Errorf("2.0.3: %q, %v", reply, err)
+	}
+	// Taken back to an older release, under the file a newer one wrote.
 	if err := os.WriteFile(filepath.Join(def.Dir, "before-2.0.2"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if reply, err := Post(ctx, in, "again", "test"); err != nil || reply != "[chat] Server: again" {
+	if reply, err := Post(ctx, in, "again", "test", true); err != nil || reply != "[chat] Server: again" {
 		t.Errorf("older again: %q, %v", reply, err)
 	}
 }

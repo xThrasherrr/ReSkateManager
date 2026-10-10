@@ -60,6 +60,14 @@ func TestClassify(t *testing.T) {
 		{`[poll] Poll "Next map?" ended: Grom 2, Stadium 1 (Grom wins).`, KindTagged, "", "", nil},
 		{"[network] The server is behind: 120 poses and effects that arrived late were not passed on. Players see each other at a lower rate until it catches up; if this keeps coming, the server has more players than its CPU can carry.", KindTagged, "", "", nil},
 		{`Threads: 4 share the sending of each pass ("threads"; this machine has 8 processors).`, KindStartup, "", "", nil},
+		// 2.0.3: announcements to one player, the chat word lists, and the owner's chat commands.
+		{"[announcement -> Bob] No griefing!", KindTagged, "Bob", "", nil},
+		{"[words] Bob said a word that is not allowed (warning 1 of 3); the message was not passed on.", KindTagged, "", "", nil},
+		{`Word lists: 120 filtered and 40 not allowed at all, from the ReSkate team's lists.`, KindStartup, "", "", nil},
+		{"The ReSkate team's lists (global bans and chat words) could not be read (timed out). Trying again every minute; until then the ones already read hold.", KindStartup, "", "", nil},
+		{"The global ban list could not be read (timed out). Trying again every minute; until then the bans already read hold.", KindStartup, "", "", nil}, // before 2.0.3
+		{"[command] Bob /rules", KindCommand, "Bob", "", map[string]string{"message": "/rules", "custom": "rules"}},
+		{"[command] Some Guy /tp-me grom: now", KindCommand, "Some Guy", "", map[string]string{"message": "/tp-me grom: now", "custom": "tp-me"}},
 		{"No steam_token: the server browser can be set to show only servers that have one, and then this server is not in it.", KindStartup, "", "", nil},
 		{"Join code: ABCD-EFGH (password required)", KindJoinCode, "", "", map[string]string{"code": "ABCD-EFGH", "password": "1"}},
 		{"Everyone has loaded Isle of Grom.", KindLoaded, "", "", map[string]string{"map": "Isle of Grom"}},

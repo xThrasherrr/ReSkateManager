@@ -147,7 +147,10 @@ type Instance struct {
 	exited    chan struct{} // closed once watch has handled the current process's exit
 	maps      []string      // the server's map list, asked once per run
 	waiters   []*waiter
-	voteDone  bool            // the next line is the command a passed vote ran, not a reply
+	ranBy     string          // "vote" or "poll": the next line is a command a passed vote or poll-run ran, not a reply
+	pollRun   bool            // the open poll is the console's poll-run, whose winning answer runs a command
+	runs      map[string]int  // how many commands each of the owner's chat commands runs; nil until one does
+	results   int             // results still to come of the commands a chat command runs, not replies either
 	lastNet   time.Time       // when the last network summary was passed on
 	clog      *logfile.Writer // console.log, while a process runs
 	// cmdSem serialises commands so replies arrive in the order they were
@@ -591,12 +594,23 @@ func (in *Instance) onIdle() {
 
 func (in *Instance) handleLocked(e logparse.Entry) {
 	in.lastLine, _, _ = strings.Cut(e.Text, "\n")
-	if in.voteDone {
-		// A passed vote logs its command's result straight after.
-		in.voteDone = false
+	if in.ranBy != "" {
+		// A passed vote, or a poll-run's winner, logs its command's result
+		// straight after.
 		if !e.IsEvent() {
-			e.Kind, e.Tag = logparse.KindTagged, "vote"
+			e.Kind, e.Tag = logparse.KindTagged, in.ranBy
 		}
+		in.ranBy = ""
+	} else if in.results > 0 && !e.IsEvent() {
+		// Each command one of the owner's chat commands runs logs its result,
+		// with any lines of the command's own before it.
+		in.results--
+		e.Kind, e.Tag = logparse.KindTagged, "command"
+	}
+	// Whoever started it: the panel, or a chat command or custom vote that
+	// runs a poll-run.
+	if strings.HasPrefix(e.Text, "Poll started; the winning answer runs: ") {
+		in.pollRun = true
 	}
 	hidden := false
 	if !e.IsEvent() {
@@ -614,11 +628,30 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 	}
 	switch e.Kind {
 	case logparse.KindTagged:
-		in.voteDone = e.Tag == "vote" && votePassedRe.MatchString(e.Text)
-		if e.Tag == "network" {
+		switch {
+		case e.Tag == "vote" && votePassedRe.MatchString(e.Text):
+			in.ranBy = "vote"
+		case e.Tag == "vote" && strings.Contains(e.Text, " was cancelled: "):
+			in.pollRun = false
+		case e.Tag == "poll" && pollEndRe.MatchString(e.Text):
+			// Only a clear winner runs anything: not a tie, nor nobody answering.
+			if in.pollRun && strings.HasSuffix(e.Text, " wins).") {
+				in.ranBy = "poll"
+			}
+			in.pollRun = false
+		case e.Tag == "network":
 			in.networkLocked(e.Text)
 		}
+	case logparse.KindCommand:
+		if name := e.Fields["custom"]; name != "" {
+			// The server reads its chat commands only when it starts.
+			if in.runs == nil {
+				in.runs = serverconfig.CommandRuns(in.def.ConfigPath())
+			}
+			in.results = in.runs[name]
+		}
 	case logparse.KindReady:
+		in.runs, in.results, in.pollRun = nil, 0, false
 		in.state = Running
 		in.readyAt = time.Now()
 		in.info.ServerName = e.Name
@@ -739,19 +772,42 @@ func (in *Instance) Command(ctx context.Context, line, by string) (string, error
 	if line == "" {
 		return "", errors.New("empty command")
 	}
-	switch strings.ToLower(strings.Fields(line)[0]) {
-	case "quit", "exit", "stop":
-		return "", errors.New("use the Stop button to stop the server")
-	case "update":
-		return "", errors.New("updates are installed by the manager")
+	if err := lifecycle(line); err != nil {
+		return "", err
+	}
+	// "poll-run <command> | <question> | <answer>...", 2.0.3: the winning
+	// answer goes in for {answer}, and the command runs as the console's.
+	if verb, rest, _ := strings.Cut(line, " "); strings.EqualFold(verb, "poll-run") {
+		parts := strings.Split(rest, "|")
+		for _, answer := range parts[min(2, len(parts)):] {
+			if err := lifecycle(strings.ReplaceAll(parts[0], "{answer}", strings.TrimSpace(answer))); err != nil {
+				return "", fmt.Errorf("a poll-run can't end the server's run: %w", err)
+			}
+		}
 	}
 	return in.send(ctx, line, by, false, nil)
+}
+
+// lifecycle refuses a command that would stop or update the server.
+func lifecycle(line string) error {
+	verb, _, _ := strings.Cut(strings.TrimSpace(line), " ")
+	switch strings.ToLower(verb) {
+	case "quit", "exit", "stop":
+		return errors.New("use the Stop button to stop the server")
+	case "update":
+		return errors.New("updates are installed by the manager")
+	}
+	return nil
 }
 
 // votePassedRe is a vote that passed. What it ran logs its result straight
 // after: a map or time of day vote's command, or since 2.0.2 a custom vote's.
 // A kick vote's leave line comes there instead, which is an event anyway.
 var votePassedRe = regexp.MustCompile(`^\[vote\] The vote to .+ passed \(\d+ yes, \d+ no, \d+ needed\)\.$`)
+
+// pollEndRe is a poll ending, which since 2.0.3 runs a poll-run's command
+// for the winning answer straight after.
+var pollEndRe = regexp.MustCompile(`^\[poll\] Poll ".*" ended: `)
 
 // replyShape accepts a reply whose first line matches re, or a refusal.
 func replyShape(re *regexp.Regexp) func(string) bool {
