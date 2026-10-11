@@ -20,13 +20,13 @@ const (
 	KindRaw       Kind = "raw"       // anything not recognised; command replies land here
 	KindInput     Kind = "input"     // a command the manager sent (never printed by the server)
 	KindManager   Kind = "manager"   // a line the manager itself adds to the console
-	KindJoin      Kind = "join"      // <name> joined (<id>[, admin]), N/M players[, loaded in X s]
+	KindJoin      Kind = "join"      // <name> joined (<id>[, <role>]), N/M players[, loaded in X s]
 	KindLeave     Kind = "leave"     // <name> left (<reason>) [<how it ended>]
 	KindChat      Kind = "chat"      // [chat] <name>: <text>
 	KindCommand   Kind = "command"   // [command] <name>: /<text>   (a player's chat command; [command] <name> /<text> as one of the owner's runs)
 	KindAdmin     Kind = "admin"     // [admin] <name>: <text>      (an in-game admin's server command)
 	KindPartyChat Kind = "partychat" // [party chat] <name>: <text>
-	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [words], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk]
+	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [words], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk], [parks], [teleport]
 	KindReady     Kind = "ready"     // <name> is up on <map> for N players.
 	KindSteam     Kind = "steam"     // Steam ID <id>[ (<how it got it>)], public IP <ip>.
 	KindJoinCode  Kind = "joincode"  // Join code: <code>[ (password required)]
@@ -49,29 +49,70 @@ type Entry struct {
 }
 
 var (
-	stampRe = regexp.MustCompile(`^\[(\d{2}:\d{2}:\d{2})\] ?(.*)$`)
+	// A line's stamp is "[HH:MM:SS] ", but ReSkate 2.0.6's Windows server
+	// writes the time as Windows shows it, which follows the user's settings:
+	// "[1:28:15 PM] ", "[13.28.15] "...
+	stampRe = regexp.MustCompile(`^\[([^\[\]]{0,24}?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?[^\[\]]{0,24}?)\] ?(.*)$`)
+	clockRe = regexp.MustCompile(`(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?`)
+	pmRe    = regexp.MustCompile(`(?i)\bp\.? ?m\b`)
+	amRe    = regexp.MustCompile(`(?i)\ba\.? ?m\b`)
 	// Since 2.0.3 a tag can name the one player a line was for: "[announcement -> Bob] ...".
-	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk)(?: -> (.+?))?\] (.*)$`)
+	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk|parks|teleport)(?: -> (.+?))?\] (.*)$`)
 	// One of the owner's chat commands running (2.0.3): "<name> /<command>[ <text>]".
 	customCommandRe = regexp.MustCompile(`^(.+?) /([a-z0-9_-]{1,16})(?: .*)?$`)
-	joinRe          = regexp.MustCompile(`^(.+) joined \((\d+)(, admin)?\), (\d+)/(\d+) players(?:, loaded in (\d+) s)?$`)
-	leaveRe         = regexp.MustCompile(`^(.+) left \((.*)\)(?: \[.*\])?$`) // then how the connection ended, since 1.1.5
-	readyRe         = regexp.MustCompile(`^(.+) is up on (.+) for (\d+) players\.$`)
-	steamRe         = regexp.MustCompile(`^Steam ID (\d+)(?: \([^)]*\))?, public IP (.*)\.$`) // the (...) since 1.1.4
-	joinCodeRe      = regexp.MustCompile(`^Join code: (\S+)( \(password required\))?$`)
-	loadedRe        = regexp.MustCompile(`^Everyone has loaded (.+)\.$`)
+	// ", admin" before 2.0.6; then the player's role, which is everyone's
+	// default one ("player") when they were given none.
+	joinRe     = regexp.MustCompile(`^(.+) joined \((\d+)(?:, ([a-z0-9_-]{1,24}))?\), (\d+)/(\d+) players(?:, loaded in (\d+) s)?$`)
+	leaveRe    = regexp.MustCompile(`^(.+) left \((.*)\)(?: \[.*\])?$`) // then how the connection ended, since 1.1.5
+	readyRe    = regexp.MustCompile(`^(.+) is up on (.+) for (\d+) players\.$`)
+	steamRe    = regexp.MustCompile(`^Steam ID (\d+)(?: \([^)]*\))?, public IP (.*)\.$`) // the (...) since 1.1.4
+	joinCodeRe = regexp.MustCompile(`^Join code: (\S+)( \(password required\))?$`)
+	loadedRe   = regexp.MustCompile(`^Everyone has loaded (.+)\.$`)
 	// The server names the player by SteamID64 in its reply, whatever the
 	// command was given; a player's name can't pass for one.
 	adminRe = regexp.MustCompile(`^(7656119\d{10}) is (an admin|no longer an admin)\.$`)
+	// 2.0.6's role command names the player as they're called on the server,
+	// or by SteamID64 when they're not on: "<who> is now <role>.", or with
+	// it taken away "<who> is <default role> again." or "<who> no longer has
+	// a role."
+	roleRe     = regexp.MustCompile(`^(.+) is now ([a-z0-9_-]{1,24})\.$`)
+	roleBackRe = regexp.MustCompile(`^(.+) is ([a-z0-9_-]{1,24}) again\.$`)
+	roleGoneRe = regexp.MustCompile(`^(.+) no longer has a role\.$`)
+	// A player in the reply to players: "<name>  (<role>)" from 2.0.6.
+	rosterRoleRe = regexp.MustCompile(`^(.*)  \(([a-z0-9_-]{1,24})\)$`)
 )
 
-// SplitStamp separates "[HH:MM:SS] text". ok is false for a continuation line.
+// SplitStamp separates "[HH:MM:SS] text", the stamp as it was written. ok is
+// false for a continuation line.
 func SplitStamp(line string) (stamp, text string, ok bool) {
 	m := stampRe.FindStringSubmatch(line)
 	if m == nil {
 		return "", line, false
 	}
 	return m[1], m[2], true
+}
+
+// Clock reads the time of day in a stamp, written as HH:MM:SS or the way
+// Windows shows the time (3:04:05 PM). An AM or PM in another language isn't
+// known, so such an afternoon reads as the morning.
+func Clock(stamp string) (h, m, s int, ok bool) {
+	c := clockRe.FindStringSubmatch(stamp)
+	if c == nil {
+		return 0, 0, 0, false
+	}
+	h, _ = strconv.Atoi(c[1])
+	m, _ = strconv.Atoi(c[2])
+	s, _ = strconv.Atoi(c[3]) // 0 when the format has no seconds
+	switch {
+	case pmRe.MatchString(stamp) && h < 12:
+		h += 12
+	case amRe.MatchString(stamp) && h == 12:
+		h = 0
+	}
+	if h > 23 || m > 59 || s > 59 {
+		return 0, 0, 0, false
+	}
+	return h, m, s, true
 }
 
 // Lines Server/main.cpp prints by itself, at startup or between commands
@@ -85,7 +126,11 @@ var startupPrefixes = []string{"Signing in to Steam", "Wrote a default ", "Added
 	"Global bans", "The global ban list could not be read", "The ReSkate team's lists (global bans and chat words) could not be read",
 	"Word lists: ", "No steam_token: ", "The server browser now shows only servers with a steam_token",
 	"The server browser shows servers without a steam_token again", "Connection: ", "Steam networking debug output is on",
-	"steam_debug: ", "Threads: "}
+	"steam_debug: ", "Threads: ", ChatWords, "The role "}
+
+// ChatWords starts what words answers, which 2.0.6 prints at startup too,
+// straight after it's up.
+const ChatWords = "Chat words: "
 
 // Classify fills Kind, Tag, Name, ID and Fields from e.Text.
 func Classify(e *Entry) {
@@ -119,6 +164,9 @@ func Classify(e *Entry) {
 		e.Kind, e.Name, e.ID = KindJoin, m[1], m[2]
 		e.Fields = map[string]string{"players": m[4], "max": m[5]}
 		if m[3] != "" {
+			e.Fields["role"] = m[3]
+		}
+		if m[3] == "admin" {
 			e.Fields["admin"] = "1"
 		}
 		if m[6] != "" {
@@ -159,7 +207,8 @@ func Classify(e *Entry) {
 			return
 		}
 	}
-	if strings.HasSuffix(first, " admin(s). Type help for commands.") {
+	// "N admin(s). Type help...", and from 2.0.6 "N admin(s), M player(s) with a role. Type help..."
+	if strings.Contains(first, " admin(s)") && strings.HasSuffix(first, ". Type help for commands.") {
 		e.Kind = KindStartup
 		return
 	}
@@ -183,15 +232,32 @@ func (e *Entry) IsEvent() bool {
 	return true
 }
 
-// ParseAdminChange reads the server's reply to `admin add|remove`: who it
-// names (a SteamID64, or the player name it was given) and whether they are
-// an admin now.
-func ParseAdminChange(text string) (who string, admin, ok bool) {
-	m := adminRe.FindStringSubmatch(text)
-	if m == nil {
-		return "", false, false
+// ParseRoleChange reads the server's reply to the command it answers: to
+// `admin add|remove`, who it names (a SteamID64) and whether they're an admin
+// now, as role "admin" or none; to 2.0.6's `role`, who (a SteamID64, or a
+// player's name when they're on) and the role they have now, "" for none.
+// Only those commands count: their replies would read the same as others'.
+func ParseRoleChange(command, reply string) (who, role string, ok bool) {
+	switch verb, _, _ := strings.Cut(strings.ToLower(command), " "); verb {
+	case "admin":
+		if m := adminRe.FindStringSubmatch(reply); m != nil {
+			if m[2] == "an admin" {
+				return m[1], "admin", true
+			}
+			return m[1], "", true
+		}
+	case "role":
+		if m := roleRe.FindStringSubmatch(reply); m != nil {
+			return m[1], m[2], true
+		}
+		if m := roleBackRe.FindStringSubmatch(reply); m != nil {
+			return m[1], m[2], true
+		}
+		if m := roleGoneRe.FindStringSubmatch(reply); m != nil {
+			return m[1], "", true
+		}
 	}
-	return m[1], m[2] == "an admin", true
+	return "", "", false
 }
 
 // IsCommandError reports whether a reply is the server refusing a command
@@ -204,6 +270,7 @@ func IsCommandError(text string) bool {
 type RosterLine struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
+	Role  string `json:"role,omitempty"` // "admin" for an admin before 2.0.6
 	Admin bool   `json:"admin"`
 }
 
@@ -213,6 +280,9 @@ var playersHeadRe = regexp.MustCompile(`^(\d+) players$`)
 //
 //	N players
 //	  <SteamID64>  <name>[  (admin)]
+//
+// From 2.0.6 each player's role is in the brackets, the default role
+// ("player") for those given none.
 func ParsePlayers(text string) ([]RosterLine, bool) {
 	lines := strings.Split(text, "\n")
 	m := playersHeadRe.FindStringSubmatch(lines[0])
@@ -228,8 +298,8 @@ func ParsePlayers(text string) ([]RosterLine, bool) {
 			continue
 		}
 		r := RosterLine{ID: id, Name: rest}
-		if n, found := strings.CutSuffix(rest, "  (admin)"); found {
-			r.Name, r.Admin = n, true
+		if m := rosterRoleRe.FindStringSubmatch(rest); m != nil {
+			r.Name, r.Role, r.Admin = m[1], m[2], m[2] == "admin"
 		}
 		out = append(out, r)
 	}

@@ -33,6 +33,9 @@ type File struct {
 	bans     []Ban // data/bans.json, when the server keeps them there
 	bansFile bool  // the bans belong in data/bans.json
 	bansSet  bool  // SetBans changed them, so Write writes data/bans.json
+
+	roles    map[string]any // data/roles.json, on a server with roles (roles.go)
+	rolesSet bool           // they changed, so Write writes data/roles.json
 }
 
 // maxConfig caps how much of a ReSkateServer.json is read. The server's own
@@ -44,7 +47,7 @@ const maxConfig = 16 << 20
 const BansFile = "data/bans.json"
 
 // Read reads a ReSkateServer.json, which must hold one JSON object, and the
-// bans in data/bans.json beside it.
+// bans in data/bans.json and roles in data/roles.json beside it.
 func Read(path string) (*File, error) {
 	data, err := readCapped(path, maxConfig)
 	if err != nil {
@@ -63,6 +66,9 @@ func Read(path string) (*File, error) {
 		return nil, errors.New("ReSkateServer.json is not valid JSON: something follows its settings")
 	}
 	f := &File{Root: root}
+	if f.roles, err = readRoles(path); err != nil {
+		return nil, err
+	}
 	data, err = readCapped(filepath.Join(filepath.Dir(path), BansFile), maxConfig)
 	if errors.Is(err, fs.ErrNotExist) {
 		return f, nil
@@ -113,7 +119,8 @@ func (f *File) Bytes() ([]byte, error) {
 // server a config it refuses to start with. It holds the server's password
 // and Steam token, so it's for the manager's user, who runs the server too.
 // Changed bans that belong in data/bans.json go there first, as the server
-// writes them, so a config that held them loses them only once they're safe.
+// writes them, so a config that held them loses them only once they're safe;
+// and so do changed roles, for the admins a config listed.
 func (f *File) Write(path string) error {
 	data, err := f.Bytes()
 	if err != nil {
@@ -133,6 +140,11 @@ func (f *File) Write(path string) error {
 			return err
 		}
 		if err := writeAtomic(bansPath, append(bans, '\n')); err != nil {
+			return err
+		}
+	}
+	if f.rolesSet {
+		if err := f.writeRoles(path); err != nil {
 			return err
 		}
 	}
@@ -167,23 +179,26 @@ var sections = map[string]string{
 	"name": "server.name", "password": "server.password", "welcome": "server.welcome_message", "listed": "server.listed",
 	"max_players": "server.max_players", "port": "server.port", "query_port": "server.query_port",
 	"steam_token": "server.steam_token", "auto_update": "server.auto_update", "activity_log": "server.activity_log",
+	// Whether the Windows server's window (2.0.6) starts it at once. The
+	// manager runs it without one, so it's left as it is.
+	"autostart":  "server.autostart",
 	"chat_color": "server.chat_color", "chat_text_color": "server.chat_text_color",
 
 	"admins": "access.admins", "reserved": "access.reserved_players_slots", "global_bans": "access.use_global_bans",
 
 	"map": "maps.map", "map_pool": "maps.pool", "map_rotation_minutes": "maps.rotation_minutes", "parks": "maps.parks",
-	"world_layer_sync": "maps.world_layer_sync", "layers": "maps.layers",
+	"world_layer_sync": "maps.world_layer_sync", "layers": "maps.layers", "park_mods": "maps.park_mods", "park_limits": "maps.park_limits",
 
 	"boosts": "players.allow_boosts", "no_bail": "players.allow_no_bail", "noclip": "players.allow_noclip",
 	"parties": "players.allow_parties", "party_size": "players.party_size", "voice_chat": "players.allow_voice_chat",
 	"voice_range": "players.voice_range", "object_placement": "players.object_placement",
 	"object_limit": "players.object_limit", "announce_throwdowns": "players.announce_throwdowns",
 	"afk_kick_minutes": "players.afk_kick_minutes", "allow_object_scaling": "players.allow_object_scaling", "sync_effects": "players.sync_effects",
-	"word_warnings": "players.word_warnings",
+	"word_warnings": "players.word_warnings", "use_global_word_filter": "players.use_global_word_filter",
 
 	"speed_check": "anti_cheat.speed_hack", "score_check": "anti_cheat.modified_scoring",
 	"score_allow": "anti_cheat.allowed_scoring_mods", "enforce_tuning": "anti_cheat.enforce_tuning",
-	"bone_scale_limit": "anti_cheat.bone_scale_limit", "bone_reach_limit": "anti_cheat.bone_reach_limit",
+	"bone_scale_limit": "anti_cheat.bone_scale_limit", "bone_reach_limit": "anti_cheat.bone_reach_limit", "pinned_board": "anti_cheat.pinned_board",
 
 	"send_rate": "network.send_rate", "crowd_budget": "network.crowd_budget", "distances": "network.distances",
 	"use_steam_relay": "network.use_steam_relay", "pack_ms": "network.pack_ms", "finger_distance": "network.finger_distance",
@@ -194,7 +209,8 @@ var sections = map[string]string{
 // took each out and how to tell a file it wrote. Reserved slots went with the
 // sections, as slots are kept for each listed player instead. The card went
 // in 2.0.3, which shows every announcement as one; that server writes its
-// announcements without it, and an older one with it or not at all.
+// announcements without it, and an older one with it or not at all. The
+// admins went into the admin role with 2.0.6's roles.
 var removed = map[string]struct {
 	since string
 	gone  func(*File) bool
@@ -204,6 +220,7 @@ var removed = map[string]struct {
 		_, card := f.Get("announcements.card")
 		return !card && f.announces()
 	}},
+	"admins": {"2.0.6", (*File).HasRoles},
 }
 
 // Removed lists the settings the newest servers no longer have.
@@ -403,13 +420,21 @@ type Ban struct {
 	Added int64  `json:"added"`
 }
 
-// Admins lists the in-game admins, by SteamID64.
+// Admins lists the in-game admins, by SteamID64: those the config lists,
+// and on a server with roles those given the admin role, which the server
+// moves the config's into when it starts.
 func (f *File) Admins() []string {
 	out := []string{}
 	v, _ := f.Get("admins")
 	list, _ := v.([]any)
 	for _, v := range list {
 		out = append(out, fmt.Sprint(v))
+	}
+	given := f.rolePlayers()
+	for _, id := range slices.Sorted(maps.Keys(given)) {
+		if given[id] == AdminRole && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
 	}
 	return out
 }
@@ -449,13 +474,19 @@ func (f *File) Bans() []Ban {
 	return out
 }
 
-// SetAdmins replaces the in-game admins.
-func (f *File) SetAdmins(ids []string) {
+// SetAdmins replaces the in-game admins: on a server with roles, those given
+// the admin role in data/roles.json; anyone it's taken from is the default
+// role again.
+func (f *File) SetAdmins(ids []string) error {
+	if f.roles != nil {
+		return f.setAdminRole(ids)
+	}
 	list := make([]any, len(ids))
 	for i, id := range ids {
 		list[i] = id
 	}
 	f.Set("admins", list)
+	return nil
 }
 
 // SetBans replaces the bans: in data/bans.json for a server that keeps them
@@ -736,6 +767,8 @@ func normalize(fd Field, raw any) (any, error) {
 		return customVotes(raw)
 	case TypeCommands:
 		return customCommands(raw)
+	case TypeParkMods:
+		return parkMods(raw)
 	}
 	return nil, errors.New("unknown field type")
 }
@@ -953,7 +986,8 @@ func commandNameFree(s string) bool {
 		"object-placement", "object-scaling", "objects", "park", "parties", "party-size", "password", "placement",
 		"players", "rate", "reserved", "rotation", "say", "score-allow", "score-check", "speed-check", "status", "tod",
 		"tpall", "tphere", "tps", "tuning", "tuning-enforce", "unban", "voice", "voice-allow", "voice-range",
-		"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update"}, s) {
+		"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update",
+		"role", "roles", "board-check", "park-mod", "teleport"}, s) { // 2.0.6
 		return false
 	}
 	return strings.Trim(s, "0123456789") != ""
@@ -1044,6 +1078,113 @@ func customCommands(raw any) ([]CustomCommand, error) {
 	return out, nil
 }
 
+// Limits of 2.0.6's park mods (Server/server_config.h).
+const maxParkMods = 32
+
+// validModFolder is valid_mod_folder: a folder's name in Mods as the game's
+// mod list takes it, with no path and no blanks at either end.
+func validModFolder(s string) bool {
+	if s == "" || len(s) > 64 || s[0] == '.' || s[0] == ' ' || s[len(s)-1] == ' ' {
+		return false
+	}
+	return !strings.ContainsFunc(s, func(r rune) bool {
+		return !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || strings.ContainsRune("_-. ", r))
+	})
+}
+
+// validParkKey is valid_park_key: a base map's key as park files are named
+// by it (bam, grom, stadium_1...).
+func validParkKey(s string) bool {
+	return s != "" && len(s) <= 32 && !strings.ContainsFunc(s, func(r rune) bool {
+		return !('a' <= r && r <= 'z' || '0' <= r && r <= '9' || r == '_')
+	})
+}
+
+// parkMods reads park mods as load_config does and checks them as
+// park_mods_error does, since the server won't start on one it refuses. That
+// a map is one the server knows is checked against its maps, in Diff.
+func parkMods(raw any) ([]ParkMod, error) {
+	if list, ok := raw.([]ParkMod); ok {
+		raw = jsonValue(Field{Type: TypeParkMods}, list)
+	}
+	if raw == nil {
+		return []ParkMod{}, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, errors.New("park mods must be a list")
+	}
+	if len(items) > maxParkMods {
+		return nil, fmt.Errorf("at most %d park mods", maxParkMods)
+	}
+	out := []ParkMod{}
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, errors.New("each park mod must be an object")
+		}
+		text := func(key string) (string, error) {
+			s, ok := m[key].(string)
+			if !ok && m[key] != nil {
+				return "", fmt.Errorf("a park mod's %s must be text", key)
+			}
+			return s, nil
+		}
+		var pm ParkMod
+		var err error
+		if pm.Name, err = text("name"); err != nil {
+			return nil, err
+		}
+		if pm.Name = strings.ToLower(strings.TrimSpace(pm.Name)); !validVoteName(pm.Name) {
+			return nil, fmt.Errorf("a park mod's name is 1 to %d lowercase letters, digits, - or _ (%q is not)", maxVoteNameBytes, pm.Name)
+		}
+		if slices.ContainsFunc(out, func(o ParkMod) bool { return o.Name == pm.Name }) {
+			return nil, fmt.Errorf("two park mods are called %s", pm.Name)
+		}
+		if pm.Folder, err = text("folder"); err != nil {
+			return nil, err
+		}
+		if !validModFolder(pm.Folder) {
+			return nil, fmt.Errorf("park mod %s: the folder is the name of a mod's folder in Mods: letters, digits, spaces, _ - and ., no path", pm.Name)
+		}
+		if pm.Map, err = text("map"); err != nil {
+			return nil, err
+		}
+		if pm.Map = strings.TrimSpace(pm.Map); pm.Map == "" {
+			return nil, fmt.Errorf("park mod %s: name the map it was built on", pm.Name)
+		}
+		if pm.Key, err = text("key"); err != nil {
+			return nil, err
+		}
+		if pm.Key = strings.TrimSpace(pm.Key); pm.Key != "" && !validParkKey(pm.Key) {
+			return nil, fmt.Errorf("park mod %s: the key is a base map's, such as bam, grom or stadium_1, or empty", pm.Name)
+		}
+		out = append(out, pm)
+	}
+	return out, nil
+}
+
+// parkModCommands plans the park-mod config commands that turn the park mods
+// from cur into want. A changed one is removed and set up again.
+func parkModCommands(cur, want []ParkMod) []string {
+	var cmds []string
+	for _, pm := range cur {
+		if !slices.Contains(want, pm) {
+			cmds = append(cmds, "park-mod config remove "+pm.Name)
+		}
+	}
+	for _, pm := range want {
+		if !slices.Contains(cur, pm) {
+			cmd := "park-mod config add " + pm.Name + " | " + pm.Folder + " | " + pm.Map
+			if pm.Key != "" {
+				cmd += " | " + pm.Key
+			}
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds
+}
+
 // jsonValue is how a normalised value is stored in the file.
 func jsonValue(fd Field, v any) any {
 	switch fd.Type {
@@ -1080,6 +1221,12 @@ func jsonValue(fd Field, v any) any {
 				runs = append(runs, r)
 			}
 			list = append(list, map[string]any{"name": cc.Name, "reply": cc.Reply, "command": runs, "admin": cc.Admin})
+		}
+		return list
+	case TypeParkMods:
+		list := []any{}
+		for _, pm := range v.([]ParkMod) {
+			list = append(list, map[string]any{"name": pm.Name, "folder": pm.Folder, "map": pm.Map, "key": pm.Key})
 		}
 		return list
 	}
@@ -1127,6 +1274,14 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 		}
 		if fd.Type == TypeMaps {
 			if v, err = knownMaps(v.([]string), known); err != nil {
+				return nil, err
+			}
+			if equal(curVals[key], v) {
+				continue
+			}
+		}
+		if fd.Type == TypeParkMods {
+			if v, err = parkMaps(v.([]ParkMod), known); err != nil {
 				return nil, err
 			}
 			if equal(curVals[key], v) {
@@ -1318,6 +1473,13 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 			p.Commands = append(p.Commands, "votes poll-seconds "+num(v))
 		case "speed_check":
 			p.Commands = append(p.Commands, "speed-check "+v.(string))
+		case "pinned_board":
+			p.Commands = append(p.Commands, "board-check "+v.(string))
+		case "use_global_word_filter":
+			p.Commands = append(p.Commands, "words global "+onOff(v))
+		case "park_mods":
+			old, _ := curVals[fd.Key].([]ParkMod)
+			p.Commands = append(p.Commands, parkModCommands(old, v.([]ParkMod))...)
 		case "score_check":
 			p.Commands = append(p.Commands, "score-check "+v.(string))
 		case "score_allow":
@@ -1350,8 +1512,23 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 var SettingVerbs = []string{"name", "map", "map-pool", "rotation", "password", "welcome", "listed", "reserved", "rate", "crowd", "tps", "distances",
 	"voice", "voice-range", "placement", "objects", "object-limit", "object-scaling", "bone-scale", "bone-reach", "effects", "noclip", "nobail", "boosts", "tuning",
 	"parties", "party-size", "afk-kick", "announce-throwdowns", "activity-log", "park", "votes", "speed-check", "score-check", "score-allow",
+	"board-check", "words", "park-mod",
 	"layer-sync", "tod", "layers", "layer", "chat-color", "chat-colour", "announcements",
 	"voice-allow", "object-placement", "world-layer-sync", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce"}
+
+// parkMaps checks that each park mod's map is one of the server's maps, and
+// spells it as the server does: it won't start on a park mod for another.
+func parkMaps(list []ParkMod, known []string) ([]ParkMod, error) {
+	out := slices.Clone(list)
+	for i, pm := range out {
+		m, err := knownMaps([]string{pm.Map}, known)
+		if err != nil {
+			return nil, fmt.Errorf("park mod %s: %w", pm.Name, err)
+		}
+		out[i].Map = m[0]
+	}
+	return out, nil
+}
 
 // knownMaps checks a map pool against the server's maps and spells each as
 // the server does, so the file it saves compares equal.
@@ -1513,6 +1690,11 @@ func equal(a, b any) bool {
 		return aok && bok && slices.EqualFunc(ac, bc, func(x, y CustomCommand) bool {
 			return x.Name == y.Name && x.Reply == y.Reply && slices.Equal(x.Command, y.Command) && x.Admin == y.Admin
 		})
+	}
+	ap, aok := a.([]ParkMod)
+	bp, bok := b.([]ParkMod)
+	if aok || bok {
+		return aok && bok && slices.Equal(ap, bp)
 	}
 	return a == b
 }

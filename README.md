@@ -53,7 +53,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Players and server control
 
-- **Player management:** see who's online and who has played. Kick, ban, unban and manage in-game admins.
+- **Player management:** see who's online and who has played, with each player's role from ReSkate 2.0.6. Kick, ban, unban and manage in-game admins, which from 2.0.6 are the players with the server's `admin` role.
 - **Crash recovery:** a crashed server restarts automatically, with backoff, up to five tries in a row.
 - **Scheduled restarts:** restart a server at set times of day, or after so many hours up. Players get a warning in chat 10, 5 and 1 minute before; a server with nobody on restarts straight away.
 
@@ -65,7 +65,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Server settings and maps
 
-- **Settings editor:** a form for every `ReSkateServer.json` setting. Most changes apply live through the server's own console commands. A few with no command (`max_players`, ports, `steam_token`, `global_bans`) go through a safe stop → write → start instead. Only owners can see or change a server's `steam_token`, its custom votes or its chat commands (ReSkate 2.0.3's own `/discord`, `/rules` and the like), which run server commands.
+- **Settings editor:** a form for every `ReSkateServer.json` setting. Most changes apply live through the server's own console commands. A few with no command (`max_players`, ports, `steam_token`, `global_bans`) go through a safe stop → write → start instead. Only owners can see or change a server's `steam_token`, its custom votes or its chat commands (ReSkate 2.0.3's own `/discord`, `/rules` and the like), which run server commands. ReSkate 2.0.6's park mods (parks built in the game's Park Editor, spawned for everyone) are set up live too.
 - **Map pool and rotation:** pick which maps players can vote for and how long the server stays on each. Edits apply live, admin changes included. The manager warns before you disable or delete a mod whose map is in a pool, since the server won't start without it.
 - **World controls:** time of day and every world layer per map, applied live or saved for the next start (needs `world-layers.json` next to the server).
 
@@ -256,8 +256,8 @@ If the panel says it can't reach the manager, the manager stopped or is restarti
 
 ReSkateServer has no admin API, so the manager works entirely through each server's console.
 
-- **Launch:** servers start with redirected stdin/stdout and `--no-update`. The manager installs updates itself, because the server's self-updater relaunches it under a process the manager can't track.
-- **Output:** stdout lines (`[HH:MM:SS] text`) are parsed into typed events: joins, leaves, chat, admin commands, anti-cheat, votes and readiness. The formats come from `Server/server_host.cpp`. A line over 1 MiB is cut there, so it can't stall the reader or the server.
+- **Launch:** servers start with redirected stdin/stdout and `--no-update`, and on Windows `--headless`, without which ReSkate 2.0.6 opens a window of its own. The manager installs updates itself, because the server's self-updater relaunches it under a process the manager can't track. A server that closes its console while it runs (2.0.6's own Windows build does) is ended and not restarted, since the manager could neither read nor stop it.
+- **Output:** stdout lines (`[HH:MM:SS] text`, or the time as Windows shows it from 2.0.6) are parsed into typed events: joins, leaves, chat, admin commands, anti-cheat, votes and readiness. The formats come from `Server/server_host.cpp`. A line over 1 MiB is cut there, so it can't stall the reader or the server.
 - **Commands:** commands go to the server one at a time, and each reply is matched to the command that produced it. Lines the server prints on its own are never taken as replies.
 - **Config file:** the server rewrites `ReSkateServer.json` after every setting command, so the manager never writes that file while the server is running. Before a start, the manager fixes a server name the server would refuse (letters, numbers, spaces and `- _ / [ ] ( )` only) by dropping the other characters, and says so in the console.
 - **Stop:** the manager sends `quit` so the server warns players and logs off Steam. If it hasn't exited after 15 s, it is killed.

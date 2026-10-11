@@ -4,9 +4,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,7 +57,15 @@ func admins(t *testing.T, in *instance.Instance) []string {
 	return list
 }
 
-func TestSyncStoppedThenRunning(t *testing.T) {
+func TestSyncStoppedThenRunning(t *testing.T) { testSync(t, false) }
+
+// From ReSkate 2.0.6 the admins are those given the admin role, which they
+// get and lose with the role command; a player with another role keeps it.
+func TestSyncWithRoles(t *testing.T) { testSync(t, true) }
+
+const moderator = "76561198000000005"
+
+func testSync(t *testing.T, roles bool) {
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	st, err := store.Open(filepath.Join(t.TempDir(), "manager.db"))
@@ -73,7 +83,18 @@ func TestSyncStoppedThenRunning(t *testing.T) {
 		t.Fatalf("build fake server: %v\n%s", err, out)
 	}
 	cfg := &serverconfig.File{Root: map[string]any{"name": "Srv"}}
-	cfg.SetAdmins([]string{manual})
+	if roles {
+		file := `{"default_role": "player", "roles": [{"name": "player"}, {"name": "moderator", "commands": ["kick"]}, {"name": "admin", "commands": ["*"]}],
+			"players": {"` + manual + `": "admin", "` + moderator + `": "moderator"}}`
+		if err := os.MkdirAll(filepath.Join(def.Dir, "data"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(def.Dir, serverconfig.RolesFile), []byte(file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	} else if err := cfg.SetAdmins([]string{manual}); err != nil {
+		t.Fatal(err)
+	}
 	if err := cfg.Write(def.ConfigPath()); err != nil {
 		t.Fatal(err)
 	}
@@ -160,5 +181,11 @@ func TestSyncStoppedThenRunning(t *testing.T) {
 	}
 	if got := admins(t, in); slices.Contains(got, slow) {
 		t.Fatalf("a disabled user is still an admin: %v", got)
+	}
+	if roles {
+		data, err := os.ReadFile(filepath.Join(def.Dir, serverconfig.RolesFile))
+		if err != nil || !strings.Contains(string(data), `"`+moderator+`": "moderator"`) {
+			t.Errorf("the moderator lost their role: %s %v", data, err)
+		}
 	}
 }

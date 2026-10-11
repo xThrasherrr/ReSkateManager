@@ -248,6 +248,8 @@ func TestSettingVerbsCoverDiff(t *testing.T) {
 			// Only a vote the server has changes live.
 			f.Set(fd.Key, []any{map[string]any{"name": "restart", "command": "map {map}"}})
 			tries = []any{[]any{map[string]any{"name": "restart", "command": "map {map}", "enabled": false}}}
+		case []ParkMod:
+			tries = []any{[]any{map[string]any{"name": "street", "folder": "street park", "map": "San Vansterdam"}}}
 		}
 		var p *Plan
 		for _, try := range tries {

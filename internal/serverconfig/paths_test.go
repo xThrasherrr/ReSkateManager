@@ -8,7 +8,7 @@ func TestPaths(t *testing.T) {
 		"players.allow_voice_chat":          "voice_chat",
 		"network.distances.half_rate_start": "distances.half_rate_start",
 		"votes.map.enabled":                 "votes.map.enabled",
-		"access.admins":                     "admins",
+		"access.reserved_players_slots":     "reserved",
 		"server.auto_update":                "auto_update",
 	} {
 		if got[place] != key {
@@ -16,8 +16,8 @@ func TestPaths(t *testing.T) {
 		}
 	}
 	for place, key := range got {
-		if key == "reserved_slots" {
-			t.Errorf("Paths() has the removed reserved_slots at %q", place)
+		if key == "reserved_slots" || key == "admins" { // the admins went into 2.0.6's roles
+			t.Errorf("Paths() has the removed %s at %q", key, place)
 		}
 	}
 }

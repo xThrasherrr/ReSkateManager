@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/adminsync"
 	"github.com/xThrasherrr/ReSkateManager/internal/announce"
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
@@ -473,13 +475,16 @@ const maxCommand = 1024
 
 // consoleOnly are the console commands console.exec alone may run: they only
 // read, or act on players in a way no finer permission covers.
-var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "vote-cancel", "clear-objects"}
+var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "teleport", "vote-cancel", "clear-objects"}
 
 // consolePerms are the console commands that do what a finer permission
 // grants, and need it too. The verbs are the server's own (Host::command in
 // Server/server_host.cpp), aliases included.
 var consolePerms = func() map[string]string {
-	m := map[string]string{"admin": auth.IngameAdmins, "admins": auth.IngameAdmins, "ban": auth.PlayersBan, "unban": auth.PlayersBan,
+	// Roles (2.0.6) are who may run which commands in the game, and admins
+	// are one of them; "roles reload" takes in an edit of the file.
+	m := map[string]string{"admin": auth.IngameAdmins, "admins": auth.IngameAdmins, "role": auth.IngameAdmins, "roles": auth.IngameAdmins,
+		"ban": auth.PlayersBan, "unban": auth.PlayersBan,
 		"kick": auth.PlayersKick, "say": auth.PlayersChat, "announce": auth.PlayersChat, "announce-to": auth.PlayersChat,
 		"msg": auth.PlayersChat, "msg-party": auth.PlayersChat, "msg-admins": auth.PlayersChat, "poll": auth.PlayersChat,
 		// The console starts votes too (2.0.3): they change what their
@@ -805,10 +810,11 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "the server has no config yet; start it once")
 		return
 	}
-	// The map pool is checked against the maps the server has, or will have
-	// once it starts.
+	// The map pool, and the maps park mods are for, are checked against the
+	// maps the server has, or will have once it starts.
 	var known []string
-	if _, ok := req.Values["map_pool"]; ok {
+	_, pool := req.Values["map_pool"]
+	if _, parks := req.Values["park_mods"]; pool || parks {
 		if running(in) {
 			if known, err = in.Maps(r.Context()); err != nil {
 				a.fail(w, r, 400, fmt.Errorf("could not list the server's maps: %w", err))
@@ -918,19 +924,32 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 
 // ---- in-game admins ----
 
+// liveAdminChange makes a running server's player an admin or not. From
+// ReSkate 2.0.6 that's their role, and taking it away leaves them the default
+// one: a player who isn't an admin keeps whatever role they have.
+func (a *API) liveAdminChange(r *http.Request, in *instance.Instance, op, id string) (string, error) {
+	f, err := serverconfig.Read(in.Def().ConfigPath())
+	if err != nil {
+		return "", err
+	}
+	if op == "add" {
+		return in.Command(r.Context(), adminsync.AddCommand(f, id), from(r).user.Username)
+	}
+	if f.HasRoles() && !slices.Contains(f.Admins(), id) {
+		return id + " is not an admin.", nil
+	}
+	return in.Command(r.Context(), adminsync.RemoveCommand(f, id), from(r).user.Username)
+}
+
 type adminRow struct {
 	ID    string `json:"id"`
 	Name  string `json:"name,omitempty"`
 	Panel string `json:"panel,omitempty"` // the panel user this admin is kept for
 }
 
-func (a *API) admins(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	f, err := serverconfig.Read(in.Def().ConfigPath())
-	if err != nil {
-		writeErr(w, 404, "the server has no config yet; start it once")
-		return
-	}
+// playerNames names the players a server has seen, by SteamID64: as they
+// were last on, or are now.
+func (a *API) playerNames(r *http.Request, in *instance.Instance) map[string]string {
 	names := map[string]string{}
 	if hist, err := a.Store.PlayerHistory(r.Context(), in.ID(), "", 5000); err == nil {
 		for _, h := range hist {
@@ -940,6 +959,17 @@ func (a *API) admins(w http.ResponseWriter, r *http.Request) {
 	for _, p := range in.Players() {
 		names[p.ID] = p.Name
 	}
+	return names
+}
+
+func (a *API) admins(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	f, err := serverconfig.Read(in.Def().ConfigPath())
+	if err != nil {
+		writeErr(w, 404, "the server has no config yet; start it once")
+		return
+	}
+	names := a.playerNames(r, in)
 	panel, err := a.Admins.PanelAdmins(r.Context(), in.ID())
 	if err != nil {
 		a.internalErr(w, r, err)
@@ -950,6 +980,162 @@ func (a *API) admins(w http.ResponseWriter, r *http.Request) {
 		out = append(out, adminRow{ID: id, Name: names[id], Panel: panel[id]})
 	}
 	writeJSON(w, 200, out)
+}
+
+// roleRow is one of a server's roles and the players given it.
+type roleRow struct {
+	serverconfig.Role
+	Players []adminRow `json:"players"`
+}
+
+// roles lists a server's roles (ReSkate 2.0.6) and who was given each, from
+// its data/roles.json, which it rewrites whenever a role is given: so with
+// nobody on, and while it's stopped.
+func (a *API) roles(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	f, err := serverconfig.Read(in.Def().ConfigPath())
+	if err != nil {
+		writeErr(w, 404, "the server has no config yet; start it once")
+		return
+	}
+	list, given, def := f.Roles()
+	names := a.playerNames(r, in)
+	panel, err := a.Admins.PanelAdmins(r.Context(), in.ID())
+	if err != nil {
+		a.internalErr(w, r, err)
+		return
+	}
+	out := []roleRow{}
+	for _, role := range list {
+		row := roleRow{Role: role, Players: []adminRow{}}
+		for _, id := range slices.Sorted(maps.Keys(given)) {
+			if given[id] == role.Name {
+				row.Players = append(row.Players, adminRow{ID: id, Name: names[id], Panel: panel[id]})
+			}
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, 200, map[string]any{"roles": out, "default": def, "hasRoles": f.HasRoles()})
+}
+
+// errPanelAdmin is a role change the in-game admin sync would undo.
+var errPanelAdmin = errors.New("kept in step with a panel user")
+
+// giveRole gives a player one of a server's roles, or with role "" takes
+// theirs away: with the role command while it runs, so they see it at once,
+// else in its data/roles.json. An admin kept in step with a panel user is the
+// sync's: it would make them an admin again.
+func (a *API) giveRole(r *http.Request, in *instance.Instance, id, role string) (string, error) {
+	panel, err := a.Admins.PanelAdmins(r.Context(), in.ID())
+	if err != nil {
+		return "", err
+	}
+	if user := panel[id]; user != "" {
+		return "", fmt.Errorf("%w: %s is an admin for panel user %s; change their roles or Steam link instead", errPanelAdmin, id, user)
+	}
+	if !running(in) {
+		return a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+			if err := f.SetRole(id, role); err != nil {
+				return "", err
+			}
+			// As the server says it.
+			if _, _, def := f.Roles(); role == "" && def != "" {
+				return id + " is " + def + " again.", nil
+			} else if role == "" {
+				return id + " no longer has a role.", nil
+			}
+			return id + " is now " + role + ".", nil
+		})
+	}
+	f, err := serverconfig.Read(in.Def().ConfigPath())
+	if err != nil {
+		return "", err
+	}
+	list, given, _ := f.Roles()
+	switch {
+	case !f.HasRoles():
+		return "", serverconfig.ErrNoRoles
+	case role == "" && given[id] == "":
+		return id + " was given no role.", nil
+	case role != "" && !slices.ContainsFunc(list, func(x serverconfig.Role) bool { return x.Name == role }):
+		return "", fmt.Errorf("the server has no %q role", role)
+	}
+	return in.Command(r.Context(), "role "+id+" "+cmp.Or(role, "none"), from(r).user.Username)
+}
+
+// answerRole answers a role change, or why there's none.
+func (a *API) answerRole(w http.ResponseWriter, r *http.Request, reply string, err error) {
+	if errors.Is(err, errPanelAdmin) || errors.Is(err, serverconfig.ErrNoRoles) {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	a.answerReply(w, r, reply, err)
+}
+
+// roleResult is how giving a role went on one server.
+type roleResult struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Reply string `json:"reply,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// setRole gives a player a role on this server, or on every server the user
+// manages admins on: each defines its own roles, so one without the role is
+// left out, and said so.
+func (a *API) setRole(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	var req struct {
+		ID         string `json:"id"`
+		Role       string `json:"role"`
+		Everywhere bool   `json:"everywhere"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	req.ID, req.Role = strings.TrimSpace(req.ID), strings.ToLower(strings.TrimSpace(req.Role))
+	if !serverconfig.SteamIDRe.MatchString(req.ID) {
+		writeErr(w, 400, "not a SteamID64")
+		return
+	}
+	if req.Role == "" || req.Role == "none" {
+		writeErr(w, 400, "pick a role")
+		return
+	}
+	if !req.Everywhere {
+		reply, err := a.giveRole(r, in, req.ID, req.Role)
+		a.auditOutcome(r, in.ID(), "role.give", req.ID+" "+req.Role, err)
+		a.answerRole(w, r, reply, err)
+		return
+	}
+	results := []roleResult{}
+	for _, other := range a.Reg.List() {
+		if !from(r).perms.Can(auth.IngameAdmins, other.ID()) {
+			continue
+		}
+		res := roleResult{ID: other.ID(), Name: other.Def().Name}
+		reply, err := a.giveRole(r, other, req.ID, req.Role)
+		a.auditOutcome(r, other.ID(), "role.give", req.ID+" "+req.Role, err)
+		if err != nil {
+			res.Error = err.Error()
+		} else {
+			res.Reply = reply
+		}
+		results = append(results, res)
+	}
+	writeJSON(w, 200, map[string]any{"results": results})
+}
+
+// takeRole takes a player's role away on this server.
+func (a *API) takeRole(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	id, ok := steamParam(w, r)
+	if !ok {
+		return
+	}
+	reply, err := a.giveRole(r, in, id, "")
+	a.auditOutcome(r, in.ID(), "role.take", id, err)
+	a.answerRole(w, r, reply, err)
 }
 
 func (a *API) addAdmin(w http.ResponseWriter, r *http.Request) {
@@ -989,7 +1175,7 @@ func (a *API) adminChange(w http.ResponseWriter, r *http.Request, in *instance.I
 	var reply string
 	var err error
 	if running(in) {
-		reply, err = in.Command(r.Context(), "admin "+op+" "+id, from(r).user.Username)
+		reply, err = a.liveAdminChange(r, in, op, id)
 	} else {
 		reply, err = a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
 			list := f.Admins()
@@ -997,11 +1183,9 @@ func (a *API) adminChange(w http.ResponseWriter, r *http.Request, in *instance.I
 				if !slices.Contains(list, id) {
 					list = append(list, id)
 				}
-				f.SetAdmins(list)
-				return id + " is an admin.", nil
+				return id + " is an admin.", f.SetAdmins(list)
 			}
-			f.SetAdmins(slices.DeleteFunc(list, func(x string) bool { return x == id }))
-			return id + " is no longer an admin.", nil
+			return id + " is no longer an admin.", f.SetAdmins(slices.DeleteFunc(list, func(x string) bool { return x == id }))
 		})
 	}
 	a.auditOutcome(r, in.ID(), "admin."+op, id, err)

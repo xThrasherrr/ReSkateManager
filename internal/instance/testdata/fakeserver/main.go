@@ -15,7 +15,8 @@ import (
 
 func log(text string) { fmt.Printf("[%s] %s\n", time.Now().Format("15:04:05"), text) }
 
-// slowAdmin is made an admin at once, but the reply comes a second later.
+// slowAdmin is made an admin (or given a role) at once, but the reply comes
+// a second later.
 const slowAdmin = "76561198000000099"
 
 // validName is valid_server_name from Engine/Game/Multiplayer/session_model.h.
@@ -49,10 +50,38 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// "mute" beside it: like 2.0.6's headless Windows server, it takes its
+	// console for one of its own and runs on unheard.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(exe), "mute")); err == nil {
+		os.Stdout.Close()
+		os.Stderr.Close()
+		os.Stdin.Close()
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	log("Fake is up on San Vansterdam for 16 players.")
 	log("Steam ID 90000000000000001, public IP 1.2.3.4.")
 	log("Join code: CODE-1")
-	log("1 admin(s). Type help for commands.")
+	// data/roles.json beside it: a server from ReSkate 2.0.6, with roles.
+	rolesPath := filepath.Join(filepath.Dir(exe), "data", "roles.json")
+	var roles map[string]any
+	if data, err := os.ReadFile(rolesPath); err == nil {
+		json.Unmarshal(data, &roles)
+	}
+	given := func(id string) string {
+		players, _ := roles["players"].(map[string]any)
+		if role, ok := players[id].(string); ok {
+			return role
+		}
+		s, _ := roles["default_role"].(string)
+		return s
+	}
+	if roles != nil {
+		log("1 admin(s), 1 player(s) with a role. Type help for commands.")
+		log("Chat words: the ReSkate team's lists are used.") // 2.0.6 prints what words answers, after it's up
+	} else {
+		log("1 admin(s). Type help for commands.")
+	}
 	players := map[string]string{}
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
@@ -71,6 +100,9 @@ func main() {
 		case "join": // test hook: "join <id> <name>"
 			id, name, _ := strings.Cut(arg, " ")
 			players[id] = name
+			if role := given(id); role != "" {
+				id += ", " + role
+			}
 			log(fmt.Sprintf("%s joined (%s), %d/16 players, loaded in 3 s", name, id, len(players)))
 			log("ok")
 		case "leave":
@@ -78,7 +110,31 @@ func main() {
 			delete(players, arg)
 			log(name + " left (Disconnected)")
 			log("ok")
+		case "role": // "role <id> <role>|none", saved to data/roles.json like the real server
+			id, role, _ := strings.Cut(arg, " ")
+			label := id
+			if name, on := players[id]; on {
+				label = name
+			}
+			list, _ := roles["players"].(map[string]any)
+			reply := label + " is now " + role + "."
+			if role == "none" {
+				delete(list, id)
+				reply = label + " is " + given(id) + " again."
+			} else {
+				list[id] = role
+			}
+			data, _ := json.MarshalIndent(roles, "", "  ")
+			os.WriteFile(rolesPath, data, 0o644)
+			if id == slowAdmin { // test hook: done at once, said late
+				time.Sleep(time.Second)
+			}
+			log(reply)
 		case "admin": // "admin add|remove <id>", saved to ReSkateServer.json like the real server
+			if roles != nil {
+				log("Admins are a role now: roles lists them, and role <player or SteamID64> admin makes one (role ... none takes it away).")
+				break
+			}
 			sub, id, _ := strings.Cut(arg, " ")
 			path := filepath.Join(filepath.Dir(exe), "ReSkateServer.json")
 			root := map[string]any{}
@@ -103,6 +159,12 @@ func main() {
 				time.Sleep(time.Second)
 			}
 			log(reply)
+		case "words": // 2.0.6
+			log("Chat words: the ReSkate team's lists are " + map[bool]string{true: "off", false: "used"}[arg == "global off"] + ".")
+		case "park-mod": // 2.0.6: the console's reply is the line logged for an admin in the game
+			log("[parks] " + arg + " by console")
+		case "parks": // test hook: a park that runs out, logged on its own
+			log("[parks] " + arg + " removed (expired)")
 		case "say":
 			log("[chat] Server: " + arg)
 		case "announce": // 2.0.2; test hook: a file "before-2.0.2" beside it makes it older
@@ -116,6 +178,9 @@ func main() {
 			text := fmt.Sprintf("%d players", len(players))
 			for id, name := range players {
 				text += "\n  " + id + "  " + name
+				if role := given(id); role != "" {
+					text += "  (" + role + ")"
+				}
 			}
 			log(text)
 		default:

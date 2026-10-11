@@ -477,11 +477,17 @@ func (a *API) releaseID(id string) {
 
 // keepUnheld undoes what a config someone who isn't an owner restored or
 // imported would change that they may not change by hand: the owner-only
-// settings, the in-game admins (who can run any console command) and, on a
-// restore, the bans. old is the config before a restore, nil for an import,
-// which then brings none of those. A file that can't be read is left alone:
-// the server refuses it too.
+// settings, the in-game admins (who can run any console command) and roles
+// (which give commands too) and, on a restore, the bans. old is the config
+// before a restore, nil for an import, which then brings none of those. A
+// file that can't be read is left alone: the server refuses it too.
 func keepUnheld(path string, old *serverconfig.File, perms auth.Perms, instanceID string) error {
+	// Even beside a config that can't be read: they'd hold once it's fixed.
+	if !perms.Can(auth.IngameAdmins, instanceID) {
+		if err := serverconfig.KeepRoles(path, old); err != nil {
+			return err
+		}
+	}
 	f, err := serverconfig.Read(path)
 	if err != nil {
 		return nil
@@ -492,7 +498,9 @@ func keepUnheld(path string, old *serverconfig.File, perms auth.Perms, instanceI
 		admins = old.Admins()
 	}
 	if !perms.Can(auth.IngameAdmins, instanceID) {
-		f.SetAdmins(admins)
+		if err := f.SetAdmins(admins); err != nil {
+			return err
+		}
 	}
 	if old != nil && !perms.Can(auth.PlayersBan, instanceID) {
 		f.SetBans(old.Bans())

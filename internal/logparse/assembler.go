@@ -1,6 +1,7 @@
 package logparse
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -28,7 +29,14 @@ func (a *Assembler) Push(line string) *Entry {
 		return nil
 	}
 	done := a.Flush()
-	a.pending = &Entry{Stamp: stamp, At: a.now().UnixMilli()}
+	now := a.now()
+	// Shown beside the manager's own lines, as they are: HH:MM:SS.
+	if h, m, s, ok := Clock(stamp); ok {
+		stamp = fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+	} else {
+		stamp = now.Format("15:04:05")
+	}
+	a.pending = &Entry{Stamp: stamp, At: now.UnixMilli()}
 	a.lines = append(a.lines[:0], text)
 	return done
 }

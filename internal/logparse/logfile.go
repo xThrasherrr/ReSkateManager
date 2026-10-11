@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// ReSkateServer.log stamps lines with the date as well: "[2006-01-02 15:04:05] text".
-var fileStampRe = regexp.MustCompile(`^\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\] ?(.*)$`)
+// ReSkateServer.log stamps lines with the date as well: "[2006-01-02 15:04:05] text",
+// with the time as the console has it (2.0.6's Windows server: "3:04:05 PM").
+var fileStampRe = regexp.MustCompile(`^\[(\d{4})-(\d{2})-(\d{2}) ([^\[\]]{0,24}?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?[^\[\]]{0,24}?)\] ?(.*)$`)
 
 const fileStamp = "2006-01-02 15:04:05"
 
@@ -43,9 +45,13 @@ func Scan(r io.Reader, fn func(Entry) bool) error {
 		if !emit() {
 			return nil
 		}
-		at, _ := time.ParseInLocation(fileStamp, m[1]+" "+m[2], time.Local)
-		cur = &Entry{Stamp: m[2], At: at.UnixMilli()}
-		lines = append(lines[:0], m[3])
+		year, _ := strconv.Atoi(m[1])
+		month, _ := strconv.Atoi(m[2])
+		day, _ := strconv.Atoi(m[3])
+		h, min, sec, _ := Clock(m[4])
+		at := time.Date(year, time.Month(month), day, h, min, sec, 0, time.Local)
+		cur = &Entry{Stamp: at.Format("15:04:05"), At: at.UnixMilli()}
+		lines = append(lines[:0], m[5])
 	}
 	emit()
 	return sc.Err()

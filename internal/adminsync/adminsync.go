@@ -45,8 +45,9 @@ func (s *Syncer) Kick() {
 }
 
 // Sync brings one server's admins in line with the panel. A running server is
-// sent admin commands and a stopped one has its config edited. One that is
-// starting or updating is skipped: it syncs when it becomes ready.
+// sent admin commands (role commands on a server with roles) and a stopped one
+// has its config or roles edited. One that is starting or updating is
+// skipped: it syncs when it becomes ready.
 func (s *Syncer) Sync(ctx context.Context, in *instance.Instance) error {
 	if s == nil {
 		return nil
@@ -57,8 +58,8 @@ func (s *Syncer) Sync(ctx context.Context, in *instance.Instance) error {
 	if err != nil {
 		return err
 	}
-	// Only SteamIDs: the server takes anything else after "admin add" as
-	// the start of a player's name.
+	// Only SteamIDs: the server takes anything else after "admin add" or
+	// "role" as the start of a player's name.
 	want := make([]string, 0, len(panel))
 	for id := range panel {
 		if serverconfig.SteamIDRe.MatchString(id) {
@@ -73,8 +74,8 @@ func (s *Syncer) Sync(ctx context.Context, in *instance.Instance) error {
 	path := in.Def().ConfigPath()
 
 	if in.State() == instance.Running {
-		// The server rewrites its config after every admin command, so the file
-		// is its current list.
+		// The server rewrites its config (its roles, from 2.0.6) after every
+		// admin command, so the file is its current list.
 		f, err := serverconfig.Read(path)
 		if err != nil {
 			return err
@@ -85,12 +86,12 @@ func (s *Syncer) Sync(ctx context.Context, in *instance.Instance) error {
 			// Kept as ours even when it failed: no reply doesn't mean the
 			// server didn't do it, and an admin the manager added but lost
 			// track of would never be taken away again.
-			if _, err := in.Command(ctx, "admin add "+id, "panel"); err != nil {
+			if _, err := in.Command(ctx, AddCommand(f, id), "panel"); err != nil {
 				failed = errors.Join(failed, err)
 			}
 		}
 		for _, id := range remove {
-			if _, err := in.Command(ctx, "admin remove "+id, "panel"); err != nil {
+			if _, err := in.Command(ctx, RemoveCommand(f, id), "panel"); err != nil {
 				next = append(next, id) // still ours; try again next time
 				failed = errors.Join(failed, err)
 			}
@@ -116,13 +117,33 @@ func (s *Syncer) Sync(ctx context.Context, in *instance.Instance) error {
 			return nil
 		}
 		list := slices.DeleteFunc(current, func(x string) bool { return slices.Contains(remove, x) })
-		f.SetAdmins(append(list, add...))
+		if err := f.SetAdmins(append(list, add...)); err != nil {
+			return err
+		}
 		return f.Write(path)
 	})
 	if !ran || err != nil || next == nil {
 		return err
 	}
 	return s.Store.SetManagedAdmins(ctx, in.ID(), next)
+}
+
+// AddCommand is the console command that makes id an admin on a running
+// server whose config is f: from ReSkate 2.0.6, by giving them the admin role.
+func AddCommand(f *serverconfig.File, id string) string {
+	if f.HasRoles() {
+		return "role " + id + " " + serverconfig.AdminRole
+	}
+	return "admin add " + id
+}
+
+// RemoveCommand is the console command that takes an admin's place away: from
+// ReSkate 2.0.6, their role, which leaves them the default one.
+func RemoveCommand(f *serverconfig.File, id string) string {
+	if f.HasRoles() {
+		return "role " + id + " none"
+	}
+	return "admin remove " + id
 }
 
 // PanelAdmins maps the Steam IDs that should be in-game admins on an instance

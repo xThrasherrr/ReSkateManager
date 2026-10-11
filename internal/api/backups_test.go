@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
@@ -18,9 +20,11 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/adminsync"
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/backup"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
@@ -323,6 +327,62 @@ func TestSteamTokenIsOwnerOnly(t *testing.T) {
 	}
 }
 
+// From ReSkate 2.0.6 a server's roles say who may run which commands in the
+// game. Backups hold them, but a restore or import by someone who couldn't
+// manage in-game admins brings none back: not the admins, nor a role that
+// gives everyone every command.
+func TestRolesComeBackOnlyForAdminManagers(t *testing.T) {
+	p, a := newBackupPanel(t)
+	in, _ := a.Reg.Get("a")
+	cfg := in.Def().ConfigPath()
+	roles := filepath.Join(filepath.Dir(cfg), serverconfig.RolesFile)
+	writeFile(t, cfg, `{"server": {"name": "A"}}`)
+	everyone := `{"default_role": "player", "roles": [{"name": "player", "commands": ["*"]}, {"name": "admin", "commands": ["*"]}],
+		"players": {"76561198000000009": "admin"}}`
+	writeFile(t, roles, everyone)
+	code, b := p.do("POST", "/api/backups", `{}`)
+	var made backup.Info
+	if st := p.runJob(code, b, &made); st.Phase != "done" {
+		t.Fatalf("backup: %+v", st)
+	}
+	exported := p.export("a")
+	if got := zipFile(t, exported, "servers/a/"+serverconfig.RolesFile); got != everyone {
+		t.Fatalf("the export's roles: %q", got)
+	}
+	safe := `{"default_role": "player", "roles": [{"name": "player"}, {"name": "admin", "commands": ["*"]}], "players": {"76561198000000001": "admin"}}`
+	writeFile(t, roles, safe)
+	// A config from before roles lists admins, which the server would move into the role.
+	writeFile(t, cfg, `{"server": {"name": "A"}}`)
+
+	code, b = p.do("POST", "/api/roles", `{"name":"Manager","permissions":["settings.view","settings.edit","instances.manage"]}`)
+	var role auth.Role
+	if json.Unmarshal(b, &role); code != 200 {
+		t.Fatalf("create role: %d %s", code, b)
+	}
+	p.createUser("manager", grant(role.ID))
+	p.signIn("manager")
+	code, b = p.do("POST", "/api/instances/a/restore", fmt.Sprintf(`{"backup":%q}`, made.Name))
+	if st := p.runJob(code, b, nil); st.Phase != "done" || readFile(roles) == everyone || !strings.Contains(readFile(roles), "76561198000000001") ||
+		strings.Contains(readFile(roles), "76561198000000009") {
+		t.Errorf("restore: %+v, roles %s", st, readFile(roles))
+	}
+	code, s := p.uploadTo("/api/imports", "a-export.zip", exported, 1000)
+	var res struct{ ID string }
+	if st := p.runJob(code, []byte(s), &res); st.Phase != "done" {
+		t.Fatalf("import: %+v", st)
+	}
+	imported, _ := a.Reg.Get(res.ID)
+	if _, err := os.Stat(filepath.Join(imported.Def().Dir, serverconfig.RolesFile)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a manager's import kept the export's roles: %v", err)
+	}
+
+	p.signIn("owner")
+	code, b = p.do("POST", "/api/instances/a/restore", fmt.Sprintf(`{"backup":%q}`, made.Name))
+	if st := p.runJob(code, b, nil); st.Phase != "done" || readFile(roles) != everyone {
+		t.Errorf("an owner's restore: %+v, roles %s", st, readFile(roles))
+	}
+}
+
 func (p *panel) export(id string) []byte {
 	p.t.Helper()
 	resp, err := p.client.Get(p.url + "/api/instances/" + id + "/export?mods=0")
@@ -356,4 +416,118 @@ func zipFile(t *testing.T, zipped []byte, name string) string {
 		}
 	}
 	return ""
+}
+
+// The Roles card reads data/roles.json, so it lists who has which role with
+// the server stopped and nobody on; it's for those who manage admins.
+func TestServerRoles(t *testing.T) {
+	p, a := newBackupPanel(t)
+	in, _ := a.Reg.Get("a")
+	cfg := in.Def().ConfigPath()
+	writeFile(t, cfg, `{"server": {"name": "A"}}`)
+	if code, b := p.do("GET", "/api/instances/a/roles", ""); code != 200 || !strings.Contains(string(b), `"hasRoles":false`) {
+		t.Errorf("a server without roles: %d %s", code, b)
+	}
+	writeFile(t, filepath.Join(filepath.Dir(cfg), serverconfig.RolesFile), `{"default_role": "player",
+		"roles": [{"name": "player"}, {"name": "vip", "tag": "VIP", "color": "#FFD24A", "rank": 10}],
+		"players": {"76561198000000003": "vip", "76561198000000004": "vip"}}`)
+	if err := a.Store.SeenPlayer(context.Background(), "a", "76561198000000003", "VipGal"); err != nil {
+		t.Fatal(err)
+	}
+	code, b := p.do("GET", "/api/instances/a/roles", "")
+	var got struct {
+		Roles []struct {
+			Name, Tag, Color string
+			Players          []struct{ ID, Name string }
+		}
+		Default  string
+		HasRoles bool
+	}
+	if json.Unmarshal(b, &got); code != 200 || !got.HasRoles || got.Default != "player" || len(got.Roles) != 2 {
+		t.Fatalf("roles: %d %s", code, b)
+	}
+	vip := got.Roles[1]
+	if vip.Name != "vip" || vip.Tag != "VIP" || vip.Color != "#FFD24A" || len(vip.Players) != 2 ||
+		vip.Players[0].ID != "76561198000000003" || vip.Players[0].Name != "VipGal" || vip.Players[1].Name != "" {
+		t.Errorf("vip %+v", vip)
+	}
+	if len(got.Roles[0].Players) != 0 {
+		t.Errorf("player %+v", got.Roles[0])
+	}
+	p.signIn("viewer")
+	if code, _ := p.do("GET", "/api/instances/a/roles", ""); code != http.StatusForbidden {
+		t.Errorf("a viewer read the roles: %d", code)
+	}
+}
+
+// Giving and taking roles from the panel, here with the servers stopped: in
+// data/roles.json. On every server, one without the role is left out.
+func TestGiveRoles(t *testing.T) {
+	p, a := newBackupPanel(t)
+	in, _ := a.Reg.Get("a")
+	cfg := in.Def().ConfigPath()
+	roles := filepath.Join(filepath.Dir(cfg), serverconfig.RolesFile)
+	writeFile(t, cfg, `{"server": {"name": "A"}}`)
+	if code, b := p.do("POST", "/api/instances/a/roles/players", `{"id": "76561198000000003", "role": "vip"}`); code != http.StatusConflict {
+		t.Errorf("a server without roles: %d %s", code, b)
+	}
+	writeFile(t, roles, `{"default_role": "player", "roles": [{"name": "player"}, {"name": "vip"}, {"name": "admin", "commands": ["*"]}], "players": {}}`)
+	b2 := instance.Def{ID: "b", Name: "B", Dir: filepath.Join(t.TempDir(), "b")}
+	writeFile(t, b2.ConfigPath(), `{"server": {"name": "B"}}`)
+	writeFile(t, filepath.Join(b2.Dir, serverconfig.RolesFile), `{"default_role": "player", "roles": [{"name": "player"}], "players": {}}`)
+	a.Reg.Add(b2)
+
+	for body, want := range map[string]int{
+		`{"id": "76561198000000003", "role": "ghost"}`: 400,
+		`{"id": "76561198000000003", "role": "none"}`:  400,
+		`{"id": "Bob", "role": "vip"}`:                 400,
+		`{"id": "76561198000000003", "role": "VIP"}`:   200,
+	} {
+		if code, b := p.do("POST", "/api/instances/a/roles/players", body); code != want {
+			t.Errorf("give %s: %d %s", body, code, b)
+		}
+	}
+	if !strings.Contains(readFile(roles), `"76561198000000003": "vip"`) {
+		t.Errorf("roles.json %s", readFile(roles))
+	}
+	code, b := p.do("POST", "/api/instances/a/roles/players", `{"id": "76561198000000004", "role": "admin", "everywhere": true}`)
+	var res struct {
+		Results []struct{ ID, Reply, Error string }
+	}
+	if json.Unmarshal(b, &res); code != 200 || len(res.Results) != 2 {
+		t.Fatalf("every server: %d %s", code, b)
+	}
+	for _, r := range res.Results {
+		if r.ID == "a" && (r.Error != "" || !strings.Contains(readFile(roles), `"76561198000000004": "admin"`)) ||
+			r.ID == "b" && !strings.Contains(r.Error, `no "admin" role`) {
+			t.Errorf("every server: %+v", r)
+		}
+	}
+	if code, b := p.do("DELETE", "/api/instances/a/roles/players/76561198000000003", ""); code != 200 || strings.Contains(readFile(roles), "76561198000000003") {
+		t.Errorf("take: %d %s, %s", code, b, readFile(roles))
+	}
+
+	// An admin kept in step with a panel user is the sync's: it would make
+	// them an admin again.
+	ctx := context.Background()
+	a.Admins = &adminsync.Syncer{Store: a.Store, Auth: a.Auth, Reg: a.Reg, Log: a.Log}
+	role, err := a.Auth.SaveRole(ctx, auth.Role{Name: "In-game admin", Permissions: []string{auth.IngameAdmin}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := a.Auth.CreateUser(ctx, auth.NewUser{Username: "linked", Password: testPassword, SteamID: "76561198000000006"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Auth.UpdateUser(ctx, u.ID, auth.UserUpdate{Grants: &[]auth.Grant{{RoleID: role.ID, Instance: "*"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ method, path, body string }{
+		{"POST", "/api/instances/a/roles/players", `{"id": "76561198000000006", "role": "vip"}`},
+		{"DELETE", "/api/instances/a/roles/players/76561198000000006", ""},
+	} {
+		if code, b := p.do(c.method, c.path, c.body); code != http.StatusConflict || !strings.Contains(string(b), "linked") {
+			t.Errorf("%s a panel user's admin role: %d %s", c.method, code, b)
+		}
+	}
 }

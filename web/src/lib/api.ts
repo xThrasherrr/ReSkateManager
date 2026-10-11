@@ -251,6 +251,7 @@ export interface LogResult {
 export interface Player {
 	id: string;
 	name: string;
+	role?: string; // the one they were given (ReSkate 2.0.6), not the default
 	admin: boolean;
 	joinedAt?: number;
 }
@@ -325,8 +326,9 @@ export interface Field {
 	key: string;
 	label: string;
 	group: string;
-	// maps: map names, in order; color: "#RRGGBB"; lines: chat lines, in order; votes: CustomVote[] (#lib/votes.js)
-	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps' | 'color' | 'lines' | 'votes' | 'commands';
+	// maps: map names, in order; color: "#RRGGBB"; lines: chat lines, in order; votes: CustomVote[] (#lib/votes.js);
+	// parkmods: ParkMod[] (#lib/parkmods.js)
+	type: 'string' | 'int' | 'number' | 'bool' | 'enum' | 'list' | 'maps' | 'color' | 'lines' | 'votes' | 'commands' | 'parkmods';
 	options?: string[];
 	min?: number;
 	max?: number;

@@ -26,6 +26,7 @@ const (
 	TypeLines    FieldType = "lines"    // ordered list of chat lines, kept as written
 	TypeVotes    FieldType = "votes"    // the owner's custom votes ([]CustomVote)
 	TypeCommands FieldType = "commands" // the owner's chat commands ([]CustomCommand)
+	TypeParkMods FieldType = "parkmods" // parks shared as mods ([]ParkMod)
 )
 
 // Field describes one setting of ReSkateServer.json for the settings page
@@ -116,6 +117,18 @@ type CustomCommand struct {
 	Admin   bool     `json:"admin"` // only admins may use it
 }
 
+// ParkMod is a park built in the game's Park Editor and shared as a mod
+// (maps.park_mods, ReSkate 2.0.6), which the server spawns for everyone with
+// "park-mod add <name>" while Map runs: from Folder, a mod's folder in the
+// server's Mods, the park for the base map Key (parks/<key>.park.json), or
+// the mod's only one when Key is empty.
+type ParkMod struct {
+	Name   string `json:"name"`
+	Folder string `json:"folder"`
+	Map    string `json:"map"`
+	Key    string `json:"key"`
+}
+
 // Fields is the editable schema, in display order.
 var Fields = []Field{
 	{Key: "name", Label: "Server name", Group: "General", Type: TypeString, MaxLen: 64, Help: "Shown in the server browser. Letters, numbers, spaces and - _ / [ ] ( ) only.", Default: defaultServerName},
@@ -171,6 +184,10 @@ var Fields = []Field{
 	{Key: "parks.historic", Label: "Piers 1 / Historic", Group: "Parks", Type: TypeEnum, Options: parkLayouts["historic"], Default: "megapark_05"},
 	{Key: "parks.financial", Label: "Piers 2 / Financial", Group: "Parks", Type: TypeEnum, Options: parkLayouts["financial"], Default: "flumppark_08"},
 
+	{Key: "park_mods", Label: "Park mods", Group: "Park mods", Type: TypeParkMods, Help: "Parks built in the game's Park Editor, from mods in the server's Mods. Spawn one with park-mod add <name> while its map runs.", Default: []ParkMod{}},
+	{Key: "park_limits.parks", Label: "Parks spawned at once, at most", Group: "Park mods", Type: TypeInt, Min: 1, Max: 16, Restart: true, Default: 3.0},
+	{Key: "park_limits.objects", Label: "Objects of the parks spawned, at most", Group: "Park mods", Type: TypeInt, Min: 1, Max: 1024, Restart: true, Help: "All of them together.", Default: 512.0},
+
 	{Key: "announcements.messages", Label: "Announcement messages", Group: "Announcements", Type: TypeLines, Max: 32, MaxLen: 200, Help: "One per line, up to 32. The server posts them in turn.", Default: []string{}},
 	{Key: "announcements.interval_minutes", Label: "Minutes between announcements", Group: "Announcements", Type: TypeInt, Min: 0, Max: 1440, Help: "While players are on. 0 is off.", Default: 0.0},
 	{Key: "announcements.card", Label: "Show announcements as a card", Group: "Announcements", Type: TypeBool, Help: "At the top of every player's screen, as well as in chat.", Default: true},
@@ -201,7 +218,9 @@ var Fields = []Field{
 
 	{Key: "global_bans", Label: "Turn away players the ReSkate team banned", Group: "Anti-cheat", Type: TypeBool, Restart: true, Help: "The server's own bans apply either way.", Default: true},
 	{Key: "word_warnings", Label: "Warnings before a kick for words not allowed", Group: "Anti-cheat", Type: TypeInt, Min: 0, Max: 10, Restart: true, Help: "A message with one is never passed on. 0 warns and kicks nobody.", Default: 3.0},
+	{Key: "use_global_word_filter", Label: "Use the ReSkate team's chat word lists", Group: "Anti-cheat", Type: TypeBool, Help: "Off, only the server's own words are filtered and refused.", Default: true},
 	{Key: "speed_check", Label: "Speedhack check", Group: "Anti-cheat", Type: TypeEnum, Options: checkModes, Default: "warn"},
+	{Key: "pinned_board", Label: "Board kept on another player check", Group: "Anti-cheat", Type: TypeEnum, Options: checkModes, Default: "warn"},
 	{Key: "score_check", Label: "Scoring mod check", Group: "Anti-cheat", Type: TypeEnum, Options: checkModes, Default: "warn"},
 	{Key: "score_allow", Label: "Allowed scoring fingerprints", Group: "Anti-cheat", Type: TypeList, Help: "16 hex digits each, as the console prints them.", Default: []string{}},
 

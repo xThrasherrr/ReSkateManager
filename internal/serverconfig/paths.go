@@ -14,7 +14,7 @@ func Paths() map[string]string {
 		}
 	}
 	for key := range sections {
-		if p := places(key)[0]; out[p] == "" {
+		if p := places(key)[0]; out[p] == "" && !slices.Contains(Removed, key) {
 			out[p] = key
 		}
 	}

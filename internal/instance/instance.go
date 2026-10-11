@@ -67,8 +67,12 @@ func (d Def) ConfigPath() string { return filepath.Join(d.Dir, "ReSkateServer.js
 
 // Player is someone on the server, as the roster has them.
 type Player struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Role is the one they were given on a server with roles (ReSkate
+	// 2.0.6), not the default one everybody else has; "admin" for an admin
+	// before then.
+	Role     string `json:"role,omitempty"`
 	Admin    bool   `json:"admin"`
 	JoinedAt int64  `json:"joinedAt,omitempty"`
 }
@@ -112,9 +116,15 @@ var backoff = []time.Duration{2 * time.Second, 5 * time.Second, 15 * time.Second
 // Exit lines after which retrying cannot help.
 var fatalPrefixes = []string{"Config problem:", "Cannot read ", "Cannot load "}
 
+// lostConsole is why a server whose output closed while it ran was ended
+// (supervisor.Process.Lost). Restarting it would only do the same again.
+const lostConsole = "The server closed its console while running, so the manager could neither read nor stop it, and ended it. " +
+	"ReSkate 2.0.6's Windows server does this; until a release fixes it, put 2.0.5's server files in its folder by hand."
+
 type waiter struct {
 	ch       chan logparse.Entry
-	internal bool // hide the reply from the console
+	line     string // the command it waits on the reply to
+	internal bool   // hide the reply from the console
 	expires  time.Time
 	// accept, when set, skips lines that can't be this command's reply, so an
 	// in-game admin's result printed meanwhile isn't parsed as a roster.
@@ -147,12 +157,18 @@ type Instance struct {
 	exited    chan struct{} // closed once watch has handled the current process's exit
 	maps      []string      // the server's map list, asked once per run
 	waiters   []*waiter
-	ranBy     string          // "vote" or "poll": the next line is a command a passed vote or poll-run ran, not a reply
-	pollRun   bool            // the open poll is the console's poll-run, whose winning answer runs a command
-	runs      map[string]int  // how many commands each of the owner's chat commands runs; nil until one does
-	results   int             // results still to come of the commands a chat command runs, not replies either
-	lastNet   time.Time       // when the last network summary was passed on
-	clog      *logfile.Writer // console.log, while a process runs
+	ranBy     string         // "vote" or "poll": the next line is a command a passed vote or poll-run ran, not a reply
+	pollRun   bool           // the open poll is the console's poll-run, whose winning answer runs a command
+	runs      map[string]int // how many commands each of the owner's chat commands runs; nil until one does
+	results   int            // results still to come of the commands a chat command runs, not replies either
+	// defaultRole is the role of everyone on the server given none (2.0.6),
+	// read as it starts.
+	defaultRole string
+	// wordsShown: the server printed what words answers as it started
+	// (2.0.6), which it does once, before it reads any command.
+	wordsShown bool
+	lastNet    time.Time       // when the last network summary was passed on
+	clog       *logfile.Writer // console.log, while a process runs
 	// cmdSem serialises commands so replies arrive in the order they were
 	// sent; a channel, so someone waiting for their turn can give up.
 	cmdSem chan struct{}
@@ -322,6 +338,7 @@ func (in *Instance) startLocked() error {
 	in.info = Info{}
 	in.exitCode, in.lastError, in.lastLine = nil, "", ""
 	in.readyAt = time.Time{}
+	in.wordsShown = false
 	in.maps = nil
 	in.state = Starting
 	if c, err := logfile.Open(filepath.Join(in.def.Dir, ConsoleLog)); err != nil {
@@ -460,6 +477,10 @@ func (in *Instance) watch(p *supervisor.Process, exited chan struct{}) {
 	requested := in.state == Stopping || in.state == Updating
 	wasReady := !in.readyAt.IsZero()
 	uptime := time.Since(in.readyAt)
+	if p.Lost() {
+		in.lastLine = lostConsole
+		in.managerLineLocked(lostConsole)
+	}
 	in.managerLineLocked(fmt.Sprintf("Server exited with code %d.", code))
 	in.log.Info("server exited", "code", code, "requested", requested)
 
@@ -473,7 +494,7 @@ func (in *Instance) watch(p *supervisor.Process, exited chan struct{}) {
 	in.lastError = in.lastLine
 	// A setup problem stops a server before it is ready. Once ready, the last
 	// line can be a player's join with any name, "Config problem: ..." too.
-	fatal := !wasReady && slices.ContainsFunc(fatalPrefixes, func(pre string) bool { return strings.HasPrefix(in.lastLine, pre) })
+	fatal := p.Lost() || !wasReady && slices.ContainsFunc(fatalPrefixes, func(pre string) bool { return strings.HasPrefix(in.lastLine, pre) })
 	if wasReady && uptime > stableUptime {
 		in.failures = 0
 	}
@@ -594,6 +615,12 @@ func (in *Instance) onIdle() {
 
 func (in *Instance) handleLocked(e logparse.Entry) {
 	in.lastLine, _, _ = strings.Cut(e.Text, "\n")
+	// What only startup prints is believed only during startup: later, a line
+	// that looks like it can come from a player's name in a command's reply,
+	// or be the reply.
+	if !in.startupLineLocked(e) {
+		e.Kind = logparse.KindRaw
+	}
 	if in.ranBy != "" {
 		// A passed vote, or a poll-run's winner, logs its command's result
 		// straight after.
@@ -613,18 +640,14 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		in.pollRun = true
 	}
 	hidden := false
-	if !e.IsEvent() {
-		hidden = in.deliverReplyLocked(e)
+	if !e.IsEvent() || in.taggedReplyLocked(e) {
+		var answered string
+		hidden, answered = in.deliverReplyLocked(e)
 		// Whoever ran it (the panel, the console, the admin sync), the roster
-		// follows an admin change made while the player is on.
-		if who, admin, ok := logparse.ParseAdminChange(e.Text); ok {
-			in.setAdminLocked(who, admin)
+		// follows a role given while the player is on.
+		if who, role, ok := logparse.ParseRoleChange(answered, e.Text); ok {
+			in.setRoleLocked(who, role)
 		}
-	}
-	// What only startup prints is believed only during startup: later, a line
-	// that looks like it can come from a player's name in a command's reply.
-	if !in.startupLineLocked(e.Kind) {
-		e.Kind = logparse.KindRaw
 	}
 	switch e.Kind {
 	case logparse.KindTagged:
@@ -652,6 +675,7 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		}
 	case logparse.KindReady:
 		in.runs, in.results, in.pollRun = nil, 0, false
+		in.defaultRole = serverconfig.DefaultRole(in.def.ConfigPath())
 		in.state = Running
 		in.readyAt = time.Now()
 		in.info.ServerName = e.Name
@@ -672,7 +696,8 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		in.info.Map = e.Fields["map"]
 		in.publishStateLocked()
 	case logparse.KindJoin:
-		p := &Player{ID: e.ID, Name: e.Name, Admin: e.Fields["admin"] == "1", JoinedAt: time.Now().UnixMilli()}
+		role := in.givenRoleLocked(e.Fields["role"])
+		p := &Player{ID: e.ID, Name: e.Name, Role: role, Admin: role == serverconfig.AdminRole, JoinedAt: time.Now().UnixMilli()}
 		in.players[e.ID] = p
 		in.publishPlayersLocked()
 		if in.OnJoin != nil {
@@ -838,7 +863,7 @@ func (in *Instance) send(ctx context.Context, line, by string, internal bool, ac
 		}
 		return "", errors.New("server is not running")
 	}
-	w := &waiter{ch: make(chan logparse.Entry, 1), internal: internal, expires: time.Now().Add(15 * time.Second), accept: accept}
+	w := &waiter{ch: make(chan logparse.Entry, 1), line: line, internal: internal, expires: time.Now().Add(15 * time.Second), accept: accept}
 	in.waiters = append(in.waiters, w)
 	if !internal {
 		shown := line
@@ -869,7 +894,31 @@ func (in *Instance) send(ctx context.Context, line, by string, internal bool, ac
 	}
 }
 
-func (in *Instance) deliverReplyLocked(e logparse.Entry) (hidden bool) {
+// taggedReplies are the commands whose reply from the console is a tagged
+// line, which is otherwise the server's own: park-mod's is the "[parks]" line
+// it logs for an admin in the game (2.0.6).
+var taggedReplies = map[string]string{"park-mod": "parks"}
+
+// taggedReplyLocked reports whether a tagged line is the reply to the command
+// waiting for one.
+func (in *Instance) taggedReplyLocked(e logparse.Entry) bool {
+	return e.Kind == logparse.KindTagged && taggedReplies[in.waitingLocked()] == e.Tag
+}
+
+// waitingLocked is the verb of the command the next reply is for, "" when
+// none is waiting.
+func (in *Instance) waitingLocked() string {
+	now := time.Now()
+	for _, w := range in.waiters {
+		if !now.After(w.expires) { // an expired one deliverReplyLocked drops
+			verb, _, _ := strings.Cut(strings.ToLower(w.line), " ")
+			return verb
+		}
+	}
+	return ""
+}
+
+func (in *Instance) deliverReplyLocked(e logparse.Entry) (hidden bool, line string) {
 	now := time.Now()
 	for len(in.waiters) > 0 {
 		w := in.waiters[0]
@@ -879,14 +928,14 @@ func (in *Instance) deliverReplyLocked(e logparse.Entry) (hidden bool) {
 			continue
 		}
 		if w.accept != nil && !w.accept(e.Text) {
-			return false
+			return false, ""
 		}
 		in.waiters = in.waiters[1:]
 		w.ch <- e
 		close(w.ch)
-		return w.internal
+		return w.internal, w.line
 	}
-	return false
+	return false, ""
 }
 
 func (in *Instance) dropWaiterLocked(w *waiter) {
@@ -906,14 +955,29 @@ func (in *Instance) failWaitersLocked() {
 	in.waiters = nil
 }
 
-// setAdminLocked marks an online player, by SteamID64 or name, as an admin or not.
-func (in *Instance) setAdminLocked(id string, admin bool) {
-	p := in.players[id]
-	if p == nil || p.Admin == admin {
+// setRoleLocked gives an online player, by SteamID64 or name, the role a
+// command gave them; "" is none.
+func (in *Instance) setRoleLocked(who, role string) {
+	p := in.players[who]
+	for _, x := range in.players {
+		if p == nil && x.Name == who {
+			p = x
+		}
+	}
+	if role = in.givenRoleLocked(role); p == nil || p.Role == role {
 		return
 	}
-	p.Admin = admin
+	p.Role, p.Admin = role, role == serverconfig.AdminRole
 	in.publishPlayersLocked()
+}
+
+// givenRoleLocked is a role as the roster keeps it: "" for the default one,
+// which the server names for everyone who was given none.
+func (in *Instance) givenRoleLocked(role string) string {
+	if role == in.defaultRole {
+		return ""
+	}
+	return role
 }
 
 var playersReplyRe = regexp.MustCompile(`^\d+ players$`)
@@ -937,7 +1001,8 @@ func (in *Instance) Reconcile() {
 	defer in.mu.Unlock()
 	next := map[string]*Player{}
 	for _, r := range rows {
-		p := &Player{ID: r.ID, Name: r.Name, Admin: r.Admin, JoinedAt: time.Now().UnixMilli()}
+		role := in.givenRoleLocked(r.Role)
+		p := &Player{ID: r.ID, Name: r.Name, Role: role, Admin: role == serverconfig.AdminRole, JoinedAt: time.Now().UnixMilli()}
 		if old, ok := in.players[r.ID]; ok {
 			p.JoinedAt = old.JoinedAt
 		} else if in.OnJoin != nil {
@@ -951,15 +1016,25 @@ func (in *Instance) Reconcile() {
 	in.publishPlayersLocked()
 }
 
-// startupLineLocked reports whether a line of kind k can be the server's own
-// at this point. It prints that it is up while starting, and its Steam ID and
-// join code straight after (Server/main.cpp); a player can't be on by then.
-func (in *Instance) startupLineLocked(k logparse.Kind) bool {
-	switch k {
+// startupLineLocked reports whether a line can be the server's own at this
+// point. It prints that it is up while starting, and its Steam ID and join
+// code straight after (Server/main.cpp); a player can't be on by then. From
+// 2.0.6 it also prints what words answers then, once: after that, such a line
+// is the reply to a words command.
+func (in *Instance) startupLineLocked(e logparse.Entry) bool {
+	early := in.state == Starting || in.state == Running && time.Since(in.readyAt) < 10*time.Second
+	switch e.Kind {
 	case logparse.KindReady:
 		return in.state == Starting
 	case logparse.KindSteam, logparse.KindJoinCode:
-		return in.state == Starting || in.state == Running && time.Since(in.readyAt) < 10*time.Second
+		return early
+	case logparse.KindStartup:
+		if !strings.HasPrefix(e.Text, logparse.ChatWords) {
+			return true
+		}
+		first := early && !in.wordsShown
+		in.wordsShown = true
+		return first
 	}
 	return true
 }

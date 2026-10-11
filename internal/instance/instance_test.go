@@ -121,6 +121,90 @@ func TestLifecycleRepliesAndRoster(t *testing.T) {
 	}
 }
 
+// From ReSkate 2.0.6 the roster has each player's role, from their join and
+// the role command, and the default one everybody else has isn't kept.
+func TestRosterRoles(t *testing.T) {
+	d := fakeServer(t)
+	if err := os.MkdirAll(filepath.Join(d.Dir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	roles := `{"default_role": "player", "roles": [{"name": "player"}, {"name": "vip"}, {"name": "admin", "commands": ["*"]}],
+		"players": {"76561198000000001": "admin"}}`
+	if err := os.WriteFile(filepath.Join(d.Dir, serverconfig.RolesFile), []byte(roles), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := New(d, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := in.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		in.Stop(ctx)
+	})
+	waitState(t, in, Running)
+	run := func(cmd string) map[string]Player {
+		t.Helper()
+		if _, err := in.Command(context.Background(), cmd, "test"); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]Player{}
+		for _, p := range in.Players() {
+			out[p.Name] = p
+		}
+		return out
+	}
+	// Straight after it's up, the server prints what words answers; the
+	// reply to a words sent then is still the reply.
+	if reply, err := in.Command(context.Background(), "words global off", "test"); err != nil || reply != "Chat words: the ReSkate team's lists are off." {
+		t.Errorf("words reply %q, %v", reply, err)
+	}
+	run("join 76561198000000001 Alice")
+	ps := run("join 76561198000000002 Bob")
+	if a, b := ps["Alice"], ps["Bob"]; !a.Admin || a.Role != "admin" || b.Admin || b.Role != "" {
+		t.Errorf("joined %+v %+v", a, b)
+	}
+	if b := run("role 76561198000000002 vip")["Bob"]; b.Role != "vip" || b.Admin {
+		t.Errorf("after role vip: %+v", b)
+	}
+	if b := run("role 76561198000000002 admin")["Bob"]; b.Role != "admin" || !b.Admin {
+		t.Errorf("after role admin: %+v", b)
+	}
+	if b := run("role 76561198000000002 none")["Bob"]; b.Role != "" || b.Admin {
+		t.Errorf("after role none: %+v", b)
+	}
+	// The list the roster is checked against names the roles too.
+	in.Reconcile()
+	if ps := run("status"); len(ps) != 2 || ps["Alice"].Role != "admin" || ps["Bob"].Role != "" || ps["Bob"].Name != "Bob" {
+		t.Errorf("after a check %+v", ps)
+	}
+}
+
+// park-mod's reply (2.0.6) is a [parks] line, which is otherwise the server's
+// own: it answers park-mod, and only park-mod.
+func TestTaggedReply(t *testing.T) {
+	in := New(fakeServer(t), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := in.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		in.Stop(ctx)
+	})
+	waitState(t, in, Running)
+	if reply, err := in.Command(context.Background(), "park-mod config add street | street | San Vansterdam", "test"); err != nil ||
+		reply != "[parks] config add street | street | San Vansterdam by console" {
+		t.Errorf("park-mod reply %q, %v", reply, err)
+	}
+	// Logged by itself, a [parks] line is no command's reply.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if reply, err := in.Command(ctx, "parks street", "test"); err == nil {
+		t.Errorf("a park's own line taken for a reply: %q", reply)
+	}
+}
+
 // The server refuses to start with a name saved before its name rule, so the
 // manager fixes the name first.
 func TestStartFixesServerName(t *testing.T) {
@@ -195,6 +279,33 @@ func TestFatalExitIsNotRetried(t *testing.T) {
 	time.Sleep(backoff[0] + 500*time.Millisecond) // past the first retry delay
 	if in.State() != Crashed || in.View().PID != 0 {
 		t.Error("a config error was retried")
+	}
+}
+
+// A server that closes its console and runs on (2.0.6's headless Windows
+// server) is ended, and not started again only to do the same.
+func TestLostConsoleIsNotRetried(t *testing.T) {
+	d := fakeServer(t)
+	d.AutoRestart = true
+	if err := os.WriteFile(filepath.Join(d.Dir, "mute"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in := New(d, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	crashes := make(chan Crash, 4)
+	in.OnCrash = func(c Crash) { crashes <- c }
+	if err := in.Start(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case c := <-crashes:
+		if !c.Fatal || c.Retry != 0 || c.Reason != lostConsole {
+			t.Errorf("crash %+v", c)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("a server with no console was left running")
+	}
+	if v := in.View(); in.State() != Crashed || v.PID != 0 || v.LastError != lostConsole {
+		t.Errorf("state %s, view %+v", in.State(), v)
 	}
 }
 

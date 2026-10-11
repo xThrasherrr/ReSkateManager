@@ -12,19 +12,20 @@ import (
 	"testing"
 )
 
-// A config as ReSkate 2.0.3 writes it (layout in Server/server_config.cpp), in
-// the sections of 1.1.7 and later.
+// A config as ReSkate 2.0.6 writes it (layout in Server/server_config.cpp), in
+// the sections of 1.1.7 and later, with the admins an older one listed: the
+// server moves them into data/roles.json when it starts.
 const sectionedConfig = `{
   "server": {"name": "Sectioned", "password": "", "welcome_message": "hi", "chat_color": "#8E5CFF", "chat_text_color": "d9c8ff",
     "listed": true, "max_players": 32, "port": 27017, "query_port": 27018, "steam_token": "TOKEN", "auto_update": false, "activity_log": true},
   "access": {"admins": ["76561198000000001"], "reserved_players_slots": ["76561198000000002"], "use_global_bans": false},
   "maps": {"map": "Isle of Grom", "pool": ["Isle of Grom", "San Vansterdam"], "rotation_minutes": 20,
     "parks": {"construction": "skatepark_01", "historic": "empty", "financial": "empty"}, "world_layer_sync": true,
-    "layers": {"grom_tod_1_night": "on"}},
+    "layers": {"grom_tod_1_night": "on"}, "park_mods": [], "park_limits": {"parks": 3, "objects": 512}},
   "players": {"allow_boosts": false, "allow_no_bail": true, "allow_noclip": false, "allow_parties": true, "party_size": 4,
     "afk_kick_minutes": 5, "allow_voice_chat": true, "voice_range": 30, "object_placement": "admins", "object_limit": 10,
-    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false, "word_warnings": 3},
-  "anti_cheat": {"speed_hack": "kick", "modified_scoring": "off", "allowed_scoring_mods": ["00000000deadbeef"],
+    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false, "word_warnings": 3, "use_global_word_filter": true},
+  "anti_cheat": {"speed_hack": "kick", "pinned_board": "warn", "modified_scoring": "off", "allowed_scoring_mods": ["00000000deadbeef"],
     "enforce_tuning": true, "bone_scale_limit": 2, "bone_reach_limit": 1.0},
   "network": {"use_steam_relay": true, "send_rate": 48, "crowd_budget": 0, "pack_ms": 10, "threads": 0, "finger_distance": 25,
     "distances": {"full_rate_return": 20, "half_rate_start": 30, "half_rate_return": 40, "low_rate_start": 60}, "steam_debug": false},
@@ -604,4 +605,78 @@ func TestBansFile(t *testing.T) {
 	if g, _ = Read(flat); len(g.Bans()) != 1 {
 		t.Errorf("flat bans %+v", g.Bans())
 	}
+}
+
+// 2.0.6: park mods, set up live with park-mod config, a check for boards kept
+// on another player, and the ReSkate team's word lists turned off.
+func TestParkModsAndChecks(t *testing.T) {
+	f, path := readSectioned(t)
+	maps := []string{"San Vansterdam", "Isle of Grom", "My Custom"}
+	street := map[string]any{"name": "Street", "folder": "popular skate 2 street park", "map": "san vansterdam", "key": "bam"}
+	p, err := Diff(f, map[string]any{"park_mods": []any{street}, "pinned_board": "kick", "use_global_word_filter": false}, maps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"board-check kick", "words global off", "park-mod config add street | popular skate 2 street park | San Vansterdam | bam"}
+	if !slices.Equal(sortedCopy(p.Commands), sortedCopy(want)) || len(p.Restart) != 0 {
+		t.Errorf("planned %q, restart %v", p.Commands, p.Restart)
+	}
+
+	// The server saves it as it set it up; a change is a remove and an add.
+	f.ApplyOffline(p.Changed)
+	if err := f.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	if f, err = Read(path); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := f.at("maps.park_mods"); fmt.Sprint(got) != "[map[folder:popular skate 2 street park key:bam map:San Vansterdam name:street]]" {
+		t.Errorf("park_mods written as %v", got)
+	}
+	if got, _ := f.at("anti_cheat.pinned_board"); got != "kick" {
+		t.Errorf("anti_cheat.pinned_board = %v", got)
+	}
+	grom := map[string]any{"name": "grom", "folder": "Grom Bowl", "map": "Isle of Grom"}
+	street["folder"] = "street park v2"
+	if p, err = Diff(f, map[string]any{"park_mods": []any{grom, street}}, maps); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"park-mod config remove street", "park-mod config add grom | Grom Bowl | Isle of Grom",
+		"park-mod config add street | street park v2 | San Vansterdam | bam"}; !slices.Equal(p.Commands, want) {
+		t.Errorf("planned %q", p.Commands)
+	}
+	if p, err = Diff(f, map[string]any{"park_mods": []any{}}, maps); err != nil || !slices.Equal(p.Commands, []string{"park-mod config remove street"}) {
+		t.Errorf("removing all planned %+v, %v", p, err)
+	}
+
+	// What park_mods_error refuses, the server won't start on.
+	for _, bad := range []map[string]any{
+		{"name": "", "folder": "a", "map": "Isle of Grom"},
+		{"name": "way too long a name", "folder": "a", "map": "Isle of Grom"},
+		{"name": "x", "folder": "../a", "map": "Isle of Grom"},
+		{"name": "x", "folder": " a", "map": "Isle of Grom"},
+		{"name": "x", "folder": ".a", "map": "Isle of Grom"},
+		{"name": "x", "folder": "a", "map": ""},
+		{"name": "x", "folder": "a", "map": "Nowhere"},
+		{"name": "x", "folder": "a", "map": "Isle of Grom", "key": "Bam"},
+	} {
+		if _, err := Diff(f, map[string]any{"park_mods": []any{bad}}, maps); err == nil {
+			t.Errorf("accepted %v", bad)
+		}
+	}
+	if _, err := Diff(f, map[string]any{"park_mods": []any{grom, grom}}, maps); err == nil {
+		t.Error("accepted two park mods of one name")
+	}
+	if _, err := Diff(f, map[string]any{"park_limits.parks": 17.0}, nil); err == nil {
+		t.Error("accepted 17 parks at once")
+	}
+	if p, err := Diff(f, map[string]any{"park_limits.objects": 100.0}, nil); err != nil || p.Restart["park_limits.objects"] != 100.0 {
+		t.Errorf("park_limits.objects planned %+v, %v", p, err)
+	}
+}
+
+func sortedCopy(s []string) []string {
+	out := slices.Clone(s)
+	slices.Sort(out)
+	return out
 }

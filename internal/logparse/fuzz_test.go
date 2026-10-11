@@ -55,7 +55,8 @@ func FuzzAssembler(f *testing.F) {
 			// Command replies go through these.
 			ParsePlayers(e.Text)
 			ParseMaps(e.Text)
-			ParseAdminChange(e.Text)
+			ParseRoleChange("admin add x", e.Text)
+			ParseRoleChange("role x admin", e.Text)
 			ParseNetwork(e.Text)
 			e.IsEvent()
 		}

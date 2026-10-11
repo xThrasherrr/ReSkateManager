@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -17,7 +19,18 @@ import (
 type Options struct {
 	Exe  string   // full path to ReSkateServer(.exe)
 	Dir  string   // working directory (the server resolves everything from its exe folder anyway)
-	Args []string // extra arguments; --no-update is always added
+	Args []string // extra arguments, after Args()
+}
+
+// Args are what every server is started with: no updates of its own, as the
+// manager installs them, and on Windows no window of its own. ReSkate 2.0.6's
+// Windows server opens one unless told it's headless; older servers ignore
+// arguments they don't know.
+func Args() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"--no-update", "--headless"}
+	}
+	return []string{"--no-update"}
 }
 
 // Process is a running server. Lines are delivered to the onLine callback
@@ -28,6 +41,7 @@ type Process struct {
 	in   chan string // console lines, written to stdin in order by one goroutine
 	done chan struct{}
 	pid  int
+	lost atomic.Bool // ended for closing its output while it ran
 }
 
 // inQueue is how many console lines may wait for the server to read them.
@@ -44,8 +58,7 @@ const drainTime = 5 * time.Second
 // Start runs the server, calling onLine with each line it prints, in order,
 // and onIdle when its output has paused for IdleGap.
 func Start(o Options, onLine func(string), onIdle func()) (*Process, error) {
-	args := append([]string{"--no-update"}, o.Args...)
-	cmd := exec.Command(o.Exe, args...)
+	cmd := exec.Command(o.Exe, append(Args(), o.Args...)...)
 	cmd.Dir = o.Dir
 	configure(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -109,6 +122,19 @@ func Start(o Options, onLine func(string), onIdle func()) (*Process, error) {
 		case <-time.After(drainTime):
 		}
 		stdout.Close()
+	}()
+	go func() {
+		<-readDone
+		// Output ends as the server exits. A server whose output ended while
+		// it runs on can't be heard or told anything, and nor would it quit:
+		// ReSkate 2.0.6's Windows server reopens its console on one of its
+		// own when headless.
+		select {
+		case <-waited:
+		case <-time.After(drainTime):
+			p.lost.Store(true)
+			kill(cmd)
+		}
 	}()
 	go func() {
 		idle := time.NewTimer(time.Hour)
@@ -197,6 +223,10 @@ func UsageOf(pid int) (Usage, error) { return usage(pid) }
 
 // Done is closed once the process has exited and all its output was delivered.
 func (p *Process) Done() <-chan struct{} { return p.done }
+
+// Lost reports, after Done, whether the server was ended because its output
+// closed while it was still running.
+func (p *Process) Lost() bool { return p.lost.Load() }
 
 // ExitCode is valid after Done; -1 when the process was killed or never ran.
 func (p *Process) ExitCode() int {

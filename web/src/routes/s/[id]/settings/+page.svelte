@@ -13,12 +13,14 @@
 	import LinesInput from '#lib/components/LinesInput.svelte';
 	import CustomVotes from '#lib/components/CustomVotes.svelte';
 	import CustomCommands from '#lib/components/CustomCommands.svelte';
+	import ParkMods from '#lib/components/ParkMods.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
 	import { control, utf8Length } from '#lib/text.js';
 	import { maxVotes, voteProblems, type CustomVote } from '#lib/votes.js';
 	import { commandProblems, maxCommands } from '#lib/commands.js';
+	import { maxParkMods, parkModProblems } from '#lib/parkmods.js';
 
 	interface Result {
 		command: string;
@@ -93,6 +95,9 @@
 		);
 	});
 	const maps = $derived(modList ? mapChoices(modList) : null);
+	// What a park mod can name: the folders in the server's Mods, and its maps.
+	const modFolders = $derived((modList?.mods ?? []).filter((m) => !m.disabled).map((m) => m.folder));
+	const mapNames = $derived(maps ? [...maps.retail, ...maps.mods.flatMap((m) => m.maps.map((x) => x.name))] : []);
 	// A saved map the list doesn't have (a level path, or a mod since removed) stays selectable.
 	const unlisted = $derived.by(() => {
 		const v = values.map as string | undefined;
@@ -176,6 +181,10 @@
 			if (v.length > maxCommands) return `At most ${maxCommands} commands.`;
 			if (commandProblems(v).some(Boolean)) return 'Fix the commands marked in red.';
 		}
+		if (f.type === 'parkmods' && Array.isArray(v)) {
+			if (v.length > maxParkMods) return `At most ${maxParkMods} park mods.`;
+			if (parkModProblems(v).some(Boolean)) return 'Fix the park mods marked in red.';
+		}
 		return '';
 	}
 	const colour = /^#?[0-9a-f]{6}$/i;
@@ -232,7 +241,7 @@
 								</div>
 								{#if f.help}<p class="text-xs text-faint">{f.help}</p>{/if}
 							</div>
-							<div class={f.type === 'maps' || f.type === 'lines' || f.type === 'votes' || f.type === 'commands' || f.long ? 'sm:col-span-2' : ''}>
+							<div class={f.type === 'maps' || f.type === 'lines' || f.type === 'votes' || f.type === 'commands' || f.type === 'parkmods' || f.long ? 'sm:col-span-2' : ''}>
 								{#if f.type === 'bool'}
 									<label class="inline-flex cursor-pointer items-center gap-2">
 										<input id={f.key} type="checkbox" class="peer sr-only" disabled={locked} bind:checked={values[f.key]} />
@@ -279,6 +288,8 @@
 									<CustomVotes id={f.key} bind:value={values[f.key]} saved={(saved[f.key] as CustomVote[] | undefined) ?? []} disabled={locked} />
 								{:else if f.type === 'commands'}
 									<CustomCommands id={f.key} bind:value={values[f.key]} disabled={locked} />
+								{:else if f.type === 'parkmods'}
+									<ParkMods id={f.key} bind:value={values[f.key]} folders={modFolders} maps={mapNames} disabled={locked} />
 								{:else if f.type === 'list'}
 									<textarea
 										id={f.key}

@@ -74,6 +74,13 @@ func TestClassify(t *testing.T) {
 		{"Shutting down.", KindShutdown, "", "", nil},
 		{"1 admin(s). Type help for commands.", KindStartup, "", "", nil},
 		{"No admins yet: type \"admin add <SteamID64>\" to add one.", KindStartup, "", "", nil},
+		// 2.0.6: roles, with everyone given none in the default one.
+		{"Bob joined (76561198000000002, player), 1/16 players", KindJoin, "Bob", "76561198000000002",
+			map[string]string{"role": "player", "admin": "", "players": "1"}},
+		{"Thrasher joined (76561198000000001, admin), 2/16 players, loaded in 4 s", KindJoin, "Thrasher", "76561198000000001",
+			map[string]string{"role": "admin", "admin": "1", "load_seconds": "4"}},
+		{"2 admin(s), 5 player(s) with a role. Type help for commands.", KindStartup, "", "", nil},
+		{`No admins yet: type "role <SteamID64> admin" to add one. Roles are in data/roles.json.`, KindStartup, "", "", nil},
 		{"Signing in to Steam...", KindStartup, "", "", nil},
 		{"Thrasher was kicked until the server restarts.", KindRaw, "", "", nil},
 	}
@@ -122,6 +129,41 @@ func TestAssemblerJoinsContinuationLines(t *testing.T) {
 	}
 }
 
+// ReSkate 2.0.6's Windows server stamps lines as Windows shows the time.
+func TestAssemblerReadsWindowsStamps(t *testing.T) {
+	a := NewAssembler()
+	a.now = func() time.Time { return time.Date(2026, 10, 11, 7, 0, 0, 0, time.Local) }
+	var got []*Entry
+	for _, l := range []string{
+		"[1:28:15 PM] Signing in to Steam...",
+		"[13.28.16] 1 players",
+		"  76561198000000001  Thrasher  (admin)",
+		"[12:05:00 a.m.] Shutting down.",
+		"[\xbf\xc0\xc8\xc4 1:28:17] Server renamed to x.", // CP949's afternoon: not known
+		"[chat] 12:30:00 isn't a stamp",
+	} {
+		if e := a.Push(l); e != nil {
+			got = append(got, e)
+		}
+	}
+	got = append(got, a.Flush())
+	want := []string{"13:28:15", "13:28:16", "00:05:00", "01:28:17"}
+	if len(got) != len(want) {
+		t.Fatalf("%d entries: %+v", len(got), got)
+	}
+	for i, e := range got {
+		if e.Stamp != want[i] {
+			t.Errorf("entry %d stamped %q, want %q", i, e.Stamp, want[i])
+		}
+	}
+	if got[1].Text != "1 players\n  76561198000000001  Thrasher  (admin)" || got[2].Kind != KindShutdown {
+		t.Errorf("entries %+v", got)
+	}
+	if got[3].Text != "Server renamed to x.\n[chat] 12:30:00 isn't a stamp" {
+		t.Errorf("a [tag] line with a time in it taken for a stamp: %q", got[3].Text)
+	}
+}
+
 func TestReplyIsNotEvent(t *testing.T) {
 	for _, text := range []string{"[chat] Server: hi", "2 players\n  1  a\n  2  b", "Server renamed to x."} {
 		e := classify(text)
@@ -151,6 +193,13 @@ func TestReadLog(t *testing.T) {
 	if want := time.Date(2026, 10, 4, 0, 55, 50, 0, time.Local).UnixMilli(); got[2].At != want {
 		t.Errorf("at %d, want %d", got[2].At, want)
 	}
+
+	// ReSkate 2.0.6 on Windows: the time as Windows shows it.
+	got = ReadLog(strings.NewReader("[2026-10-11 1:28:15 PM] Join code: 9029-8b4c\n"), 3)
+	if len(got) != 1 || got[0].Kind != KindJoinCode || got[0].Stamp != "13:28:15" ||
+		got[0].At != time.Date(2026, 10, 11, 13, 28, 15, 0, time.Local).UnixMilli() {
+		t.Errorf("Windows stamp read as %+v", got)
+	}
 }
 
 func TestParseMaps(t *testing.T) {
@@ -168,22 +217,47 @@ func TestParseMaps(t *testing.T) {
 	}
 }
 
-func TestParseAdminChange(t *testing.T) {
+func TestParseRoleChange(t *testing.T) {
 	for _, c := range []struct {
-		text, who string
-		admin, ok bool
+		command, text, who, role string
+		ok                       bool
 	}{
-		{"76561198000000002 is an admin.", "76561198000000002", true, true},
-		{"76561198000000002 is no longer an admin.", "76561198000000002", false, true},
+		{"admin add 76561198000000002", "76561198000000002 is an admin.", "76561198000000002", "admin", true},
+		{"admin remove 76561198000000002", "76561198000000002 is no longer an admin.", "76561198000000002", "", true},
 		// The server names the SteamID64 (server_host.cpp); a player's name
 		// that reads like a reply is not one.
-		{"Bob is an admin.", "", false, false},
-		{"Bob is already an admin.", "", false, false},
-		{"2 players\n  76561198000000002  Bob  (admin)", "", false, false},
+		{"admin add Bob", "Bob is an admin.", "", "", false},
+		{"admin add Bob", "Bob is already an admin.", "", "", false},
+		{"players", "2 players\n  76561198000000002  Bob  (admin)", "", "", false},
+		// 2.0.6: by name when they're on, and back to the default role or none.
+		{"role 76561198000000002 admin", "Bob is now admin.", "Bob", "admin", true},
+		{"ROLE 76561198000000003 vip", "76561198000000003 is now vip.", "76561198000000003", "vip", true},
+		{"role Bob none", "Bob is player again.", "Bob", "player", true},
+		{"role Bob none", "Bob no longer has a role.", "Bob", "", true},
+		{"role Bob none", "76561198000000002 was given no role.", "", "", false},
+		{"role Bob admin", `There is no role "admin". Type roles to list them.`, "", "", false},
+		// Replies to other commands can read the same.
+		{"placement admins", "Placement is now admins.", "", "", false},
+		{"", "Bob is now admin.", "", "", false},
 	} {
-		who, admin, ok := ParseAdminChange(c.text)
-		if who != c.who || admin != c.admin || ok != c.ok {
-			t.Errorf("ParseAdminChange(%q) = %q, %v, %v", c.text, who, admin, ok)
+		who, role, ok := ParseRoleChange(c.command, c.text)
+		if who != c.who || role != c.role || ok != c.ok {
+			t.Errorf("ParseRoleChange(%q, %q) = %q, %q, %v", c.command, c.text, who, role, ok)
+		}
+	}
+}
+
+// From 2.0.6 the players list names each player's role.
+func TestParsePlayersRoles(t *testing.T) {
+	got, ok := ParsePlayers("3 players\n  76561198000000001  Thrasher  (admin)\n  76561198000000002  Some (Guy)  (player)\n  76561198000000003  Mo  (moderator)")
+	if !ok || len(got) != 3 {
+		t.Fatalf("%+v %v", got, ok)
+	}
+	want := []RosterLine{{"76561198000000001", "Thrasher", "admin", true}, {"76561198000000002", "Some (Guy)", "player", false},
+		{"76561198000000003", "Mo", "moderator", false}}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
 }

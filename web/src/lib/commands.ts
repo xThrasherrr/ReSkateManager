@@ -26,7 +26,8 @@ const taken = [
 	'object-placement', 'object-scaling', 'objects', 'park', 'parties', 'party-size', 'password', 'placement',
 	'players', 'rate', 'reserved', 'rotation', 'say', 'score-allow', 'score-check', 'speed-check', 'status', 'tod',
 	'tpall', 'tphere', 'tps', 'tuning', 'tuning-enforce', 'unban', 'voice', 'voice-allow', 'voice-range',
-	'vote-cancel', 'votes', 'welcome', 'world-layer-sync', 'quit', 'exit', 'stop', 'update'
+	'vote-cancel', 'votes', 'welcome', 'world-layer-sync', 'quit', 'exit', 'stop', 'update',
+	'role', 'roles', 'board-check', 'park-mod', 'teleport' // 2.0.6
 ];
 
 /** What is wrong with each command, by its place in the list ('' for nothing). */

@@ -67,9 +67,39 @@
 	let adminTarget = $state.raw<Player | null>(null);
 	let adminOpen = $state(false);
 
+	// A server with roles (ReSkate 2.0.6) gives any of them here, not only admin.
+	interface RoleList {
+		roles: { name: string; players: { id: string; panel?: string }[] }[];
+		default: string;
+		hasRoles: boolean;
+	}
+	let roles = $state.raw<RoleList | null>(null);
+	let pick = $state('');
+	const beginRoles = newest();
+	$effect(() => {
+		ctx.id;
+		if (!ctx.can('ingame.admins.manage')) return;
+		const current = beginRoles();
+		untrack(() => api.get<RoleList>(`/instances/${ctx.id}/roles`)).then(
+			(r) => current() && (roles = r),
+			() => current() && (roles = null)
+		);
+	});
+	const panelAdmin = (p: Player) => roles?.roles.some((r) => r.players.some((x) => x.id === p.id && x.panel)) ?? false;
+
 	function askAdmin(p: Player) {
 		adminTarget = p;
+		pick = p.role || '';
 		adminOpen = true;
+	}
+	async function setRole() {
+		if (!adminTarget) return;
+		const t = adminTarget;
+		adminOpen = false;
+		const done = pick
+			? await attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/roles/players`, { id: t.id, role: pick }), (r) => r.reply)
+			: await attempt(() => api.del<{ reply: string }>(`/instances/${ctx.id}/roles/players/${t.id}`), (r) => r.reply);
+		if (done && roles) roles = await api.get<RoleList>(`/instances/${ctx.id}/roles`).catch(() => roles);
 	}
 	async function makeAdmin() {
 		if (!adminTarget) return;
@@ -96,14 +126,22 @@
 							<tr>
 								<td>
 									<span class="font-medium">{p.name}</span>
-									{#if p.admin}<span class="sticker sticker-warn ml-2">Admin</span>{/if}
+									{#if p.admin}<span class="sticker sticker-warn ml-2">Admin</span>{:else if p.role}<span class="sticker sticker-info ml-2">{p.role}</span>{/if}
 									<a class="block font-mono text-[11px] text-faint hover:text-fg md:hidden" href={steamProfile(p.id)} target="_blank" rel="noreferrer">{p.id}</a>
 								</td>
 								<td class="hidden md:table-cell"><a class="font-mono text-xs text-muted hover:text-fg" href={steamProfile(p.id)} target="_blank" rel="noreferrer">{p.id}</a></td>
 								<td class="hidden whitespace-nowrap text-muted sm:table-cell">{ago(p.joinedAt)}</td>
 								<td>
 									<div class="flex justify-end gap-1">
-										{#if ctx.can('ingame.admins.manage') && !p.admin}
+										{#if ctx.can('ingame.admins.manage') && roles?.hasRoles}
+											<button
+												class="btn btn-sm btn-ghost"
+												disabled={panelAdmin(p)}
+												onclick={() => askAdmin(p)}
+												title={panelAdmin(p) ? "An admin kept in step with a panel user's roles" : 'Give a role'}
+												aria-label="Give {p.name} a role"><Icon name="shield" size={14} /></button
+											>
+										{:else if ctx.can('ingame.admins.manage') && !p.admin}
 											<button class="btn btn-sm btn-ghost" onclick={() => askAdmin(p)} title="Make in-game admin" aria-label="Make {p.name} an in-game admin"><Icon name="shield" size={14} /></button>
 										{/if}
 										{#if ctx.can('players.kick')}
@@ -188,13 +226,33 @@
 	{/snippet}
 </Modal>
 
-<Modal bind:open={adminOpen} title="Make {adminTarget?.name || adminTarget?.id} an admin?">
-	<p class="text-sm text-muted">
-		They get in-game admin on this server straight away, including its admin commands. You can take it back under
-		<a class="text-accent hover:underline" href="/s/{ctx.id}/bans">Bans &amp; admins</a>.
-	</p>
-	{#snippet actions()}
-		<button class="btn" onclick={() => (adminOpen = false)}>Cancel</button>
-		<button class="btn btn-primary" onclick={makeAdmin}><Icon name="shield" size={14} /> Make admin</button>
-	{/snippet}
-</Modal>
+{#if roles?.hasRoles}
+	<Modal bind:open={adminOpen} title="{adminTarget?.name || adminTarget?.id}'s role">
+		<label class="block">
+			<span class="label">Role on this server</span>
+			<select class="input" bind:value={pick}>
+				<option value="">{roles.default ? `${roles.default} (everyone's)` : 'none'}</option>
+				{#each roles.roles.filter((r) => r.name !== roles?.default) as r (r.name)}<option value={r.name}>{r.name}</option>{/each}
+			</select>
+		</label>
+		<p class="mt-2 text-sm text-muted">
+			It applies straight away: their tag and what they may do. Every role and who has it is under
+			<a class="text-accent hover:underline" href="/s/{ctx.id}/bans">Bans &amp; admins</a>.
+		</p>
+		{#snippet actions()}
+			<button class="btn" onclick={() => (adminOpen = false)}>Cancel</button>
+			<button class="btn btn-primary" disabled={pick === (adminTarget?.role || '')} onclick={setRole}><Icon name="shield" size={14} /> Set role</button>
+		{/snippet}
+	</Modal>
+{:else}
+	<Modal bind:open={adminOpen} title="Make {adminTarget?.name || adminTarget?.id} an admin?">
+		<p class="text-sm text-muted">
+			They get in-game admin on this server straight away, including its admin commands. You can take it back under
+			<a class="text-accent hover:underline" href="/s/{ctx.id}/bans">Bans &amp; admins</a>.
+		</p>
+		{#snippet actions()}
+			<button class="btn" onclick={() => (adminOpen = false)}>Cancel</button>
+			<button class="btn btn-primary" onclick={makeAdmin}><Icon name="shield" size={14} /> Make admin</button>
+		{/snippet}
+	</Modal>
+{/if}

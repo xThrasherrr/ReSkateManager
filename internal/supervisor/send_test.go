@@ -18,6 +18,15 @@ func TestMain(m *testing.M) {
 		time.Sleep(d)
 		os.Exit(0)
 	}
+	// The child of TestOutputClosedWhileRunning: a server that closes its
+	// output and runs on, as 2.0.6's headless Windows server does.
+	if os.Getenv("SUPERVISOR_TEST_MUTE") == "1" {
+		os.Stdout.WriteString("muted\n")
+		os.Stdout.Close()
+		os.Stderr.Close()
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
 	// The child of TestExitSeenThoughOutputIsHeld: a server that starts a
 	// process holding its output, then exits.
 	if os.Getenv("SUPERVISOR_TEST_FORK") == "1" {
@@ -52,8 +61,32 @@ func TestExitSeenThoughOutputIsHeld(t *testing.T) {
 	case <-time.After(drainTime + 10*time.Second):
 		t.Fatal("the exit was never seen")
 	}
-	if p.ExitCode() != 0 || len(lines) == 0 || lines[0] != "forked" {
-		t.Errorf("exit %d, lines %q", p.ExitCode(), lines)
+	if p.ExitCode() != 0 || len(lines) == 0 || lines[0] != "forked" || p.Lost() {
+		t.Errorf("exit %d, lines %q, lost %v", p.ExitCode(), lines, p.Lost())
+	}
+}
+
+// A server whose output closes while it runs on can't be heard or told to
+// quit: it's ended, and Lost says why.
+func TestOutputClosedWhileRunning(t *testing.T) {
+	t.Setenv("SUPERVISOR_TEST_MUTE", "1")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	p, err := Start(Options{Exe: exe}, func(l string) { lines = append(lines, l) }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.Done():
+	case <-time.After(drainTime + 10*time.Second):
+		p.Kill()
+		t.Fatal("a server with no output was left running")
+	}
+	if !p.Lost() || len(lines) != 1 || lines[0] != "muted" {
+		t.Errorf("lost %v, lines %q", p.Lost(), lines)
 	}
 }
 

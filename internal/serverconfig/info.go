@@ -15,6 +15,7 @@ var GroupInfo = map[string]string{
 	"Parks": "San Vansterdam has three park lots. Each shows one layout to everyone: a Flump, Mega, Skate or Street park variant, " +
 		"or \"empty\" for a bare lot. Changes apply live.\n" +
 		"Randomize picks a layout for each lot (never an empty one) for you to save.",
+	"Park mods": "Parks players built in the game's Park Editor and shared as mods, which the server spawns for everyone. A spawned park belongs to the server: nobody can move or delete it, and it stays when players leave. Needs ReSkate 2.0.6.",
 	"Map pool": "Build a server around a theme, like only Skate 3 maps. An empty pool is every map the server knows.\n" +
 		"• Map votes take only the pool's maps, and players' map suggestions list only those.\n" +
 		"• The rotation goes down the pool from the map the server is on, or from the top when that map isn't in it.\n" +
@@ -88,7 +89,7 @@ var fieldInfo = map[string]string{
 	"voice_chat":  "Off turns voice chat off for everyone on the server.",
 	"voice_range": "How far the server carries proximity voice. Players still pick their own hearing distance in the game, within this range.",
 
-	"object_placement":     "\"admins\" lets only in-game admins (from the Players page) place objects. The console's clear-objects removes everything placed.",
+	"object_placement":     "\"admins\" lets only in-game admins (from the Players page) place objects; from ReSkate 2.0.6, the players whose role has unlimited_objects. The console's clear-objects removes everything placed.",
 	"object_limit":         "How many objects one player can have placed at a time, 1 to 1024. A player at the limit deletes one of theirs to place another. Admins are never limited.\nFrom ReSkate 2.0.0, a player who places more than twice the limit plus 100 in a minute (a modified game animating objects by respawning them) has all theirs deleted, and nothing they place is shared for a minute. The console says who.",
 	"allow_object_scaling": "Lets players place objects bigger or smaller than their own size. Off, every player's objects are shared at their own size and the size controls in their park editor are turned off. Admins can still resize theirs. Needs ReSkate 2.0.0.",
 	"bone_scale_limit":     "The most a mod may scale one part of a skater, such as a big-head mod, as others see it: 1 to 8 times, or 0 for no limit. The default is 2: the game's own skater height is a bone scale, so at 1 every skater shows at one height. The player with the mod still sees it on their own screen. Needs ReSkate 1.1.6.",
@@ -121,12 +122,26 @@ var fieldInfo = map[string]string{
 	"announcements.interval_minutes": "How long between two of the messages above, 1 to 1440 minutes. The timer waits while nobody is on. 0 turns it off and keeps the messages for later. Needs ReSkate 2.0.2.",
 	"announcements.card":             "Each announcement also shows as a card at the top of every player's screen for a few seconds, longer for longer text. That covers the messages above, /announce, and the Announcements tab's messages that have Card on. Off, they're only in chat. ReSkate 2.0.2 only: 2.0.3 took this setting out and shows every announcement as a card, not in chat.",
 
-	"commands": "Each has the name players type after the /, an optional reply sent back to them, up to 8 server commands it runs, and whether only in-game admins may use it. Up to 32. A name can't be one the server already has, such as /help, /vote or /kick.",
+	"commands": "Each has the name players type after the /, an optional reply sent back to them, up to 8 server commands it runs, and whether only in-game admins may use it (from ReSkate 2.0.6, players whose role has any command). Up to 32. A name can't be one the server already has, such as /help, /vote or /kick.",
+
+	"park_mods": "A park built in the game's Park Editor and saved as a mod (a folder with manifest.json and parks/<map>.park.json) can be put up by the server for everyone. Copy the mod's folder into the server's Mods, add it here with a name and the map it was built on, and spawn it with park-mod add <name> while that map runs: from the console, in chat by a player whose role has park-mod, or by a custom vote. Players need no mod for it.\n" +
+		"• Folder: the mod's folder in Mods.\n" +
+		"• Key: which of the mod's parks, by the base map it's for (bam, grom, mpr, ftue, stadium_1, stadium_2); empty when the mod has one.\n" +
+		"A park goes when the map changes, and none come back after a restart. Changes here apply live. Needs ReSkate 2.0.6.",
+	"park_limits.parks":   "How many park mods may be spawned at once, 1 to 16. Needs ReSkate 2.0.6.",
+	"park_limits.objects": "How many objects the spawned park mods may have together, 1 to 1024. They count against nobody's object limit. Needs ReSkate 2.0.6.",
 
 	"global_bans": "Players the ReSkate team has banned from multiplayer are refused when they join, and removed if they're already on. The server reads the list from api.reskate.dev when it starts and every ten minutes after.\n" +
 		"Off lets them in. Bans from the Players page apply either way.",
 	"word_warnings": "The ReSkate team keeps a list of words that aren't allowed in chat at all, read with the global bans whether those are on or not. A message with one is never passed on, whatever this is, and its player is warned.\n" +
 		"After this many warnings, 1 to 10, the next one kicks them; they can join again, and are kicked again at the next. Warnings last until the server restarts. 0 warns and kicks nobody, and the message is still not passed on. Needs ReSkate 2.0.3.",
+	"use_global_word_filter": "On, the ReSkate team's chat word lists apply here as well as the server's own (data/words_filtered.txt and data/words_blocked.txt, which the console's words reload reads again). Off, only the server's own words are filtered and refused.\n" +
+		"Players' games still star out the team's filtered words for those who have their chat filter on, whatever this is. Needs ReSkate 2.0.6.",
+	"pinned_board": "Catches players whose skateboard stays on another player as that player moves: a hacked game placing its board there.\n" +
+		"• warn: stops showing their board to everyone else until it has behaved for half a minute, and tells the admins in the game and the log who it is.\n" +
+		"• kick: removes them from the server.\n" +
+		"• off: no check.\n" +
+		"Needs ReSkate 2.0.6.",
 	"speed_check": "Catches players whose game runs faster than normal (Cheat Engine's speedhack and the like), judged by the timing of what their game sends.\n" +
 		"• warn: takes them out of throwdowns and coop challenges until their speed is normal again, and tells the admins.\n" +
 		"• kick: removes them from the server.\n" +
