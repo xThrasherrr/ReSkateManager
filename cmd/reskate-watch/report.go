@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -27,6 +29,39 @@ type report struct {
 }
 
 type detail struct{ Title, Body string }
+
+// findings are a report's lists, which another run adds to its own: the
+// workflow runs the Windows server on Windows, and the rest on Linux.
+type findings struct {
+	Breaking, Adds, Notes, Checked []string
+}
+
+func (r *report) found() findings { return findings{r.Breaking, r.Adds, r.Notes, r.Checked} }
+
+// include adds the findings another run wrote to path, leaving out what this
+// run found too (the config of either server, say).
+func (r *report) include(path string) {
+	var f findings
+	data, err := os.ReadFile(path)
+	if err == nil {
+		err = json.Unmarshal(data, &f)
+	}
+	if err != nil {
+		r.Notes = append(r.Notes, "What the run on another system found couldn't be read: "+code(err.Error()))
+		return
+	}
+	add := func(to *[]string, items []string) {
+		for _, it := range items {
+			if !slices.Contains(*to, it) {
+				*to = append(*to, it)
+			}
+		}
+	}
+	add(&r.Breaking, f.Breaking)
+	add(&r.Adds, f.Adds)
+	add(&r.Notes, f.Notes)
+	add(&r.Checked, f.Checked)
+}
 
 // detailCap keeps each background section, and so the issue, under GitHub's
 // 65536-character limit for an issue body.

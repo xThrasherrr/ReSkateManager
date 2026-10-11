@@ -29,6 +29,8 @@ func main() {
 	root := flag.String("manager", ".", "the manager's source tree")
 	out := flag.String("out", "", "write the report here (default: stdout)")
 	summary := flag.String("summary", "", "write the issue's title and whether it needs work here, as JSON")
+	findings := flag.String("findings", "", "write what was found here, as JSON, for another run's -with")
+	with := flag.String("with", "", "add what another run found (its -findings): the Windows server's, run on Windows")
 	flag.Parse()
 	if *src != "" && (*from == "" || *to == "") {
 		fatal("-src needs -from and -to")
@@ -54,6 +56,16 @@ func main() {
 			fatal(err.Error())
 		}
 		r.checkSource(use)
+	}
+
+	if *with != "" {
+		r.include(*with)
+	}
+	if *findings != "" {
+		data, _ := json.Marshal(r.found())
+		if err := os.WriteFile(*findings, data, 0o644); err != nil {
+			fatal(err.Error())
+		}
 	}
 
 	text := r.markdown()

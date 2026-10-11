@@ -1,22 +1,22 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
+	"github.com/xThrasherrr/ReSkateManager/internal/supervisor"
 	"github.com/xThrasherrr/ReSkateManager/internal/updater"
 )
 
@@ -122,6 +122,9 @@ func (r *report) checkConfig(ctx context.Context, dir string) {
 	os.Remove(filepath.Join(dir, serverconfig.BansFile))
 
 	lines, err := runServer(ctx, dir)
+	if r.cantManage(err) {
+		return
+	}
 	if err != nil {
 		r.Notes = append(r.Notes, "The server couldn't be run: "+code(err.Error()))
 		return
@@ -148,13 +151,17 @@ func (r *report) checkConfig(ctx context.Context, dir string) {
 			f.Set(fd.Key, fd.Default)
 		}
 	}
-	f.SetAdmins([]string{"76561198000000001"})
+	if err := f.SetAdmins([]string{"76561198000000001"}); err != nil {
+		r.Breaking = append(r.Breaking, "The manager can't make an in-game admin on the server's own config: "+code(err.Error()))
+	}
 	f.SetBans([]serverconfig.Ban{{ID: "76561198000000002", Name: "reskate-watch", Added: time.Now().Unix()}})
 	if err := f.Write(cfg); err != nil {
 		r.Notes = append(r.Notes, "The edited config couldn't be written: "+code(err.Error()))
 		return
 	}
-	if lines, err = runServer(ctx, dir); err != nil {
+	if lines, err = runServer(ctx, dir); r.cantManage(err) {
+		return
+	} else if err != nil {
 		r.Notes = append(r.Notes, "The server couldn't be run on the edited config: "+code(err.Error()))
 		return
 	}
@@ -261,37 +268,87 @@ func (r *report) describe(place string) string {
 	return ""
 }
 
-// runServer runs the server in dir until it stops, or until it reaches the
-// step after its config (Steam), where it is stopped.
+// cantManage reports a server run the manager couldn't run a server like:
+// one that wrote nothing to its console, or closed it (2.0.6's headless
+// Windows server writes to a console of its own), or whose lines start with
+// a stamp the log parser doesn't read.
+func (r *report) cantManage(err error) bool {
+	var stamp stampError
+	switch {
+	case errors.Is(err, errSilent):
+		r.Breaking = append(r.Breaking, fmt.Sprintf("The %s server wrote nothing to its console, started as the manager starts it (%s): the manager can neither read it nor stop it",
+			platform[runtime.GOOS], code(strings.Join(supervisor.Args(), " "))))
+	case errors.Is(err, errLost):
+		r.Breaking = append(r.Breaking, fmt.Sprintf("The %s server closed its console while running, started as the manager starts it (%s): the manager can neither read it nor stop it",
+			platform[runtime.GOOS], code(strings.Join(supervisor.Args(), " "))))
+	case errors.As(err, &stamp):
+		r.Breaking = append(r.Breaking, fmt.Sprintf("The %s server starts its lines with a stamp the log parser doesn't read: %s", platform[runtime.GOOS], code(stamp.line)))
+	default:
+		return false
+	}
+	return true
+}
+
+// errLost is a server that closed its console while it ran (supervisor's
+// Process.Lost), and errSilent one that wrote nothing to it: without Steam's
+// library, 2.0.6's headless Windows server stops before the manager would
+// see it closed.
+var (
+	errLost   = errors.New("the server closed its console while running")
+	errSilent = errors.New("the server wrote nothing to its console")
+)
+
+// stampError is a server whose first line has no stamp the log parser reads.
+type stampError struct{ line string }
+
+func (e stampError) Error() string { return "no stamp the log parser reads: " + e.line }
+
+// runServer runs the server in dir as the manager runs one, through its
+// supervisor with the same arguments and console, until it stops, or until
+// it reaches the step after its config (Steam), where it is stopped. Its
+// lines come without their stamps.
 func runServer(ctx context.Context, dir string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, filepath.Join(dir, updater.ExeName()), "--no-update")
-	cmd.Dir = dir
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	cmd.Stderr = cmd.Stdout
-	cmd.WaitDelay = 5 * time.Second
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
+	var mu sync.Mutex
 	var lines []string
-	sc := bufio.NewScanner(out)
-	for sc.Scan() {
-		_, text, _ := logparse.SplitStamp(strings.TrimRight(sc.Text(), "\r"))
+	var unstamped string // the first line, when it has no stamp the parser reads
+	outcome := make(chan struct{})
+	var once sync.Once
+	p, err := supervisor.Start(supervisor.Options{Exe: filepath.Join(dir, updater.ExeName()), Dir: dir}, func(l string) {
+		_, text, ok := logparse.SplitStamp(l)
+		mu.Lock()
+		if !ok && len(lines) == 0 {
+			unstamped = l
+		}
 		lines = append(lines, text)
+		mu.Unlock()
 		// The Windows server waits on a failure until someone reads it, so
 		// it is stopped as soon as the outcome is known.
 		if strings.HasPrefix(text, "Signing in to Steam") || strings.HasPrefix(text, "Config problem: ") ||
 			strings.HasPrefix(text, "Cannot read ") || strings.Contains(text, "steam_api") {
-			cmd.Process.Kill()
-			break
+			once.Do(func() { close(outcome) })
 		}
+	}, nil)
+	if err != nil {
+		return nil, err
 	}
-	cmd.Wait() // the lines say how it went, not the exit code
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	select {
+	case <-outcome:
+	case <-p.Done():
+	case <-ctx.Done():
+	}
+	p.Kill() // the lines say how it went, not the exit code
+	mu.Lock()
+	defer mu.Unlock()
+	switch {
+	case p.Lost():
+		return lines, errLost
+	case len(lines) == 0:
+		return lines, errSilent
+	case unstamped != "":
+		return lines, stampError{unstamped}
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return lines, errors.New("the server ran for a minute without reaching Steam")
 	}
 	return lines, nil

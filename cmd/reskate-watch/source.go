@@ -14,10 +14,11 @@ import (
 )
 
 // upstream is the dedicated server's source at one release: every string
-// literal in Server/ (its tests aside), the console's commands and the
-// README.
+// literal in Server/ (its tests and window aside), the console's commands
+// and the README.
 type upstream struct {
 	strings  map[string]bool
+	written  map[string]bool     // of those, the ones not only compared with: text the server may print
 	all      string              // every literal, NUL between them, for substring searches
 	help     string              // the `help` reply, which lists the commands
 	cmds     map[string][]string // each command's forms in the help, by verb; just the verb when it has none
@@ -50,20 +51,26 @@ func readUpstream(src, tag string) (*upstream, error) {
 	if err != nil {
 		return nil, err
 	}
-	u := &upstream{strings: map[string]bool{}, lines: map[string]bool{}, tagLines: map[string]string{}, selfRuns: map[string]string{}}
+	u := &upstream{strings: map[string]bool{}, written: map[string]bool{}, lines: map[string]bool{}, tagLines: map[string]string{}, selfRuns: map[string]string{}}
 	verbs := map[string]bool{}
 	for name := range strings.FieldsSeq(list) {
-		if strings.HasPrefix(name, "Server/Test/") || !slices.Contains([]string{".cpp", ".h", ".hpp", ".cc", ".inl"}, path.Ext(name)) {
+		// Not the tests, nor the server's window (2.0.6, Windows), which the
+		// manager never opens: it starts servers headless.
+		if strings.HasPrefix(name, "Server/Test/") || strings.HasPrefix(name, "Server/GUI/") ||
+			!slices.Contains([]string{".cpp", ".h", ".hpp", ".cc", ".inl"}, path.Ext(name)) {
 			continue
 		}
 		text, err := git(src, "show", tag+":"+name)
 		if err != nil {
 			return nil, err
 		}
-		for _, s := range cppStrings(text) {
-			u.strings[s] = true
-			if strings.Count(s, " | ") > strings.Count(u.help, " | ") {
-				u.help = s
+		for _, l := range cppLiterals(text) {
+			u.strings[l.text] = true
+			if !l.compared {
+				u.written[l.text] = true
+			}
+			if strings.Count(l.text, " | ") > strings.Count(u.help, " | ") {
+				u.help = l.text
 			}
 		}
 		for _, m := range verbRe.FindAllStringSubmatch(hostCommand(text), -1) {
@@ -135,8 +142,9 @@ func (r *report) checkSource(use *usage) {
 	}
 
 	// Every tag the parser lacks, not only new ones: one it never had
-	// files those lines as plain text.
-	for _, t := range slices.Sorted(maps.Keys(tags(r.cur.strings))) {
+	// files those lines as plain text. Only those the server may write: 2.0.6's
+	// window tells lines apart by tags no line has ("[cmd]", "[fatal]").
+	for _, t := range slices.Sorted(maps.Keys(tags(r.cur.written))) {
 		if !use.knowsTag(t) {
 			r.Adds = append(r.Adds, fmt.Sprintf("Console tag %s, which the log parser doesn't know", code("["+t+"]")))
 		}
@@ -164,7 +172,8 @@ func (r *report) checkSource(use *usage) {
 		}
 	}
 	for _, s := range slices.Sorted(maps.Keys(r.cur.strings)) {
-		if flagRe.MatchString(s) && !r.old.strings[s] {
+		// One the manager starts servers with is taken up (2.0.6's --headless).
+		if flagRe.MatchString(s) && !r.old.strings[s] && !use.words[s] {
 			r.Adds = append(r.Adds, "New command-line flag "+code(s))
 		}
 	}
@@ -349,14 +358,16 @@ func hostCommand(src string) string {
 
 // commands reads the help reply ("status | net [player] | ...") into each
 // command's forms by its verb. A form with a | of its own ("poll <question> |
-// <answer>..." in 2.0.3) leaves pieces that start with a <placeholder>, not a
-// verb: they belong to the form before them.
+// <answer>..." in 2.0.3, "words [reload | global on|off]" in 2.0.6) leaves
+// pieces that start with a <placeholder>, not a verb, or close a bracket the
+// piece before opened: they belong to the form before them.
 func commands(help string) map[string][]string {
 	out := map[string][]string{}
 	for line := range strings.SplitSeq(help, "\n") {
 		var forms []string
 		for entry := range strings.SplitSeq(line, " | ") {
-			if entry = strings.TrimSpace(entry); strings.HasPrefix(entry, "<") && len(forms) > 0 {
+			open := len(forms) > 0 && strings.Count(forms[len(forms)-1], "[") > strings.Count(forms[len(forms)-1], "]")
+			if entry = strings.TrimSpace(entry); (strings.HasPrefix(entry, "<") || open) && len(forms) > 0 {
 				forms[len(forms)-1] += " | " + entry
 			} else {
 				forms = append(forms, entry)
@@ -509,13 +520,42 @@ func meaningful(s string) bool {
 // can't throw it.
 func cppStrings(src string) []string {
 	var out []string
+	for _, l := range cppLiterals(src) {
+		out = append(out, l.text)
+	}
+	return out
+}
+
+// cppLiteral is one literal of cppLiterals, and whether the source only
+// compares text with it: tag == "[ban]", text.find("[cmd]"),
+// starts_with("[error]").
+type cppLiteral struct {
+	text     string
+	compared bool
+}
+
+// comparedBefore and comparedAfter find a comparison next to a literal.
+var (
+	comparedBefore = regexp.MustCompile(`(?:[=!]=|\b(?:r?find|starts_with|ends_with|contains|compare)\()\s*$`)
+	comparedAfter  = regexp.MustCompile(`^\s*[=!]=`)
+)
+
+// cppLiterals is cppStrings, each literal with whether it's only compared.
+func cppLiterals(src string) []cppLiteral {
+	var out []cppLiteral
 	joinable := false // only spaces and comments since the last literal
-	add := func(s string) {
+	start := 0        // where the literal being read began
+	add := func(s string, end int) {
 		if joinable {
-			out[len(out)-1] += s
+			out[len(out)-1].text += s
 		} else {
-			out = append(out, s)
+			out = append(out, cppLiteral{text: s})
 		}
+		last := &out[len(out)-1]
+		if !joinable {
+			last.compared = comparedBefore.MatchString(src[max(0, start-32):start])
+		}
+		last.compared = last.compared || comparedAfter.MatchString(src[end:min(end+8, len(src))])
 		joinable = true
 	}
 	for i := 0; i < len(src); {
@@ -532,8 +572,9 @@ func cppStrings(src string) []string {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			i++
 		case c == '"':
+			start = i
 			s, next := quoted(src, i, '"')
-			add(s)
+			add(s, next)
 			i = next
 		case c == '\'':
 			_, i = quoted(src, i, '\'')
@@ -546,12 +587,14 @@ func cppStrings(src string) []string {
 			word := src[i:j]
 			switch {
 			case j < len(src) && src[j] == '"' && slices.Contains([]string{"L", "u", "U", "u8"}, word):
+				start = i
 				s, next := quoted(src, j, '"')
-				add(s)
+				add(s, next)
 				i = next
 			case j < len(src) && src[j] == '"' && slices.Contains([]string{"R", "LR", "uR", "UR", "u8R"}, word):
+				start = i
 				s, next := raw(src, j)
-				add(s)
+				add(s, next)
 				i = next
 			default:
 				i = j

@@ -25,6 +25,25 @@ std::string s = u8"\x41\101\"";
 	}
 }
 
+// 2.0.6's window tells lines apart by tags in them that no line has: text
+// only compared with isn't what the server writes.
+func TestCppLiteralsCompared(t *testing.T) {
+	src := `if (tag == "[ban]" || tag == "[banned]") return red;
+if (text.find("[cmd]") != std::string::npos || text.starts_with("[error]")) level = error;
+if ("[left]" == tag) return red;
+log_("[parks] " + name);
+if (name == "kick") kick();
+const auto *x = "[cmd]";`
+	got := map[string]bool{}
+	for _, l := range cppLiterals(src) {
+		got[l.text] = got[l.text] || !l.compared
+	}
+	want := map[string]bool{"[ban]": false, "[banned]": false, "[cmd]": true, "[error]": false, "[left]": false, "[parks] ": true, "kick": false}
+	if !maps.Equal(got, want) {
+		t.Errorf("written:\n got %v\nwant %v", got, want)
+	}
+}
+
 func TestLogStarts(t *testing.T) {
 	src := `write_log("Mods: " + std::to_string(n));
 log_(on ? "[steam] Signed in." : "[steam] Signed out: " + why);
@@ -83,9 +102,11 @@ func TestCheckLost(t *testing.T) {
 }
 
 func TestCommands(t *testing.T) {
-	got := commands("status | net [player] | say <text>\nlisted on|off | votes [map|kick]\npoll <question> | <answer> | <answer>... | poll end")
+	got := commands("status | net [player] | say <text>\nlisted on|off | votes [map|kick]\npoll <question> | <answer> | <answer>... | poll end\n" +
+		"score-allow [<fingerprint>|remove <fingerprint>] | words [reload | global on|off]\nreserved [slots <n> | add|remove <SteamID64>] | roles [reload]")
 	want := map[string][]string{"status": {"status"}, "net": {"net [player]"}, "say": {"say <text>"}, "listed": {"listed on|off"}, "votes": {"votes [map|kick]"},
-		"poll": {"poll <question> | <answer> | <answer>...", "poll end"}}
+		"poll": {"poll <question> | <answer> | <answer>...", "poll end"}, "score-allow": {"score-allow [<fingerprint>|remove <fingerprint>]"},
+		"words": {"words [reload | global on|off]"}, "reserved": {"reserved [slots <n> | add|remove <SteamID64>]"}, "roles": {"roles [reload]"}}
 	if !maps.EqualFunc(got, want, slices.Equal) {
 		t.Errorf("commands = %q, want %q", got, want)
 	}
