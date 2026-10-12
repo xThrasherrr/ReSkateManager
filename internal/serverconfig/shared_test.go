@@ -76,7 +76,7 @@ func TestSyncShared(t *testing.T) {
 	}
 
 	// A shared mod's link can't be overwritten by an upload to the server.
-	if _, _, err := InstallMod(dir, writeZip(t, "reskate-levels.json", levels), "bbcity.zip"); err == nil {
+	if _, _, err := installMod(dir, writeZip(t, "reskate-levels.json", levels), "bbcity.zip"); err == nil {
 		t.Error("an upload replaced a shared mod's link")
 	}
 

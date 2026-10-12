@@ -32,6 +32,16 @@ func writeZip(t *testing.T, files ...string) string {
 
 const levels = `{"levels":[{"asset":"Levels/Custom/BBCity/BBCity_LevelRoot","displayName":"BB City"}]}`
 
+// installMod unpacks a mod's zip into dir/Mods, as an upload does.
+func installMod(dir, zipPath, zipName string) (folder string, replaced bool, err error) {
+	u, err := UnpackMod(dir, zipPath, zipName)
+	if err != nil {
+		return "", false, err
+	}
+	defer u.Discard()
+	return u.Install("")
+}
+
 func TestInstallModLayouts(t *testing.T) {
 	for _, c := range []struct {
 		what, zipName, want string
@@ -47,7 +57,7 @@ func TestInstallModLayouts(t *testing.T) {
 			[]string{`bbcity\reskate-levels.json`, levels, "__MACOSX/bbcity/._reskate-levels.json", "", "bbcity/.DS_Store", ""}},
 	} {
 		dir := t.TempDir()
-		folder, replaced, err := InstallMod(dir, writeZip(t, c.files...), c.zipName)
+		folder, replaced, err := installMod(dir, writeZip(t, c.files...), c.zipName)
 		if err != nil || folder != c.want || replaced {
 			t.Errorf("%s: %q, %v, %v; want %q", c.what, folder, replaced, err, c.want)
 			continue
@@ -104,10 +114,10 @@ func TestZipMaps(t *testing.T) {
 
 func TestInstallModReplaces(t *testing.T) {
 	dir := t.TempDir()
-	if _, _, err := InstallMod(dir, writeZip(t, "bbcity/old.txt", "1", "bbcity/reskate-levels.json", levels), "a.zip"); err != nil {
+	if _, _, err := installMod(dir, writeZip(t, "bbcity/old.txt", "1", "bbcity/reskate-levels.json", levels), "a.zip"); err != nil {
 		t.Fatal(err)
 	}
-	folder, replaced, err := InstallMod(dir, writeZip(t, "bbcity/reskate-levels.json", levels), "b.zip")
+	folder, replaced, err := installMod(dir, writeZip(t, "bbcity/reskate-levels.json", levels), "b.zip")
 	if err != nil || folder != "bbcity" || !replaced {
 		t.Fatalf("%q, %v, %v", folder, replaced, err)
 	}
@@ -136,7 +146,7 @@ func TestInstallModRefuses(t *testing.T) {
 	}
 	for _, c := range cases {
 		dir := t.TempDir()
-		_, _, err := InstallMod(dir, writeZip(t, c.files...), c.zipName)
+		_, _, err := installMod(dir, writeZip(t, c.files...), c.zipName)
 		if err == nil || !strings.Contains(err.Error(), c.err) {
 			t.Errorf("%s: %v, want %q", c.what, err, c.err)
 		}
@@ -146,14 +156,14 @@ func TestInstallModRefuses(t *testing.T) {
 	}
 	notZip := filepath.Join(t.TempDir(), "x.zip")
 	os.WriteFile(notZip, []byte("hello"), 0o644)
-	if _, _, err := InstallMod(t.TempDir(), notZip, "x.zip"); err == nil {
+	if _, _, err := installMod(t.TempDir(), notZip, "x.zip"); err == nil {
 		t.Error("installed something that is not a zip")
 	}
 }
 
 func TestModEnableDeleteUpdate(t *testing.T) {
 	dir := t.TempDir()
-	if _, _, err := InstallMod(dir, writeZip(t, "reskate-levels.json", levels, "manifest.json", `{"name":"BBCity","version_number":"1.0.0"}`), "Sk8r-BBCity-1.0.0.zip"); err != nil {
+	if _, _, err := installMod(dir, writeZip(t, "reskate-levels.json", levels, "manifest.json", `{"name":"BBCity","version_number":"1.0.0"}`), "Sk8r-BBCity-1.0.0.zip"); err != nil {
 		t.Fatal(err)
 	}
 	read := func() []Mod {
@@ -178,7 +188,7 @@ func TestModEnableDeleteUpdate(t *testing.T) {
 	}
 
 	// Re-uploading a disabled mod updates it where it is.
-	if _, replaced, err := InstallMod(dir, writeZip(t, "reskate-levels.json", levels), "Sk8r-BBCity-1.0.0.zip"); err != nil || !replaced {
+	if _, replaced, err := installMod(dir, writeZip(t, "reskate-levels.json", levels), "Sk8r-BBCity-1.0.0.zip"); err != nil || !replaced {
 		t.Fatalf("re-upload: %v, %v", replaced, err)
 	}
 	if m := read(); len(m) != 1 || !m[0].Disabled {
@@ -186,7 +196,12 @@ func TestModEnableDeleteUpdate(t *testing.T) {
 	}
 
 	// An update into a newly named folder replaces the old one and stays disabled.
-	folder, err := UpdateMod(dir, "Sk8r-BBCity-1.0.0", writeZip(t, "reskate-levels.json", levels, "manifest.json", `{"name":"BBCity","version_number":"1.1.0"}`), "Sk8r-BBCity-1.1.0.zip")
+	u, err := UnpackMod(dir, writeZip(t, "reskate-levels.json", levels, "manifest.json", `{"name":"BBCity","version_number":"1.1.0"}`), "Sk8r-BBCity-1.1.0.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Discard()
+	folder, _, err := u.Install("Sk8r-BBCity-1.0.0")
 	if err != nil || folder != "Sk8r-BBCity-1.1.0" {
 		t.Fatalf("update: %q, %v", folder, err)
 	}
@@ -244,7 +259,7 @@ func TestInstallModRefusesALongList(t *testing.T) {
 	maxModList = 16 << 10
 	t.Cleanup(func() { maxModList = prev })
 	dir := t.TempDir()
-	if _, _, err := InstallMod(dir, writeZip(t, files...), "a.zip"); err == nil || !strings.Contains(err.Error(), "more than") {
+	if _, _, err := installMod(dir, writeZip(t, files...), "a.zip"); err == nil || !strings.Contains(err.Error(), "more than") {
 		t.Fatalf("a 2000-file list in 16 KB: %v", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
@@ -260,7 +275,7 @@ func TestInstallModRefusesTooBigUpFront(t *testing.T) {
 	t.Cleanup(func() { maxModBytes = prev })
 	dir := t.TempDir()
 	zipped := writeZip(t, "bbcity/a", strings.Repeat("a", 600), "bbcity/b", strings.Repeat("b", 600))
-	if _, _, err := InstallMod(dir, zipped, "a.zip"); err == nil || !strings.Contains(err.Error(), "unpacks to more than") {
+	if _, _, err := installMod(dir, zipped, "a.zip"); err == nil || !strings.Contains(err.Error(), "unpacks to more than") {
 		t.Fatalf("1.2 KB of files over a 1 KB limit: %v", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 0 {

@@ -11,7 +11,7 @@ import (
 )
 
 // FuzzInstallMod unpacks zips of arbitrary entries: any names, contents and
-// modes, links included. Whatever a zip holds, InstallMod writes nothing
+// modes, links included. Whatever a zip holds, installMod writes nothing
 // outside dir/Mods/<folder>, makes no links, keeps to the size and file
 // limits, and leaves nothing behind when it refuses.
 func FuzzInstallMod(f *testing.F) {
@@ -72,12 +72,12 @@ func FuzzInstallMod(f *testing.F) {
 		if err := os.Mkdir(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		folder, _, err := InstallMod(dir, zipPath, zipName)
+		folder, _, err := installMod(dir, zipPath, zipName)
 		checkInstall(t, base, dir, folder, err)
 		if err != nil {
 			return
 		}
-		again, replaced, err := InstallMod(dir, zipPath, zipName)
+		again, replaced, err := installMod(dir, zipPath, zipName)
 		if err != nil || again != folder || !replaced {
 			t.Fatalf("installing it again: %q, %v, %v; want %q replaced", again, replaced, err, folder)
 		}

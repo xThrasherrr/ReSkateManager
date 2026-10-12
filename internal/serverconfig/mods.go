@@ -63,6 +63,10 @@ func ModsDir(dir string) string { return filepath.Join(dir, "Mods") }
 // DisabledModsDir holds mods taken out of Mods without deleting them.
 func DisabledModsDir(dir string) string { return filepath.Join(dir, "DisabledMods") }
 
+// modDirs are Mods then DisabledMods, so a folder's index says whether its
+// mods are disabled.
+func modDirs(dir string) [2]string { return [2]string{ModsDir(dir), DisabledModsDir(dir)} }
+
 // ReadMods lists the mod folders in dir/Mods in the order the server reads
 // them, then the disabled ones. A missing folder is no mods.
 func ReadMods(dir string) ([]Mod, error) {
@@ -71,11 +75,8 @@ func ReadMods(dir string) ([]Mod, error) {
 		seen[foldPath(a)] = true
 	}
 	mods := []Mod{}
-	for _, disabled := range []bool{false, true} {
-		parent := ModsDir(dir)
-		if disabled {
-			parent = DisabledModsDir(dir)
-		}
+	for i, parent := range modDirs(dir) {
+		disabled := i == 1
 		entries, err := os.ReadDir(parent)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue

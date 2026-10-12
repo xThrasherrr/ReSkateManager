@@ -22,36 +22,6 @@ var (
 	maxModList int64 = 8 << 20
 )
 
-// InstallMod unpacks a mod's zip into dir/Mods. The zip may hold the mod's
-// files at its root (the folder is then named after zipName), one folder with
-// them inside, or Mods/<folder>/ as zipped from a game install. A folder of the
-// same name is replaced, so uploading a newer version updates the mod; a
-// disabled one stays disabled.
-func InstallMod(dir, zipPath, zipName string) (folder string, replaced bool, err error) {
-	u, err := UnpackMod(dir, zipPath, zipName)
-	if err != nil {
-		return "", false, err
-	}
-	defer u.Discard()
-	return u.Install("")
-}
-
-// UpdateMod installs a newer version of the mod in folder old, which may land
-// in a folder of another name (Thunderstore's carry the version), and removes
-// the old one. The mod stays enabled or disabled as it was.
-func UpdateMod(dir, old, zipPath, zipName string) (folder string, err error) {
-	if _, _, err := findMod(dir, old); err != nil {
-		return "", err
-	}
-	u, err := UnpackMod(dir, zipPath, zipName)
-	if err != nil {
-		return "", err
-	}
-	defer u.Discard()
-	folder, _, err = u.Install(old)
-	return folder, err
-}
-
 // Unpacked is a mod unpacked beside a server's Mods folder, not yet in it.
 // Unpacking is the slow part of installing a mod and changes nothing the
 // server sees, so it needs no lock; Install, which does, is a few renames.
@@ -61,8 +31,10 @@ type Unpacked struct {
 	folder string // the folder they go to
 }
 
-// UnpackMod unpacks a mod's zip, laid out as InstallMod takes it, beside
-// dir/Mods. Discard it once done with it, installed or not.
+// UnpackMod unpacks a mod's zip beside dir/Mods. The zip may hold the mod's
+// files at its root (the folder is then named after zipName), one folder with
+// them inside, or Mods/<folder>/ as zipped from a game install. Discard it
+// once done with it, installed or not.
 func UnpackMod(dir, zipPath, zipName string) (*Unpacked, error) {
 	zr, err := safezip.Open(zipPath, maxModList)
 	if errors.Is(err, zip.ErrInsecurePath) {
@@ -114,9 +86,6 @@ func UnpackMod(dir, zipPath, zipName string) (*Unpacked, error) {
 	}
 	return u, nil
 }
-
-// Folder is the folder the mod goes to.
-func (u *Unpacked) Folder() string { return u.folder }
 
 // Discard deletes the unpacked files, unless Install moved them into place.
 func (u *Unpacked) Discard() { os.RemoveAll(u.tmp) }
@@ -275,14 +244,10 @@ func findMod(dir, folder string) (path string, disabled bool, err error) {
 	if !ValidModFolder(folder) {
 		return "", false, ErrNoMod
 	}
-	for _, disabled := range []bool{false, true} {
-		parent := ModsDir(dir)
-		if disabled {
-			parent = DisabledModsDir(dir)
-		}
+	for i, parent := range modDirs(dir) {
 		p := filepath.Join(parent, folder)
 		if fi, err := os.Lstat(p); err == nil && (fi.IsDir() || linkTarget(p) != "") {
-			return p, disabled, nil
+			return p, i == 1, nil
 		}
 	}
 	return "", false, ErrNoMod

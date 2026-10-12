@@ -123,7 +123,7 @@ func TimeOfDay(layers map[string]string, all []WorldLayer) string {
 			found = true
 			want := ""
 			if slot != 0 {
-				want = map[bool]string{true: "on", false: "off"}[s == slot]
+				want = onOff(s == slot)
 			}
 			if layers[l.Key] != want {
 				match = false

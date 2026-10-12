@@ -184,7 +184,7 @@ var Fields = []Field{
 	{Key: "parks.historic", Label: "Piers 1 / Historic", Group: "Parks", Type: TypeEnum, Options: parkLayouts["historic"], Default: "megapark_05"},
 	{Key: "parks.financial", Label: "Piers 2 / Financial", Group: "Parks", Type: TypeEnum, Options: parkLayouts["financial"], Default: "flumppark_08"},
 
-	{Key: "park_mods", Label: "Park mods", Group: "Park mods", Type: TypeParkMods, Help: "Parks built in the game's Park Editor, from mods in the server's Mods. Spawn one with park-mod add <name> while its map runs.", Default: []ParkMod{}},
+	{Key: "park_mods", Label: "Park mods", Group: "Park mods", Type: TypeParkMods, Max: maxParkMods, Help: "Parks built in the game's Park Editor, from mods in the server's Mods. Spawn one with park-mod add <name> while its map runs.", Default: []ParkMod{}},
 	{Key: "park_limits.parks", Label: "Parks spawned at once, at most", Group: "Park mods", Type: TypeInt, Min: 1, Max: 16, Restart: true, Default: 3.0},
 	{Key: "park_limits.objects", Label: "Objects of the parks spawned, at most", Group: "Park mods", Type: TypeInt, Min: 1, Max: 1024, Restart: true, Help: "All of them together.", Default: 512.0},
 
@@ -192,7 +192,7 @@ var Fields = []Field{
 	{Key: "announcements.interval_minutes", Label: "Minutes between announcements", Group: "Announcements", Type: TypeInt, Min: 0, Max: 1440, Help: "While players are on. 0 is off.", Default: 0.0},
 	{Key: "announcements.card", Label: "Show announcements as a card", Group: "Announcements", Type: TypeBool, Help: "At the top of every player's screen, as well as in chat.", Default: true},
 
-	{Key: "commands", Label: "Chat commands", Group: "Chat commands", Type: TypeCommands, Owner: true, Restart: true, Help: "Your own /commands, such as /discord or /rules. They apply on restart.", Default: []CustomCommand{}},
+	{Key: "commands", Label: "Chat commands", Group: "Chat commands", Type: TypeCommands, Max: maxCustomCommands, Owner: true, Restart: true, Help: "Your own /commands, such as /discord or /rules. They apply on restart.", Default: []CustomCommand{}},
 
 	{Key: "votes.seconds", Label: "Vote length (s)", Group: "Votes", Type: TypeInt, Min: 10, Max: 300, Help: "For votes that don't set their own.", Default: 30.0},
 	{Key: "votes.cooldown_seconds", Label: "Cooldown between a player's votes (s)", Group: "Votes", Type: TypeInt, Min: 0, Max: 3600, Help: "For votes that don't set their own.", Default: 60.0},
@@ -212,7 +212,7 @@ var Fields = []Field{
 	{Key: "votes.time_of_day.seconds", Label: "Time of day vote length (s)", Group: "Time of day votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},
 	{Key: "votes.time_of_day.cooldown_seconds", Label: "Cooldown after a time of day vote (s)", Group: "Time of day votes", Type: TypeInt, Min: 0, Max: 3600, Help: votesOwnCooldown, Default: 0.0},
 	{Key: "votes.time_of_day.min_players", Label: "Players on to start a time of day vote", Group: "Time of day votes", Type: TypeInt, Min: 1, Max: maxVotePlayers, Default: 1.0},
-	{Key: "votes.custom", Label: "Custom votes", Group: "Custom votes", Type: TypeVotes, Owner: true, Help: "Votes of your own, each running a server command when it passes. New, removed or edited ones apply on restart.", Default: []CustomVote{}},
+	{Key: "votes.custom", Label: "Custom votes", Group: "Custom votes", Type: TypeVotes, Max: maxCustomVotes, Owner: true, Help: "Votes of your own, each running a server command when it passes. New, removed or edited ones apply on restart.", Default: []CustomVote{}},
 	{Key: "votes.polls", Label: "Who may start polls", Group: "Polls", Type: TypeEnum, Options: []string{"off", "admins", "everyone"}, Default: "admins"},
 	{Key: "votes.poll_seconds", Label: "Poll length (s)", Group: "Polls", Type: TypeInt, Min: 10, Max: 600, Default: 60.0},
 

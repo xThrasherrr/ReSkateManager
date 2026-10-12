@@ -82,7 +82,7 @@ func SyncShared(dir, shared string, use SharedUse) error {
 	}
 	var errs []error
 	taken := map[string]bool{}
-	for _, parent := range []string{ModsDir(dir), DisabledModsDir(dir)} {
+	for _, parent := range modDirs(dir) {
 		entries, err := os.ReadDir(parent)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -222,7 +222,7 @@ func UseShared(dir, folder, shared string) (bool, error) {
 // RenameShared moves server folder dir's link to shared mod old over to new,
 // where an update put it, keeping it enabled or disabled.
 func RenameShared(dir, old, new, shared string) error {
-	for _, parent := range []string{ModsDir(dir), DisabledModsDir(dir)} {
+	for _, parent := range modDirs(dir) {
 		p := filepath.Join(parent, old)
 		if !isSharedLink(p) {
 			continue

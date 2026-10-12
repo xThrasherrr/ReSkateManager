@@ -63,8 +63,7 @@ func Read(path string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
+	dec := decodeJSON(data)
 	var root map[string]any
 	if err := dec.Decode(&root); err != nil {
 		return nil, fmt.Errorf("ReSkateServer.json is not valid JSON: %w", err)
@@ -87,14 +86,20 @@ func Read(path string) (*File, error) {
 		return nil, err
 	}
 	// The server won't start with bans it can't read either.
-	dec = json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
 	var rows []any
-	if err := dec.Decode(&rows); err != nil {
+	if err := decodeJSON(data).Decode(&rows); err != nil {
 		return nil, fmt.Errorf("%s is not a JSON list: %w", BansFile, err)
 	}
 	f.bans, f.bansFile = bansOf(rows), true
 	return f, nil
+}
+
+// decodeJSON decodes data with its numbers kept as json.Number, so a whole
+// number is written back as it was.
+func decodeJSON(data []byte) *json.Decoder {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return dec
 }
 
 // readCapped reads a file of at most max bytes, refusing a bigger one
@@ -137,19 +142,7 @@ func (f *File) Write(path string) error {
 		return err
 	}
 	if f.bansSet && f.bansFile {
-		rows := make([]any, len(f.bans))
-		for i, b := range f.bans {
-			rows[i] = map[string]any{"id": b.ID, "name": b.Name, "added": b.Added}
-		}
-		bans, err := json.MarshalIndent(rows, "", "  ")
-		if err != nil {
-			return err
-		}
-		bansPath := filepath.Join(filepath.Dir(path), BansFile)
-		if err := os.MkdirAll(filepath.Dir(bansPath), 0o755); err != nil {
-			return err
-		}
-		if err := atomicfile.Write(bansPath, append(bans, '\n'), 0o600); err != nil {
+		if err := writeJSON(filepath.Join(filepath.Dir(path), BansFile), banRows(f.bans)); err != nil {
 			return err
 		}
 	}
@@ -159,6 +152,19 @@ func (f *File) Write(path string) error {
 		}
 	}
 	return atomicfile.Write(path, data, 0o600)
+}
+
+// writeJSON writes v indented, as the server writes its files in data/, in
+// one step like Write.
+func writeJSON(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return atomicfile.Write(path, append(data, '\n'), 0o600)
 }
 
 // sections says where a sectioned file keeps each flat key (load_config in
@@ -472,11 +478,7 @@ func (f *File) SetAdmins(ids []string) error {
 	if f.roles != nil {
 		return f.setAdminRole(ids)
 	}
-	list := make([]any, len(ids))
-	for i, id := range ids {
-		list[i] = id
-	}
-	f.Set("admins", list)
+	f.Set("admins", anys(ids))
 	return nil
 }
 
@@ -488,11 +490,16 @@ func (f *File) SetBans(bans []Ban) {
 		delete(f.Root, "bans")
 		return
 	}
-	list := make([]any, len(bans))
+	f.Root["bans"] = banRows(bans)
+}
+
+// banRows are bans as the server writes them, in either place.
+func banRows(bans []Ban) []any {
+	rows := make([]any, len(bans))
 	for i, b := range bans {
-		list[i] = map[string]any{"id": b.ID, "name": b.Name, "added": b.Added}
+		rows[i] = map[string]any{"id": b.ID, "name": b.Name, "added": b.Added}
 	}
-	f.Root["bans"] = list
+	return rows
 }
 
 // ---- values ----
@@ -601,17 +608,8 @@ func normalize(fd Field, raw any) (any, error) {
 		if n < fd.Min || (fd.Max != 0 && n > fd.Max) {
 			return nil, fmt.Errorf("%s must be %g to %g", fd.Label, fd.Min, fd.Max)
 		}
-		if fd.Key == "crowd_budget" && n != 0 && n < 300 {
-			return nil, fmt.Errorf("%s must be 0 (no limit) or 300 to %g", fd.Label, fd.Max)
-		}
-		if fd.Key == "bone_scale_limit" && n != 0 && n < 1 {
-			return nil, fmt.Errorf("%s must be 0 (no limit) or 1 to %g", fd.Label, fd.Max)
-		}
-		if fd.Key == "bone_reach_limit" && n != 0 && n < 0.5 {
-			return nil, fmt.Errorf("%s must be 0 (no limit) or 0.5 to %g", fd.Label, fd.Max)
-		}
-		if ownSeconds(fd.Key) && n != 0 && n < minVoteSeconds {
-			return nil, fmt.Errorf("%s must be 0 (the vote length) or %d to %g", fd.Label, minVoteSeconds, fd.Max)
+		if z, ok := zeroOr[fd.Key]; ok && n != 0 && n < z.least {
+			return nil, fmt.Errorf("%s must be 0 (%s) or %g to %g", fd.Label, z.zero, z.least, fd.Max)
 		}
 		return n, nil
 	case TypeEnum:
@@ -669,20 +667,13 @@ func normalize(fd Field, raw any) (any, error) {
 		}
 		return "#" + strings.ToUpper(s), nil
 	case TypeList:
-		var items []string
-		switch v := raw.(type) {
-		case []any:
-			for _, x := range v {
-				items = append(items, fmt.Sprint(x))
-			}
-		case []string:
-			items = v
-		default:
+		items, ok := anyList(raw)
+		if !ok {
 			return nil, fmt.Errorf("%s must be a list", fd.Label)
 		}
 		out := []string{}
-		for _, it := range items {
-			it = strings.ToLower(strings.TrimSpace(it))
+		for _, x := range items {
+			it := strings.ToLower(strings.TrimSpace(fmt.Sprint(x)))
 			if fd.Key == "score_allow" && !fingerprintRe.MatchString(it) {
 				return nil, fmt.Errorf("%q is not a scoring fingerprint (16 hex digits)", it)
 			}
@@ -698,15 +689,8 @@ func normalize(fd Field, raw any) (any, error) {
 		}
 		return out, nil
 	case TypeMaps:
-		var items []any
-		switch v := raw.(type) {
-		case []any:
-			items = v
-		case []string:
-			for _, s := range v {
-				items = append(items, s)
-			}
-		default:
+		items, ok := anyList(raw)
+		if !ok {
 			return nil, fmt.Errorf("%s must be a list", fd.Label)
 		}
 		// Like load_config, skip what isn't a map name; the server matches names
@@ -726,15 +710,8 @@ func normalize(fd Field, raw any) (any, error) {
 		}
 		return out, nil
 	case TypeLines:
-		var items []any
-		switch v := raw.(type) {
-		case []any:
-			items = v
-		case []string:
-			for _, s := range v {
-				items = append(items, s)
-			}
-		default:
+		items, ok := anyList(raw)
+		if !ok {
 			return nil, fmt.Errorf("%s must be a list", fd.Label)
 		}
 		// Like load_config, skip what isn't text. The console's add trims a
@@ -788,6 +765,41 @@ func asNumber(raw any) (float64, bool) {
 	return n, !math.IsNaN(n) && !math.IsInf(n, 0)
 }
 
+// anyList reads a list as JSON or the panel gives it.
+func anyList(raw any) ([]any, bool) {
+	switch v := raw.(type) {
+	case []any:
+		return v, true
+	case []string:
+		return anys(v), true
+	}
+	return nil, false
+}
+
+// anys is a list of strings as the file holds it: [] when empty, never null.
+func anys(list []string) []any {
+	out := make([]any, len(list))
+	for i, s := range list {
+		out[i] = s
+	}
+	return out
+}
+
+// zeroOr are the numbers whose 0 stands for something, no limit or the votes'
+// own length, and that otherwise start above their minimum: the least they
+// are then, and what 0 is.
+var zeroOr = map[string]struct {
+	least float64
+	zero  string
+}{
+	"crowd_budget":              {300, "no limit"},
+	"bone_scale_limit":          {1, "no limit"},
+	"bone_reach_limit":          {0.5, "no limit"},
+	"votes.map.seconds":         {minVoteSeconds, "the vote length"},
+	"votes.kick.seconds":        {minVoteSeconds, "the vote length"},
+	"votes.time_of_day.seconds": {minVoteSeconds, "the vote length"},
+}
+
 // Limits of 2.0.2's custom votes (Server/server_config.h,
 // Extension/Multiplayer/Net/protocol.h).
 const (
@@ -802,12 +814,6 @@ const (
 	maxVoteCooldown  = 3600
 	commandExample   = `e.g. "map {map}"`
 )
-
-// ownSeconds reports whether key is one vote's own length (votes.map.seconds),
-// which is 0 for the votes' length, never 1 to 9.
-func ownSeconds(key string) bool {
-	return slices.Contains([]string{"votes.map.seconds", "votes.kick.seconds", "votes.time_of_day.seconds"}, key)
-}
 
 // validVoteName is valid_server_vote_name: 1 to 16 of a-z, 0-9, - and _.
 func validVoteName(s string) bool {
@@ -853,17 +859,6 @@ func customVotes(raw any) ([]CustomVote, error) {
 			return nil, errors.New("each custom vote must be an object")
 		}
 		v := CustomVote{Choices: []string{}, Enabled: true, Percent: defaultVotePct, MinPlayers: 1}
-		text := func(key string) (string, error) {
-			x, ok := m[key]
-			if !ok || x == nil {
-				return "", nil
-			}
-			s, ok := x.(string)
-			if !ok {
-				return "", fmt.Errorf("a custom vote's %s must be text", key)
-			}
-			return strings.TrimSpace(s), nil
-		}
 		whole := func(key string, min, max int, into *int) error {
 			x, ok := m[key]
 			if !ok {
@@ -877,11 +872,10 @@ func customVotes(raw any) ([]CustomVote, error) {
 			return nil
 		}
 		var err error
-		if v.Name, err = text("name"); err != nil {
+		if v.Name, err = textOf(m, "name", "a custom vote"); err != nil {
 			return nil, err
 		}
-		v.Name = strings.ToLower(v.Name)
-		if !validVoteName(v.Name) {
+		if v.Name = strings.ToLower(strings.TrimSpace(v.Name)); !validVoteName(v.Name) {
 			return nil, fmt.Errorf("a custom vote's name is 1 to %d lowercase letters, digits, - or _ (%q is not)", maxVoteNameBytes, v.Name)
 		}
 		if !voteNameFree(v.Name) {
@@ -890,16 +884,16 @@ func customVotes(raw any) ([]CustomVote, error) {
 		if slices.ContainsFunc(out, func(o CustomVote) bool { return o.Name == v.Name }) {
 			return nil, fmt.Errorf("two custom votes are called %q", v.Name)
 		}
-		if v.Description, err = text("description"); err != nil {
+		if v.Description, err = textOf(m, "description", "a custom vote"); err != nil {
 			return nil, err
 		}
-		if v.Description != "" && (len(v.Description) > maxVoteDescBytes || !ValidChatText(v.Description)) {
+		if v.Description = strings.TrimSpace(v.Description); v.Description != "" && (len(v.Description) > maxVoteDescBytes || !ValidChatText(v.Description)) {
 			return nil, fmt.Errorf("custom vote %q: the description must be one chat line of at most %d bytes", v.Name, maxVoteDescBytes)
 		}
-		if v.Command, err = text("command"); err != nil {
+		if v.Command, err = textOf(m, "command", "a custom vote"); err != nil {
 			return nil, err
 		}
-		if !validAdminText(v.Command) {
+		if v.Command = strings.TrimSpace(v.Command); !validAdminText(v.Command) {
 			return nil, fmt.Errorf("custom vote %q: the command must be one server command of at most %d bytes, %s", v.Name, maxAdminText, commandExample)
 		}
 		if x, ok := m["choices"]; ok && x != nil {
@@ -951,6 +945,16 @@ func customVotes(raw any) ([]CustomVote, error) {
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// textOf reads one of an object's texts as load_config does: a missing one,
+// or null, is empty. what names the object in the error, as "a custom vote".
+func textOf(m map[string]any, key, what string) (string, error) {
+	s, ok := m[key].(string)
+	if !ok && m[key] != nil {
+		return "", fmt.Errorf("%s's %s must be text", what, key)
+	}
+	return s, nil
 }
 
 // validAdminText is valid_admin_text: one server command of at most 320
@@ -1005,19 +1009,11 @@ func customCommands(raw any) ([]CustomCommand, error) {
 			return nil, errors.New("each chat command must be an object")
 		}
 		c := CustomCommand{Command: []string{}}
-		text := func(key string) (string, error) {
-			s, ok := m[key].(string)
-			if !ok && m[key] != nil {
-				return "", fmt.Errorf("a chat command's %s must be text", key)
-			}
-			return strings.TrimSpace(s), nil
-		}
 		var err error
-		if c.Name, err = text("name"); err != nil {
+		if c.Name, err = textOf(m, "name", "a chat command"); err != nil {
 			return nil, err
 		}
-		c.Name = strings.ToLower(c.Name)
-		if !validVoteName(c.Name) {
+		if c.Name = strings.ToLower(strings.TrimSpace(c.Name)); !validVoteName(c.Name) {
 			return nil, fmt.Errorf("a chat command's name is 1 to %d lowercase letters, digits, - or _ (%q is not)", maxVoteNameBytes, c.Name)
 		}
 		if !commandNameFree(c.Name) {
@@ -1026,10 +1022,10 @@ func customCommands(raw any) ([]CustomCommand, error) {
 		if slices.ContainsFunc(out, func(o CustomCommand) bool { return o.Name == c.Name }) {
 			return nil, fmt.Errorf("two chat commands are called /%s", c.Name)
 		}
-		if c.Reply, err = text("reply"); err != nil {
+		if c.Reply, err = textOf(m, "reply", "a chat command"); err != nil {
 			return nil, err
 		}
-		if c.Reply != "" && !ValidChatText(c.Reply) {
+		if c.Reply = strings.TrimSpace(c.Reply); c.Reply != "" && !ValidChatText(c.Reply) {
 			return nil, fmt.Errorf("chat command /%s: the reply must be one chat line of at most 200 bytes", c.Name)
 		}
 		var runs []any
@@ -1114,16 +1110,9 @@ func parkMods(raw any) ([]ParkMod, error) {
 		if !ok {
 			return nil, errors.New("each park mod must be an object")
 		}
-		text := func(key string) (string, error) {
-			s, ok := m[key].(string)
-			if !ok && m[key] != nil {
-				return "", fmt.Errorf("a park mod's %s must be text", key)
-			}
-			return s, nil
-		}
 		var pm ParkMod
 		var err error
-		if pm.Name, err = text("name"); err != nil {
+		if pm.Name, err = textOf(m, "name", "a park mod"); err != nil {
 			return nil, err
 		}
 		if pm.Name = strings.ToLower(strings.TrimSpace(pm.Name)); !validVoteName(pm.Name) {
@@ -1132,19 +1121,19 @@ func parkMods(raw any) ([]ParkMod, error) {
 		if slices.ContainsFunc(out, func(o ParkMod) bool { return o.Name == pm.Name }) {
 			return nil, fmt.Errorf("two park mods are called %s", pm.Name)
 		}
-		if pm.Folder, err = text("folder"); err != nil {
+		if pm.Folder, err = textOf(m, "folder", "a park mod"); err != nil {
 			return nil, err
 		}
 		if !validModFolder(pm.Folder) {
 			return nil, fmt.Errorf("park mod %s: the folder is the name of a mod's folder in Mods: letters, digits, spaces, _ - and ., no path", pm.Name)
 		}
-		if pm.Map, err = text("map"); err != nil {
+		if pm.Map, err = textOf(m, "map", "a park mod"); err != nil {
 			return nil, err
 		}
 		if pm.Map = strings.TrimSpace(pm.Map); pm.Map == "" {
 			return nil, fmt.Errorf("park mod %s: name the map it was built on", pm.Name)
 		}
-		if pm.Key, err = text("key"); err != nil {
+		if pm.Key, err = textOf(m, "key", "a park mod"); err != nil {
 			return nil, err
 		}
 		if pm.Key = strings.TrimSpace(pm.Key); pm.Key != "" && !validParkKey(pm.Key) {
@@ -1158,22 +1147,38 @@ func parkMods(raw any) ([]ParkMod, error) {
 // parkModCommands plans the park-mod config commands that turn the park mods
 // from cur into want. A changed one is removed and set up again.
 func parkModCommands(cur, want []ParkMod) []string {
+	remove := func(pm ParkMod) string { return "park-mod config remove " + pm.Name }
+	add := func(pm ParkMod) string {
+		cmd := "park-mod config add " + pm.Name + " | " + pm.Folder + " | " + pm.Map
+		if pm.Key != "" {
+			cmd += " | " + pm.Key
+		}
+		return cmd
+	}
+	return setCommands(cur, want, remove, add)
+}
+
+// setCommands plans the commands that turn the set cur into want, as the
+// server only adds and removes one at a time: what want lacks is removed,
+// then what cur lacks is added, each in its list's order.
+func setCommands[T comparable](cur, want []T, remove, add func(T) string) []string {
 	var cmds []string
-	for _, pm := range cur {
-		if !slices.Contains(want, pm) {
-			cmds = append(cmds, "park-mod config remove "+pm.Name)
+	for _, x := range cur {
+		if !slices.Contains(want, x) {
+			cmds = append(cmds, remove(x))
 		}
 	}
-	for _, pm := range want {
-		if !slices.Contains(cur, pm) {
-			cmd := "park-mod config add " + pm.Name + " | " + pm.Folder + " | " + pm.Map
-			if pm.Key != "" {
-				cmd += " | " + pm.Key
-			}
-			cmds = append(cmds, cmd)
+	for _, x := range want {
+		if !slices.Contains(cur, x) {
+			cmds = append(cmds, add(x))
 		}
 	}
 	return cmds
+}
+
+// withArg is a command that takes the argument it's given at its end.
+func withArg(cmd string) func(string) string {
+	return func(arg string) string { return cmd + arg }
 }
 
 // jsonValue is how a normalised value is stored in the file.
@@ -1184,44 +1189,25 @@ func jsonValue(fd Field, v any) any {
 	case TypeNumber:
 		return json.Number(strconv.FormatFloat(v.(float64), 'f', -1, 64))
 	case TypeList, TypeMaps, TypeLines:
-		list := []any{}
-		for _, s := range v.([]string) {
-			list = append(list, s)
-		}
-		return list
-	case TypeVotes:
-		// Every key, as the server writes them, so it adds none on its next start.
-		list := []any{}
-		for _, cv := range v.([]CustomVote) {
-			choices := []any{}
-			for _, c := range cv.Choices {
-				choices = append(choices, c)
-			}
-			n := func(i int) json.Number { return json.Number(strconv.Itoa(i)) }
-			list = append(list, map[string]any{"name": cv.Name, "description": cv.Description, "command": cv.Command,
-				"choices": choices, "enabled": cv.Enabled, "percent": n(cv.Percent), "seconds": n(cv.Seconds),
-				"cooldown_seconds": n(cv.Cooldown), "min_players": n(cv.MinPlayers)})
-		}
-		return list
-	case TypeCommands:
-		// As the server writes them: the command always a list.
-		list := []any{}
-		for _, cc := range v.([]CustomCommand) {
-			runs := []any{}
-			for _, r := range cc.Command {
-				runs = append(runs, r)
-			}
-			list = append(list, map[string]any{"name": cc.Name, "reply": cc.Reply, "command": runs, "admin": cc.Admin})
-		}
-		return list
-	case TypeParkMods:
-		list := []any{}
-		for _, pm := range v.([]ParkMod) {
-			list = append(list, map[string]any{"name": pm.Name, "folder": pm.Folder, "map": pm.Map, "key": pm.Key})
-		}
-		return list
+		return anys(v.([]string))
+	case TypeVotes, TypeCommands, TypeParkMods:
+		return jsonTree(v)
 	}
 	return v
+}
+
+// jsonTree is a list of the owner's custom votes, chat commands or park mods
+// as the server writes them: every key of their json tags, so it adds none on
+// its next start, a chat command's command always a list, and whole numbers
+// as json.Number, as Read keeps them.
+func jsonTree(v any) []any {
+	data, _ := json.Marshal(v) // structs of text, numbers and switches: it can't fail
+	var list []any
+	decodeJSON(data).Decode(&list)
+	if list == nil {
+		list = []any{}
+	}
+	return list
 }
 
 func num(v any) string { return strconv.FormatFloat(v.(float64), 'f', -1, 64) }
@@ -1308,10 +1294,6 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 			continue
 		}
 		switch fd.Key {
-		case "name":
-			p.Commands = append(p.Commands, "name "+v.(string))
-		case "map":
-			p.Commands = append(p.Commands, "map "+v.(string))
 		case "map_pool":
 			old, _ := curVals[fd.Key].([]string)
 			cmds, err := poolCommands(old, v.([]string), known)
@@ -1319,12 +1301,6 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 				return nil, err
 			}
 			p.Commands = append(p.Commands, cmds...)
-		case "map_rotation_minutes":
-			if v.(float64) == 0 {
-				p.Commands = append(p.Commands, "rotation off")
-			} else {
-				p.Commands = append(p.Commands, "rotation "+num(v))
-			}
 		case "password", "welcome":
 			s := v.(string)
 			if s == "" {
@@ -1344,31 +1320,9 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 				}
 				p.Commands = append(p.Commands, "chat-color "+badge+" "+text)
 			}
-		case "listed":
-			p.Commands = append(p.Commands, "listed "+onOff(v))
-		case "reserved_slots":
-			p.Commands = append(p.Commands, "reserved slots "+num(v))
 		case "reserved":
 			old, _ := curVals[fd.Key].([]string)
-			next := v.([]string)
-			for _, id := range old {
-				if !slices.Contains(next, id) {
-					p.Commands = append(p.Commands, "reserved remove "+id)
-				}
-			}
-			for _, id := range next {
-				if !slices.Contains(old, id) {
-					p.Commands = append(p.Commands, "reserved add "+id)
-				}
-			}
-		case "send_rate":
-			p.Commands = append(p.Commands, "rate "+num(v))
-		case "crowd_budget":
-			if v.(float64) == 0 {
-				p.Commands = append(p.Commands, "crowd off")
-			} else {
-				p.Commands = append(p.Commands, "crowd "+num(v))
-			}
+			p.Commands = append(p.Commands, setCommands(old, v.([]string), withArg("reserved remove "), withArg("reserved add "))...)
 		case "distances.full_rate_return", "distances.half_rate_start", "distances.half_rate_return", "distances.low_rate_start":
 			if !distances {
 				distances = true
@@ -1376,123 +1330,75 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 					num(merged["distances.full_rate_return"]), num(merged["distances.half_rate_start"]),
 					num(merged["distances.half_rate_return"]), num(merged["distances.low_rate_start"])))
 			}
-		case "voice_chat":
-			p.Commands = append(p.Commands, "voice "+onOff(v))
-		case "voice_range":
-			p.Commands = append(p.Commands, "voice-range "+num(v))
-		case "object_placement":
-			p.Commands = append(p.Commands, "placement "+v.(string))
-		case "object_limit":
-			if v.(float64) == 0 {
-				p.Commands = append(p.Commands, "objects off")
-			} else {
-				p.Commands = append(p.Commands, "objects "+num(v))
-			}
-		case "allow_object_scaling":
-			p.Commands = append(p.Commands, "object-scaling "+onOff(v))
-		case "bone_scale_limit":
-			if v.(float64) == 0 {
-				p.Commands = append(p.Commands, "bone-scale off")
-			} else {
-				p.Commands = append(p.Commands, "bone-scale "+num(v))
-			}
-		case "bone_reach_limit":
-			if v.(float64) == 0 {
-				p.Commands = append(p.Commands, "bone-reach off")
-			} else {
-				p.Commands = append(p.Commands, "bone-reach "+num(v))
-			}
-		case "sync_effects":
-			p.Commands = append(p.Commands, "effects "+onOff(v))
-		case "noclip":
-			p.Commands = append(p.Commands, "noclip "+onOff(v))
-		case "no_bail":
-			p.Commands = append(p.Commands, "nobail "+onOff(v))
-		case "boosts":
-			p.Commands = append(p.Commands, "boosts "+onOff(v))
-		case "enforce_tuning":
-			p.Commands = append(p.Commands, "tuning "+onOff(v))
-		case "parties":
-			p.Commands = append(p.Commands, "parties "+onOff(v))
-		case "party_size":
-			p.Commands = append(p.Commands, "party-size "+num(v))
-		case "afk_kick_minutes":
-			if v.(float64) == 0 {
-				p.Commands = append(p.Commands, "afk-kick off")
-			} else {
-				p.Commands = append(p.Commands, "afk-kick "+num(v))
-			}
-		case "announce_throwdowns":
-			p.Commands = append(p.Commands, "announce-throwdowns "+onOff(v))
-		case "activity_log":
-			p.Commands = append(p.Commands, "activity-log "+onOff(v))
-		case "parks.construction", "parks.historic", "parks.financial":
-			p.Commands = append(p.Commands, "park "+strings.TrimPrefix(fd.Key, "parks.")+" "+v.(string))
 		case "announcements.messages":
 			old, _ := curVals[fd.Key].([]string)
 			p.Commands = append(p.Commands, announcementCommands(old, v.([]string))...)
-		case "announcements.interval_minutes":
-			if v.(float64) == 0 {
-				p.Commands = append(p.Commands, "announcements interval off")
-			} else {
-				p.Commands = append(p.Commands, "announcements interval "+num(v))
-			}
-		case "announcements.card":
-			p.Commands = append(p.Commands, "announcements card "+onOff(v))
-		case "votes.map.enabled", "votes.kick.enabled", "votes.time_of_day.enabled":
-			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" "+onOff(v))
-		case "votes.map.percent", "votes.kick.percent", "votes.time_of_day.percent":
-			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" "+num(v))
-		case "votes.map.seconds", "votes.kick.seconds", "votes.time_of_day.seconds":
-			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" seconds "+num(v))
-		case "votes.map.cooldown_seconds", "votes.kick.cooldown_seconds", "votes.time_of_day.cooldown_seconds":
-			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" cooldown "+num(v))
-		case "votes.map.min_players", "votes.kick.min_players", "votes.time_of_day.min_players":
-			p.Commands = append(p.Commands, "votes "+voteKind(fd.Key)+" min-players "+num(v))
-		case "votes.seconds":
-			p.Commands = append(p.Commands, "votes seconds "+num(v))
-		case "votes.cooldown_seconds":
-			p.Commands = append(p.Commands, "votes cooldown "+num(v))
-		case "votes.starter_votes_yes":
-			p.Commands = append(p.Commands, "votes starter-yes "+onOff(v))
 		case "votes.custom":
 			old, _ := curVals[fd.Key].([]CustomVote)
 			p.Commands = append(p.Commands, customVoteCommands(old, v.([]CustomVote))...)
-		case "votes.polls":
-			p.Commands = append(p.Commands, "votes polls "+v.(string))
-		case "votes.poll_seconds":
-			p.Commands = append(p.Commands, "votes poll-seconds "+num(v))
-		case "speed_check":
-			p.Commands = append(p.Commands, "speed-check "+v.(string))
-		case "pinned_board":
-			p.Commands = append(p.Commands, "board-check "+v.(string))
-		case "use_global_word_filter":
-			p.Commands = append(p.Commands, "words global "+onOff(v))
 		case "park_mods":
 			old, _ := curVals[fd.Key].([]ParkMod)
 			p.Commands = append(p.Commands, parkModCommands(old, v.([]ParkMod))...)
-		case "score_check":
-			p.Commands = append(p.Commands, "score-check "+v.(string))
 		case "score_allow":
 			old, _ := curVals[fd.Key].([]string)
-			next := v.([]string)
-			for _, fp := range old {
-				if !slices.Contains(next, fp) {
-					p.Commands = append(p.Commands, "score-allow remove "+fp)
-				}
-			}
-			for _, fp := range next {
-				if !slices.Contains(old, fp) {
-					p.Commands = append(p.Commands, "score-allow "+fp)
-				}
-			}
-		case "world_layer_sync":
-			p.Commands = append(p.Commands, "layer-sync "+onOff(v))
+			p.Commands = append(p.Commands, setCommands(old, v.([]string), withArg("score-allow remove "), withArg("score-allow "))...)
 		default:
-			return nil, fmt.Errorf("no command for %s", fd.Key)
+			cmd, ok := settingCommand(fd, v)
+			if !ok {
+				return nil, fmt.Errorf("no command for %s", fd.Key)
+			}
+			p.Commands = append(p.Commands, cmd)
 		}
 	}
 	return p, nil
+}
+
+// commandVerbs are the console commands that set a setting, by its key, with
+// one "<verb> <value>": on or off for a switch, the text or choice itself, or
+// the number.
+var commandVerbs = map[string]string{
+	"name": "name", "map": "map", "listed": "listed", "reserved_slots": "reserved slots",
+	"map_rotation_minutes": "rotation", "send_rate": "rate", "crowd_budget": "crowd",
+	"voice_chat": "voice", "voice_range": "voice-range",
+	"object_placement": "placement", "object_limit": "objects", "allow_object_scaling": "object-scaling",
+	"bone_scale_limit": "bone-scale", "bone_reach_limit": "bone-reach", "sync_effects": "effects",
+	"noclip": "noclip", "no_bail": "nobail", "boosts": "boosts", "enforce_tuning": "tuning",
+	"parties": "parties", "party_size": "party-size", "afk_kick_minutes": "afk-kick",
+	"announce_throwdowns": "announce-throwdowns", "activity_log": "activity-log",
+	"parks.construction": "park construction", "parks.historic": "park historic", "parks.financial": "park financial",
+	"announcements.interval_minutes": "announcements interval", "announcements.card": "announcements card",
+	"votes.seconds": "votes seconds", "votes.cooldown_seconds": "votes cooldown", "votes.starter_votes_yes": "votes starter-yes",
+	"votes.map.enabled": "votes map", "votes.map.percent": "votes map", "votes.map.seconds": "votes map seconds",
+	"votes.map.cooldown_seconds": "votes map cooldown", "votes.map.min_players": "votes map min-players",
+	"votes.kick.enabled": "votes kick", "votes.kick.percent": "votes kick", "votes.kick.seconds": "votes kick seconds",
+	"votes.kick.cooldown_seconds": "votes kick cooldown", "votes.kick.min_players": "votes kick min-players",
+	"votes.time_of_day.enabled": "votes tod", "votes.time_of_day.percent": "votes tod", "votes.time_of_day.seconds": "votes tod seconds",
+	"votes.time_of_day.cooldown_seconds": "votes tod cooldown", "votes.time_of_day.min_players": "votes tod min-players",
+	"votes.polls": "votes polls", "votes.poll_seconds": "votes poll-seconds",
+	"speed_check": "speed-check", "pinned_board": "board-check", "score_check": "score-check",
+	"use_global_word_filter": "words global", "world_layer_sync": "layer-sync",
+}
+
+// offAtZero are the numbers whose 0 the server takes as "<verb> off".
+var offAtZero = []string{"map_rotation_minutes", "crowd_budget", "object_limit", "bone_scale_limit", "bone_reach_limit",
+	"afk_kick_minutes", "announcements.interval_minutes"}
+
+// settingCommand is the command that sets fd to v, when commandVerbs has one.
+func settingCommand(fd Field, v any) (string, bool) {
+	verb, ok := commandVerbs[fd.Key]
+	if !ok {
+		return "", false
+	}
+	switch fd.Type {
+	case TypeBool:
+		return verb + " " + onOff(v), true
+	case TypeInt, TypeNumber:
+		if v.(float64) == 0 && slices.Contains(offAtZero, fd.Key) {
+			return verb + " off", true
+		}
+		return verb + " " + num(v), true
+	}
+	return verb + " " + v.(string), true
 }
 
 // SettingVerbs are the console commands that change settings: every one Diff
@@ -1500,12 +1406,18 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 // before 1.1.5 still take, and the names the server also takes for some of
 // them (the in-game menu's, and chat-colour). Typed into the console, they
 // need the same permission as the settings pages.
-var SettingVerbs = []string{"name", "map", "map-pool", "rotation", "password", "welcome", "listed", "reserved", "rate", "crowd", "tps", "distances",
-	"voice", "voice-range", "placement", "objects", "object-limit", "object-scaling", "bone-scale", "bone-reach", "effects", "noclip", "nobail", "boosts", "tuning",
-	"parties", "party-size", "afk-kick", "announce-throwdowns", "activity-log", "park", "votes", "speed-check", "score-check", "score-allow",
-	"board-check", "words", "park-mod",
-	"layer-sync", "tod", "layers", "layer", "chat-color", "chat-colour", "announcements",
-	"voice-allow", "object-placement", "world-layer-sync", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce"}
+var SettingVerbs = func() []string {
+	// What Diff plans besides commandVerbs, then the others.
+	out := []string{"map-pool", "password", "welcome", "chat-color", "distances", "park-mod", "score-allow",
+		"tps", "tod", "layers", "layer", "chat-colour",
+		"voice-allow", "object-placement", "object-limit", "world-layer-sync", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce"}
+	for _, verb := range commandVerbs {
+		first, _, _ := strings.Cut(verb, " ")
+		out = append(out, first)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}()
 
 // parkMaps checks that each park mod's map is one of the server's maps, and
 // spells it as the server does: it won't start on a park mod for another.
@@ -1641,16 +1553,6 @@ func customVoteCommands(cur, want []CustomVote) []string {
 		}
 	}
 	return cmds
-}
-
-func voteKind(key string) string {
-	switch {
-	case strings.HasPrefix(key, "votes.map."):
-		return "map"
-	case strings.HasPrefix(key, "votes.kick."):
-		return "kick"
-	}
-	return "tod"
 }
 
 // ApplyOffline writes every changed value to the file (for a stopped server).
