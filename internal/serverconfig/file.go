@@ -46,6 +46,14 @@ const maxConfig = 16 << 20
 // to its folder.
 const BansFile = "data/bans.json"
 
+// HostFiles are the files in a server's folder that are the host's own: what
+// it can't download again, apart from its mods. A server update creates them
+// when missing but never replaces them, and a backup holds them. Servers from
+// ReSkate 1.1.7 on keep their bans in data/, and from 2.0.6 their roles (the
+// admins among them) and chat words too.
+var HostFiles = []string{"ReSkateServer.json", "world-layers.json", BansFile, RolesFile,
+	"data/words_filtered.txt", "data/words_blocked.txt"}
+
 // Read reads a ReSkateServer.json, which must hold one JSON object, and the
 // bans in data/bans.json and roles in data/roles.json beside it.
 func Read(path string) (*File, error) {

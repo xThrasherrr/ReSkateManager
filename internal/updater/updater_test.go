@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 )
 
 func makeZip(t *testing.T, files map[string]string) []byte {
@@ -312,6 +314,27 @@ func TestInstallKeepsHostFilesWhateverTheirSpelling(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, "ReSkateServer.json")); string(got) != `{"name":"mine"}` {
 		t.Errorf("the host's config was replaced: %s", got)
+	}
+}
+
+// Every file a backup holds as the host's own is kept through an update too.
+func TestInstallKeepsEveryHostFile(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "data"), 0o755)
+	theirs := map[string]string{}
+	for _, f := range serverconfig.HostFiles {
+		os.WriteFile(filepath.Join(dir, f), []byte("mine"), 0o644)
+		theirs[f] = "theirs"
+	}
+	zipPath := filepath.Join(t.TempDir(), "release.zip")
+	os.WriteFile(zipPath, makeZip(t, theirs), 0o644)
+	if _, err := Install(zipPath, dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range serverconfig.HostFiles {
+		if got, _ := os.ReadFile(filepath.Join(dir, f)); string(got) != "mine" {
+			t.Errorf("%s was replaced: %s", f, got)
+		}
 	}
 }
 

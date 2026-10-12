@@ -32,6 +32,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 )
 
 const maxDownload = 512 << 20
@@ -551,11 +553,8 @@ func walk(r io.Reader, kind string, fn func(name string, mode os.FileMode, body 
 
 // Protected files are the host's own: a release creates them when missing but never replaces them.
 func protected(rel string) bool {
-	switch strings.ToLower(filepath.ToSlash(rel)) {
-	case "reskateserver.json", "world-layers.json", "data/bans.json":
-		return true
-	}
-	return false
+	rel = filepath.ToSlash(rel)
+	return slices.ContainsFunc(serverconfig.HostFiles, func(f string) bool { return strings.EqualFold(f, rel) })
 }
 
 // skipped files are never written by a release.

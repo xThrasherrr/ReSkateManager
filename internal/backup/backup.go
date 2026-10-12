@@ -57,12 +57,8 @@ const (
 
 func serverPrefix(id string) string { return "servers/" + id + "/" }
 
-// ConfigFiles are the files in a server's folder that a backup holds: what
-// it can't download again, apart from its mods. A server update leaves them
-// in place. Servers from ReSkate 1.1.7 on keep their bans in data/, and from
-// 2.0.6 their roles (the admins among them) and chat words too.
-var ConfigFiles = []string{"ReSkateServer.json", "world-layers.json", serverconfig.BansFile, serverconfig.RolesFile,
-	"data/words_filtered.txt", "data/words_blocked.txt"}
+// ConfigFiles are the files in a server's folder that a backup holds.
+var ConfigFiles = serverconfig.HostFiles
 
 // modDirs are a server's folders of mods, enabled and disabled.
 var modDirs = []string{"Mods", "DisabledMods"}
