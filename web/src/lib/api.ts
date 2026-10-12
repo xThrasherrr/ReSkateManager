@@ -300,6 +300,13 @@ export interface Announcement {
 	chatOnly?: boolean; // without ReSkate 2.0.2's card
 }
 
+/** One running server a message to every server went to. */
+export interface SentTo {
+	id: string;
+	name: string;
+	error?: string; // why it didn't get it
+}
+
 export interface Grant {
 	roleId: number;
 	role?: string;

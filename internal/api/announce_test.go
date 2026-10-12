@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
@@ -90,5 +92,55 @@ func TestAnnouncementScopes(t *testing.T) {
 	json.Unmarshal(b, &got)
 	if len(got.Announcements) != 2 || got.AllServers {
 		t.Fatalf("list on a = %s", b)
+	}
+}
+
+// A message for every server goes once to each running one, and the answer
+// says which got it; with none running there is nowhere to send it.
+func TestSayEverywhere(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	reg := instance.NewRegistry(log)
+	p := newPanel(t, func(a *API) { a.Reg = reg })
+	p.signIn("owner")
+	up := reg.Add(instance.Def{ID: "up", Name: "Up", Dir: t.TempDir()})
+	reg.Add(instance.Def{ID: "down", Name: "Down", Dir: t.TempDir()})
+	if code, b := p.do("POST", "/api/say", `{"message":"hello"}`); code != http.StatusConflict {
+		t.Fatalf("with none running: %d %s", code, b)
+	}
+
+	if out, err := exec.Command("go", "build", "-o", up.Def().Exe(), "../instance/testdata/fakeserver").CombinedOutput(); err != nil {
+		t.Fatalf("build fake server: %v: %s", err, out)
+	}
+	if err := up.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		up.Stop(ctx)
+	})
+	for deadline := time.Now().Add(10 * time.Second); up.State() != instance.Running; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("state %s", up.State())
+		}
+	}
+	if code, b := p.do("POST", "/api/say", `{"message":""}`); code != 400 {
+		t.Errorf("empty message: %d %s", code, b)
+	}
+	code, b := p.do("POST", "/api/say", `{"message":" hello\tall "}`)
+	var got struct{ Servers []sentTo }
+	json.Unmarshal(b, &got)
+	if code != 200 || len(got.Servers) != 1 || got.Servers[0] != (sentTo{ID: "up", Name: "Up"}) {
+		t.Fatalf("say: %d %s", code, b)
+	}
+	said := false
+	for _, e := range up.Console() {
+		said = said || e.Text == "[chat] Server: hello all"
+	}
+	if !said {
+		t.Error("the running server didn't get it")
+	}
+	if audit, _ := p.auditActions(t); !strings.Contains(audit, "player.say") {
+		t.Errorf("no player.say in the audit log: %s", audit)
 	}
 }

@@ -180,6 +180,8 @@ func (a *API) Handler() http.Handler {
 			r.With(a.global(auth.InstancesManage)).Post("/imports", a.startImport)
 			r.With(a.global(auth.InstancesManage)).Put("/imports/{uid}", a.importChunk)
 
+			// A message to every running server takes chat on all of them.
+			r.With(a.global(auth.PlayersChat)).Post("/say", a.sayEverywhere)
 			r.Get("/instances", a.listInstances)
 			r.With(a.global(auth.InstancesManage)).Post("/instances", a.createInstance)
 			r.Route("/instances/{id}", func(r chi.Router) {

@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, message as explain, type Announcement } from '#lib/api.js';
+	import { api, message as explain, type Announcement, type SentTo } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
-	import { attempt, flip } from '#lib/toast.svelte.js';
+	import { session } from '#lib/session.svelte.js';
+	import { attempt, flip, toast } from '#lib/toast.svelte.js';
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
 	import Icon from '#lib/components/Icon.svelte';
@@ -51,7 +52,8 @@
 	const size = $derived(utf8Length(message.trim()));
 	const interval = $derived(Math.round(every * unit));
 	const intervalOk = $derived(interval >= 60 && interval <= 7 * 86400);
-	const valid = $derived(size > 0 && size <= 200 && intervalOk);
+	const sizeOk = $derived(size > 0 && size <= 200);
+	const valid = $derived(sizeOk && intervalOk);
 
 	function reset() {
 		editing = null;
@@ -109,6 +111,24 @@
 		return busy.run(`send:${a.id}`, () => attempt(() => api.post(`/instances/${ctx.id}/say`, { message: a.message, announce: !a.chatOnly }), 'Sent'));
 	}
 
+	// The form's message, sent once now without saving it: to this server, or
+	// to every running one.
+	const sendEverywhere = $derived(session.can('players.chat'));
+	async function sendOnce() {
+		const body = { message: message.trim(), announce: card };
+		if (!everywhere) {
+			if (await busy.run('send', () => attempt(() => api.post(`/instances/${ctx.id}/say`, body), 'Sent'))) message = '';
+			return;
+		}
+		const r = await busy.run('send', () => attempt(() => api.post<{ servers: SentTo[] }>('/say', body)));
+		if (!r) return;
+		const failed = r.servers.filter((s) => s.error);
+		const sent = r.servers.length - failed.length;
+		if (sent) toast.ok(`Sent to ${sent} ${sent === 1 ? 'server' : 'servers'}`);
+		for (const s of failed) toast.push('error', `Not sent to ${s.name}: ${s.error}`);
+		if (!failed.length) message = '';
+	}
+
 	function cadence(secs: number) {
 		const h = Math.floor(secs / 3600);
 		const m = Math.round((secs % 3600) / 60);
@@ -138,7 +158,7 @@
 					text={`Sent as "Server" while players are on. With Card on, from ReSkate 2.0.2 they show as a card on every player's screen: in chat too on 2.0.2, unless the card is off under Settings > Announcements, beside the server's own list; only as a card from 2.0.3. With Card off, or on an older server, they go to chat. When the server empties, the countdowns start over, so nobody who joins gets every message at once. Announcements on one server go out at least a minute apart.`}
 				/>
 			</h2>
-			<p class="mt-0.5 text-xs text-faint">Point players at your Discord, rules or other servers.</p>
+			<p class="mt-0.5 text-xs text-faint">Point players at your Discord, rules or other servers. Add it to repeat on a timer, or Send now for once.</p>
 		</div>
 		<form onsubmit={save} class="space-y-3 px-4 py-4">
 			<div>
@@ -168,6 +188,24 @@
 				/>
 				<div class="ml-auto flex gap-2">
 					{#if editing}<button type="button" class="btn" onclick={reset}>Cancel</button>{/if}
+					{#if !editing && ctx.can('players.chat')}
+						<button
+							type="button"
+							class="btn"
+							disabled={!sizeOk || busy.is() || (everywhere ? !sendEverywhere : !running)}
+							title={everywhere
+								? sendEverywhere
+									? 'Send it once to every running server, without saving it'
+									: 'Sending to every server needs chat on all servers'
+								: running
+									? 'Send it once, without saving it'
+									: 'The server is not running'}
+							onclick={sendOnce}
+						>
+							<Icon name="send" size={14} />
+							{busy.is('send') ? 'Sending…' : 'Send now'}
+						</button>
+					{/if}
 					<button class="btn btn-primary" disabled={!valid || busy.is()}>
 						<Icon name={editing ? 'check' : 'plus'} size={14} />
 						{editing ? 'Save' : 'Add'}

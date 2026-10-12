@@ -645,21 +645,31 @@ func (a *API) auditOutcome(r *http.Request, instanceID, action, detail string, e
 	a.audit(r, instanceID, action, detail)
 }
 
-func (a *API) say(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	var req struct {
-		Message string `json:"message"`
-		// An announcement, posted as the scheduled ones with Card on are: a
-		// card on every player's screen where the server has them, too (2.0.2)
-		// or instead of chat (2.0.3).
-		Announce bool `json:"announce"`
-	}
+type sayReq struct {
+	Message string `json:"message"`
+	// An announcement, posted as the scheduled ones with Card on are: a card
+	// on every player's screen where the server has them, too (2.0.2) or
+	// instead of chat (2.0.3).
+	Announce bool `json:"announce"`
+}
+
+// readSay reads a message to send, cleaned as chatText makes it.
+func readSay(w http.ResponseWriter, r *http.Request) (string, sayReq, bool) {
+	var req sayReq
 	if !readJSON(w, r, &req) {
-		return
+		return "", req, false
 	}
 	msg, ok := chatText(req.Message)
 	if !ok {
 		writeErr(w, 400, "messages are 1-200 bytes")
+	}
+	return msg, req, ok
+}
+
+func (a *API) say(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	msg, req, ok := readSay(w, r)
+	if !ok {
 		return
 	}
 	reply, err := announce.Post(r.Context(), in, msg, from(r).user.Username, req.Announce)

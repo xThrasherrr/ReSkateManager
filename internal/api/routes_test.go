@@ -141,6 +141,7 @@ var routePerms = map[string]string{
 	"POST /api/manager/discord/test":                     "owner",
 	"POST /api/manager/update":                           "owner",
 	"POST /api/roles":                                    "panel.users.manage",
+	"POST /api/say":                                      "players.chat",
 	"POST /api/shared-mods/{folder}/update":              "settings.edit",
 	"POST /api/shared-mods/installs":                     "settings.edit",
 	"POST /api/shared-mods/updates":                      "settings.edit",

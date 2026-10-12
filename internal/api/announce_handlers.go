@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
+	"sync"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/announce"
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
@@ -155,6 +157,55 @@ func (a *API) updateAnnouncement(w http.ResponseWriter, r *http.Request) {
 	}
 	a.audit(r, auditScope(ann), "announcement.edit", ann.Message)
 	writeJSON(w, 200, ann)
+}
+
+// sentTo is one running server a message for every server went to.
+type sentTo struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Error string `json:"error,omitempty"` // why it didn't get it
+}
+
+// sayEverywhere sends a message once to every running server, as say does to
+// one, and answers how it went on each.
+func (a *API) sayEverywhere(w http.ResponseWriter, r *http.Request) {
+	msg, req, ok := readSay(w, r)
+	if !ok {
+		return
+	}
+	var servers []*instance.Instance
+	for _, in := range a.Reg.List() {
+		if in.State() == instance.Running {
+			servers = append(servers, in)
+		}
+	}
+	if len(servers) == 0 {
+		writeErr(w, http.StatusConflict, "no server is running")
+		return
+	}
+	out := make([]sentTo, len(servers))
+	var wg sync.WaitGroup
+	for i, in := range servers {
+		wg.Go(func() {
+			out[i] = sentTo{ID: in.ID(), Name: in.Def().Name}
+			if _, err := announce.Post(r.Context(), in, msg, from(r).user.Username, req.Announce); err != nil {
+				out[i].Error = err.Error()
+			}
+		})
+	}
+	wg.Wait()
+	var failed []string
+	for _, s := range out {
+		if s.Error != "" {
+			failed = append(failed, s.Name+": "+s.Error)
+		}
+	}
+	detail := msg
+	if len(failed) > 0 {
+		detail += " (failed on " + strings.Join(failed, "; ") + ")"
+	}
+	a.audit(r, "", "player.say", detail)
+	writeJSON(w, 200, map[string]any{"servers": out})
 }
 
 func (a *API) deleteAnnouncement(w http.ResponseWriter, r *http.Request) {
