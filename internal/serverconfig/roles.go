@@ -1,13 +1,19 @@
 package serverconfig
 
 import (
+	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 // RolesFile is where a server from ReSkate 2.0.6 on keeps its roles, what
@@ -154,12 +160,147 @@ func (f *File) rolePlayers() map[string]string {
 }
 
 // hasRole reports whether the roles have one by this name.
-func (f *File) hasRole(name string) bool {
+func (f *File) hasRole(name string) bool { return f.role(name) != nil }
+
+// role is the role by this name, as the file has it; nil when there's none.
+func (f *File) role(name string) map[string]any {
 	list, _ := f.roles["roles"].([]any)
-	return slices.ContainsFunc(list, func(v any) bool {
+	for _, v := range list {
+		if role, _ := v.(map[string]any); role["name"] == name {
+			return role
+		}
+	}
+	return nil
+}
+
+// Limits of 2.0.6's roles (Server/roles.h, Net/protocol.h).
+const (
+	maxRoles    = 32
+	maxRoleTag  = 16 // bytes
+	maxRoleRank = 1000
+)
+
+var roleNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,24}$`)
+
+// gameTags are the tags the game uses itself, for the server, a lobby's host,
+// friends and the ReSkate team, which no role may wear (roles_error): lower
+// case and without spaces, as it compares them.
+var gameTags = []string{"server", "reskate", "dev", "developer", "contentcreator", "centrix", "staff", "homie", "host", "friend"}
+
+// RoleLook is what the panel sets of a role: its name when it's new, and the
+// tag its players wear before their names, the tag's colour, and its rank.
+type RoleLook struct {
+	Name  string `json:"name"`
+	Tag   string `json:"tag"`
+	Color string `json:"color"`
+	Rank  int    `json:"rank"`
+}
+
+// tidy checks the tag, colour and rank as roles_error does, and spells them
+// as the server writes them.
+func (l *RoleLook) tidy() error {
+	l.Tag = strings.TrimSpace(l.Tag)
+	if len(l.Tag) > maxRoleTag || !utf8.ValidString(l.Tag) || strings.ContainsFunc(l.Tag, isControl) {
+		return fmt.Errorf("a tag is at most %d bytes of plain text", maxRoleTag)
+	}
+	plain := strings.Map(func(r rune) rune {
+		switch {
+		case r == ' ':
+			return -1
+		case 'A' <= r && r <= 'Z':
+			return r + 'a' - 'A'
+		}
+		return r
+	}, l.Tag)
+	if slices.Contains(gameTags, plain) {
+		return fmt.Errorf("the game uses the tag %q itself", l.Tag)
+	}
+	c := cmp.Or(strings.TrimPrefix(strings.TrimSpace(l.Color), "#"), "FFFFFF")
+	if !colorRe.MatchString(c) {
+		return errors.New("a tag's colour is like #FF74C6")
+	}
+	l.Color = "#" + strings.ToUpper(c)
+	if l.Rank < 0 || l.Rank > maxRoleRank {
+		return fmt.Errorf("a rank is 0 to %d", maxRoleRank)
+	}
+	return nil
+}
+
+// AddRole adds a role with look l. It has what the default role has and
+// nothing of its own: the commands and permissions a role gives are set in
+// data/roles.json (README-roles.txt beside the server lists them).
+func (f *File) AddRole(l RoleLook) error {
+	if f.roles == nil {
+		return ErrNoRoles
+	}
+	if !roleNameRe.MatchString(l.Name) || l.Name == "none" {
+		return errors.New("a role's name is 1 to 24 of a-z, 0-9, - and _, and not none")
+	}
+	if f.hasRole(l.Name) {
+		return fmt.Errorf("the server has a %q role already", l.Name)
+	}
+	list, _ := f.roles["roles"].([]any)
+	if len(list) >= maxRoles {
+		return fmt.Errorf("a server has at most %d roles", maxRoles)
+	}
+	if err := l.tidy(); err != nil {
+		return err
+	}
+	f.roles["roles"] = append(list, map[string]any{"name": l.Name, "tag": l.Tag, "color": l.Color,
+		"rank": json.Number(strconv.Itoa(l.Rank)), "inherit": true, "commands": []any{}, "permissions": []any{}})
+	f.rolesSet = true
+	return nil
+}
+
+// EditRole sets a role's tag, colour and rank to l's; whatever else it has
+// stays as it is.
+func (f *File) EditRole(name string, l RoleLook) error {
+	if f.roles == nil {
+		return ErrNoRoles
+	}
+	role := f.role(name)
+	if role == nil {
+		return fmt.Errorf("the server has no %q role", name)
+	}
+	if err := l.tidy(); err != nil {
+		return err
+	}
+	role["tag"], role["color"], role["rank"] = l.Tag, l.Color, json.Number(strconv.Itoa(l.Rank))
+	f.rolesSet = true
+	return nil
+}
+
+// DeleteRole removes a role, and its players are the default role again, as
+// in the server's own roles editor; it says how many there were. The default
+// role stays, and so does admin: the manager gives it to its in-game admins.
+func (f *File) DeleteRole(name string) (int, error) {
+	if f.roles == nil {
+		return 0, ErrNoRoles
+	}
+	if !f.hasRole(name) {
+		return 0, fmt.Errorf("the server has no %q role", name)
+	}
+	if def, _ := f.roles["default_role"].(string); name == def {
+		return 0, errors.New("the default role stays: it's everyone's who was given none")
+	}
+	if name == AdminRole {
+		return 0, errors.New("the admin role stays: the manager gives it to its in-game admins")
+	}
+	list, _ := f.roles["roles"].([]any)
+	f.roles["roles"] = slices.DeleteFunc(slices.Clone(list), func(v any) bool {
 		role, _ := v.(map[string]any)
 		return role["name"] == name
 	})
+	players, _ := f.roles["players"].(map[string]any)
+	n := 0
+	for id, role := range players {
+		if role == name {
+			delete(players, id)
+			n++
+		}
+	}
+	f.rolesSet = true
+	return n, nil
 }
 
 // setAdminRole gives the admin role to ids and takes it from everyone else
@@ -197,12 +338,12 @@ func KeepRoles(configPath string, old *File) error {
 	if old != nil {
 		f.roles = old.roles
 	}
-	return f.writeRoles(configPath)
+	return f.WriteRoles(configPath)
 }
 
-// writeRoles writes data/roles.json as the roles now are, or removes it when
+// WriteRoles writes data/roles.json as the roles now are, or removes it when
 // there are none to keep.
-func (f *File) writeRoles(configPath string) error {
+func (f *File) WriteRoles(configPath string) error {
 	path := filepath.Join(filepath.Dir(configPath), RolesFile)
 	if f.roles == nil {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {

@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -529,5 +530,60 @@ func TestGiveRoles(t *testing.T) {
 		if code, b := p.do(c.method, c.path, c.body); code != http.StatusConflict || !strings.Contains(string(b), "linked") {
 			t.Errorf("%s a panel user's admin role: %d %s", c.method, code, b)
 		}
+	}
+}
+
+// Roles made, changed and deleted from the panel, here with the server
+// stopped: in data/roles.json, with whatever else a role has kept. A role
+// may be called players, beside the routes that give roles to players.
+func TestEditServerRoles(t *testing.T) {
+	p, a := newBackupPanel(t)
+	in, _ := a.Reg.Get("a")
+	cfg := in.Def().ConfigPath()
+	roles := filepath.Join(filepath.Dir(cfg), serverconfig.RolesFile)
+	writeFile(t, cfg, `{"server": {"name": "A"}}`)
+	if code, b := p.do("POST", "/api/instances/a/roles", `{"name": "vip"}`); code != http.StatusConflict {
+		t.Errorf("a server without roles: %d %s", code, b)
+	}
+	writeFile(t, roles, `{"default_role": "player", "roles": [{"name": "player"}, {"name": "admin", "commands": ["*"]}],
+		"players": {"76561198000000003": "admin"}}`)
+	for _, c := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{"POST", "/api/instances/a/roles", `{"name": " Players ", "tag": "P", "color": "#00ff00", "rank": 5}`, 200},
+		{"POST", "/api/instances/a/roles", `{"name": "players"}`, 400},
+		{"POST", "/api/instances/a/roles", `{"name": "x", "tag": "Server"}`, 400},
+		{"PATCH", "/api/instances/a/roles/players", `{"tag": "Skater", "color": "abcdef", "rank": 7}`, 200},
+		{"PATCH", "/api/instances/a/roles/ghost", `{"tag": "x"}`, 400},
+		{"PATCH", "/api/instances/a/roles/admin", `{"tag": "Boss", "color": "#FF74C6", "rank": 100}`, 200},
+		{"DELETE", "/api/instances/a/roles/admin", "", 400},
+		{"DELETE", "/api/instances/a/roles/player", "", 400},
+	} {
+		if code, b := p.do(c.method, c.path, c.body); code != c.want {
+			t.Errorf("%s %s %s: %d %s", c.method, c.path, c.body, code, b)
+		}
+	}
+	f, err := serverconfig.Read(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, given, _ := f.Roles()
+	if len(list) != 3 || list[2].Name != "players" || list[2].Tag != "Skater" || list[2].Color != "#ABCDEF" || list[2].Rank != 7 {
+		t.Errorf("roles %+v", list)
+	}
+	if list[1].Tag != "Boss" || !slices.Equal(list[1].Commands, []string{"*"}) || given["76561198000000003"] != "admin" {
+		t.Errorf("admin %+v, given %v", list[1], given)
+	}
+	if code, b := p.do("DELETE", "/api/instances/a/roles/players", ""); code != 200 {
+		t.Errorf("delete: %d %s", code, b)
+	}
+	f, _ = serverconfig.Read(cfg)
+	if list, _, _ = f.Roles(); len(list) != 2 {
+		t.Errorf("after delete %+v", list)
+	}
+	p.signIn("viewer")
+	if code, _ := p.do("POST", "/api/instances/a/roles", `{"name": "vip"}`); code != http.StatusForbidden {
+		t.Errorf("a viewer added a role: %d", code)
 	}
 }

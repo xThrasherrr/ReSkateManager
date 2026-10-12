@@ -232,6 +232,9 @@ func (a *API) Handler() http.Handler {
 				r.With(a.can(auth.IngameAdmins)).Post("/admins", a.addAdmin)
 				r.With(a.can(auth.IngameAdmins)).Delete("/admins/{steamId}", a.removeAdmin)
 				r.With(a.can(auth.IngameAdmins)).Get("/roles", a.roles)
+				r.With(a.can(auth.IngameAdmins)).Post("/roles", a.addServerRole)
+				r.With(a.can(auth.IngameAdmins)).Patch("/roles/{role}", a.editServerRole)
+				r.With(a.can(auth.IngameAdmins)).Delete("/roles/{role}", a.deleteServerRole)
 				r.With(a.can(auth.IngameAdmins)).Post("/roles/players", a.setRole)
 				r.With(a.can(auth.IngameAdmins)).Delete("/roles/players/{steamId}", a.takeRole)
 

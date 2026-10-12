@@ -234,6 +234,87 @@ func (a *API) takeRole(w http.ResponseWriter, r *http.Request) {
 	a.answerRole(w, r, reply, err)
 }
 
+// roleChange makes change to a server's roles in its data/roles.json and,
+// while it runs, has it read the file again (roles reload), as its own roles
+// editor does, so its players see their tags change at once. A running
+// server writes the file itself as roles are given, so it's read just before.
+func (a *API) roleChange(w http.ResponseWriter, r *http.Request, action, detail string, change func(*serverconfig.File) (string, error)) {
+	in := inst(r)
+	var reply string
+	var err error
+	if !running(in) {
+		reply, err = a.offlineEdit(in, change)
+	} else {
+		reply, err = a.liveRoleChange(r, in, change)
+	}
+	a.auditOutcome(r, in.ID(), action, detail, err)
+	a.answerRole(w, r, reply, err)
+}
+
+func (a *API) liveRoleChange(r *http.Request, in *instance.Instance, change func(*serverconfig.File) (string, error)) (string, error) {
+	path := in.Def().ConfigPath()
+	f, err := serverconfig.Read(path)
+	if err != nil {
+		return "", err
+	}
+	reply, err := change(f)
+	if err != nil {
+		return "", err
+	}
+	if err := f.WriteRoles(path); err != nil {
+		return "", err
+	}
+	answer, err := in.Command(r.Context(), "roles reload", from(r).user.Username)
+	if err == nil && strings.Contains(answer, "was not loaded") {
+		err = errors.New(answer) // the server keeps the roles it had
+	}
+	return reply, err
+}
+
+// addServerRole adds a role to a server (ReSkate 2.0.6), with the tag, colour and
+// rank given and what the default role has.
+func (a *API) addServerRole(w http.ResponseWriter, r *http.Request) {
+	var req serverconfig.RoleLook
+	if !readJSON(w, r, &req) {
+		return
+	}
+	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
+	a.roleChange(w, r, "role.create", req.Name, func(f *serverconfig.File) (string, error) {
+		return "Added the " + req.Name + " role.", f.AddRole(req)
+	})
+}
+
+// editServerRole sets a role's tag, colour and rank.
+func (a *API) editServerRole(w http.ResponseWriter, r *http.Request) {
+	name, _ := pathParam(r, "role")
+	var req serverconfig.RoleLook
+	if !readJSON(w, r, &req) {
+		return
+	}
+	a.roleChange(w, r, "role.edit", name, func(f *serverconfig.File) (string, error) {
+		return "Saved the " + name + " role.", f.EditRole(name, req)
+	})
+}
+
+// deleteServerRole deletes a role; its players are the default role again.
+func (a *API) deleteServerRole(w http.ResponseWriter, r *http.Request) {
+	name, _ := pathParam(r, "role")
+	a.roleChange(w, r, "role.delete", name, func(f *serverconfig.File) (string, error) {
+		n, err := f.DeleteRole(name)
+		if err != nil || n == 0 {
+			return "Deleted the " + name + " role.", err
+		}
+		who := "the player who had it is"
+		if n > 1 {
+			who = fmt.Sprintf("the %d players who had it are", n)
+		}
+		if _, _, def := f.Roles(); def != "" {
+			return fmt.Sprintf("Deleted the %s role; %s %s again.", name, who, def), nil
+		}
+		return fmt.Sprintf("Deleted the %s role; %s given no role now.", name, who), nil
+	})
+}
+
 func (a *API) addAdmin(w http.ResponseWriter, r *http.Request) {
 	in := inst(r)
 	var req struct {

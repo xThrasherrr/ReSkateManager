@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -251,6 +252,79 @@ func TestSetRole(t *testing.T) {
 	}
 	g, _ := Read(rolesServer(t, `{"server": {"name": "x"}}`, ""))
 	if err := g.SetRole("76561198000000001", "vip"); !errors.Is(err, ErrNoRoles) {
+		t.Errorf("a server without roles: %v", err)
+	}
+}
+
+func TestEditRoles(t *testing.T) {
+	path := rolesServer(t, `{"server": {"name": "x"}}`, newRoles)
+	f, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.AddRole(RoleLook{Name: "vip", Tag: " VIP ", Color: "ffd24a", Rank: 10}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.EditRole("moderator", RoleLook{Tag: "Staff Mod", Color: "#123abc", Rank: 60}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	f, _ = Read(path)
+	list, given, _ := f.Roles()
+	vip := list[len(list)-1]
+	if vip.Name != "vip" || vip.Tag != "VIP" || vip.Color != "#FFD24A" || vip.Rank != 10 || !vip.Inherit || len(vip.Commands) != 0 {
+		t.Errorf("added %+v", vip)
+	}
+	mod := list[1]
+	if mod.Tag != "Staff Mod" || mod.Color != "#123ABC" || mod.Rank != 60 || !slices.Equal(mod.Commands, []string{"kick"}) {
+		t.Errorf("edited %+v", mod)
+	}
+	if given["76561198000000002"] != "moderator" {
+		t.Errorf("an edit took the role away: %v", given)
+	}
+
+	// Its players are the default role again.
+	if n, err := f.DeleteRole("moderator"); err != nil || n != 1 {
+		t.Errorf("delete: %d %v", n, err)
+	}
+	f.Write(path)
+	f, _ = Read(path)
+	list, given, _ = f.Roles()
+	if slices.ContainsFunc(list, func(r Role) bool { return r.Name == "moderator" }) || given["76561198000000002"] != "" {
+		t.Errorf("after delete: %v %v", list, given)
+	}
+
+	for name, l := range map[string]RoleLook{
+		"taken":        {Name: "vip"},
+		"none":         {Name: "none"},
+		"upper case":   {Name: "VIP2"},
+		"long name":    {Name: "abcdefghijklmnopqrstuvwxy"},
+		"game's tag":   {Name: "x1", Tag: "Content Creator"},
+		"long tag":     {Name: "x2", Tag: "abcdefghijklmnopq"},
+		"control":      {Name: "x3", Tag: "a\tb"},
+		"colour":       {Name: "x4", Color: "red"},
+		"rank":         {Name: "x5", Rank: 1001},
+		"below rank 0": {Name: "x6", Rank: -1},
+	} {
+		if err := f.AddRole(l); err == nil {
+			t.Errorf("%s: added %+v", name, l)
+		}
+	}
+	for _, name := range []string{"player", "admin", "ghost"} {
+		if _, err := f.DeleteRole(name); err == nil {
+			t.Errorf("deleted %s", name)
+		}
+	}
+	for range maxRoles - len(list) {
+		f.AddRole(RoleLook{Name: "r" + strconv.Itoa(len(f.roles["roles"].([]any)))})
+	}
+	if err := f.AddRole(RoleLook{Name: "one-more"}); err == nil {
+		t.Errorf("past %d roles", maxRoles)
+	}
+	g, _ := Read(rolesServer(t, `{"server": {"name": "x"}}`, ""))
+	if err := g.AddRole(RoleLook{Name: "vip"}); !errors.Is(err, ErrNoRoles) {
 		t.Errorf("a server without roles: %v", err)
 	}
 }

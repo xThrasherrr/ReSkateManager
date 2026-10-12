@@ -6,10 +6,13 @@
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
 	import { ago, dateTime } from '#lib/format.js';
+	import { onLine, roleLine } from '#lib/lines.svelte.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
+	import RolePick from '#lib/components/RolePick.svelte';
+	import ServerRoles from '#lib/components/ServerRoles.svelte';
 	import SteamId from '#lib/components/SteamId.svelte';
 	import { ask } from '#lib/ask.svelte.js';
 
@@ -44,6 +47,25 @@
 	// The search runs on Enter, not on every keystroke in q.
 	onMount(loadHistory);
 
+	// A server with roles (ReSkate 2.0.6) has them managed at the top, and
+	// given to a player from either list.
+	let roles = $state.raw<RoleList | null>(null);
+	const manage = $derived(ctx.can('ingame.admins.manage'));
+	const withRoles = $derived(manage && !!roles?.hasRoles);
+	const beginRoles = newest();
+	async function loadRoles() {
+		const current = beginRoles();
+		const r = await api.get<RoleList>(`/instances/${ctx.id}/roles`).catch(() => roles);
+		if (current()) roles = r;
+	}
+	$effect(() => {
+		if (ctx.can('ingame.admins.manage')) untrack(loadRoles);
+	});
+	// Roles given in the game or from the console land in the file too.
+	onLine(ctx.live, roleLine, () => {
+		if (manage) loadRoles();
+	});
+
 	let banTarget = $state.raw<{ id: string; name: string } | null>(null);
 	let banOpen = $state(false);
 
@@ -62,36 +84,13 @@
 		banOpen = false;
 		await attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/bans`, t), (r) => r.reply);
 	}
+
+	// A server from before roles has admins only.
 	let adminTarget = $state.raw<Player | null>(null);
 	let adminOpen = $state(false);
-
-	// A server with roles (ReSkate 2.0.6) gives any of them here, not only admin.
-	let roles = $state.raw<RoleList | null>(null);
-	let pick = $state('');
-	const beginRoles = newest();
-	async function loadRoles() {
-		const current = beginRoles();
-		const r = await api.get<RoleList>(`/instances/${ctx.id}/roles`).catch(() => roles);
-		if (current()) roles = r;
-	}
-	$effect(() => {
-		if (ctx.can('ingame.admins.manage')) untrack(loadRoles);
-	});
-	const panelAdmin = (p: Player) => roles?.roles.some((r) => r.players.some((x) => x.id === p.id && x.panel)) ?? false;
-
 	function askAdmin(p: Player) {
 		adminTarget = p;
-		pick = p.role || '';
 		adminOpen = true;
-	}
-	async function setRole() {
-		if (!adminTarget) return;
-		const t = adminTarget;
-		adminOpen = false;
-		const done = pick
-			? await attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/roles/players`, { id: t.id, role: pick }), (r) => r.reply)
-			: await attempt(() => api.del<{ reply: string }>(`/instances/${ctx.id}/roles/players/${t.id}`), (r) => r.reply);
-		if (done && roles) loadRoles();
 	}
 	async function makeAdmin() {
 		if (!adminTarget) return;
@@ -102,6 +101,10 @@
 </script>
 
 <div class="space-y-4 p-4 sm:space-y-6 sm:p-6">
+	{#if withRoles && roles}
+		<ServerRoles {roles} seen={history ?? []} onchange={loadRoles} />
+	{/if}
+
 	<section class="card">
 		<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b-2 border-line px-4 py-3">
 			<h2 class="flex items-center gap-2">Online now <span class="sticker sticker-accent">{players.length}</span></h2>
@@ -112,28 +115,27 @@
 		{:else if players.length}
 			<div class="overflow-x-auto">
 				<table class="table">
-					<thead><tr><th>Player</th><th class="hidden md:table-cell">SteamID64</th><th class="hidden sm:table-cell">Joined</th><th class="text-right">Actions</th></tr></thead>
+					<thead>
+						<tr>
+							<th>Player</th>{#if withRoles}<th>Role</th>{/if}<th class="hidden md:table-cell">SteamID64</th><th class="hidden sm:table-cell">Joined</th><th class="text-right">Actions</th>
+						</tr>
+					</thead>
 					<tbody>
 						{#each players as p (p.id)}
 							<tr>
 								<td>
 									<span class="font-medium">{p.name}</span>
-									{#if p.admin}<span class="sticker sticker-warn ml-2">Admin</span>{:else if p.role}<span class="sticker sticker-info ml-2">{p.role}</span>{/if}
+									{#if !withRoles}
+										{#if p.admin}<span class="sticker sticker-warn ml-2">Admin</span>{:else if p.role}<span class="sticker sticker-info ml-2">{p.role}</span>{/if}
+									{/if}
 									<SteamId id={p.id} small class="md:hidden" />
 								</td>
+								{#if withRoles && roles}<td><RolePick id={p.id} name={p.name} {roles} onchange={loadRoles} /></td>{/if}
 								<td class="hidden md:table-cell"><SteamId id={p.id} /></td>
 								<td class="hidden whitespace-nowrap text-muted sm:table-cell">{ago(p.joinedAt)}</td>
 								<td>
 									<div class="flex justify-end gap-1">
-										{#if ctx.can('ingame.admins.manage') && roles?.hasRoles}
-											<button
-												class="btn btn-sm btn-ghost"
-												disabled={panelAdmin(p)}
-												onclick={() => askAdmin(p)}
-												title={panelAdmin(p) ? "An admin kept in step with a panel user's roles" : 'Give a role'}
-												aria-label="Give {p.name} a role"><Icon name="shield" size={14} /></button
-											>
-										{:else if ctx.can('ingame.admins.manage') && !p.admin}
+										{#if manage && roles && !roles.hasRoles && !p.admin}
 											<button class="btn btn-sm btn-ghost" onclick={() => askAdmin(p)} title="Make in-game admin" aria-label="Make {p.name} an in-game admin"><Icon name="shield" size={14} /></button>
 										{/if}
 										{#if ctx.can('players.kick')}
@@ -174,7 +176,9 @@
 				<table class="table">
 					<thead>
 						<tr>
-							<th>Player</th><th class="hidden md:table-cell">SteamID64</th><th class="hidden lg:table-cell">First seen</th><th class="hidden sm:table-cell">Last seen</th><th>Visits</th><th></th>
+							<th>Player</th>{#if withRoles}<th>Role</th>{/if}<th class="hidden md:table-cell">SteamID64</th><th class="hidden lg:table-cell">First seen</th><th class="hidden sm:table-cell"
+								>Last seen</th
+							><th class="hidden sm:table-cell">Visits</th><th></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -184,10 +188,11 @@
 									{h.name}
 									<SteamId id={h.id} small class="font-normal md:hidden" />
 								</td>
+								{#if withRoles && roles}<td><RolePick id={h.id} name={h.name} {roles} onchange={loadRoles} /></td>{/if}
 								<td class="hidden md:table-cell"><SteamId id={h.id} /></td>
 								<td class="hidden text-muted lg:table-cell">{dateTime(h.firstSeen)}</td>
 								<td class="hidden text-muted sm:table-cell">{dateTime(h.lastSeen)}</td>
-								<td class="tabular-nums">{h.sessions}</td>
+								<td class="hidden tabular-nums sm:table-cell">{h.sessions}</td>
 								<td class="text-right">
 									{#if ctx.can('players.ban')}
 										<button class="btn btn-sm btn-danger" onclick={() => askBan(h.id, h.name)} aria-label="Ban {h.name}"><Icon name="ban" size={14} /> <span class="hidden sm:inline">Ban</span></button>
@@ -218,33 +223,13 @@
 	{/snippet}
 </Modal>
 
-{#if roles?.hasRoles}
-	<Modal bind:open={adminOpen} title="{adminTarget?.name || adminTarget?.id}'s role">
-		<label class="block">
-			<span class="label">Role on this server</span>
-			<select class="input" bind:value={pick}>
-				<option value="">{roles.default ? `${roles.default} (everyone's)` : 'none'}</option>
-				{#each roles.roles.filter((r) => r.name !== roles?.default) as r (r.name)}<option value={r.name}>{r.name}</option>{/each}
-			</select>
-		</label>
-		<p class="mt-2 text-sm text-muted">
-			It applies straight away: their tag and what they may do. Every role and who has it is under
-			<a class="text-accent hover:underline" href="/s/{ctx.id}/bans">Bans &amp; admins</a>.
-		</p>
-		{#snippet actions()}
-			<button class="btn" onclick={() => (adminOpen = false)}>Cancel</button>
-			<button class="btn btn-primary" disabled={pick === (adminTarget?.role || '')} onclick={setRole}><Icon name="shield" size={14} /> Set role</button>
-		{/snippet}
-	</Modal>
-{:else}
-	<Modal bind:open={adminOpen} title="Make {adminTarget?.name || adminTarget?.id} an admin?">
-		<p class="text-sm text-muted">
-			They get in-game admin on this server straight away, including its admin commands. You can take it back under
-			<a class="text-accent hover:underline" href="/s/{ctx.id}/bans">Bans &amp; admins</a>.
-		</p>
-		{#snippet actions()}
-			<button class="btn" onclick={() => (adminOpen = false)}>Cancel</button>
-			<button class="btn btn-primary" onclick={makeAdmin}><Icon name="shield" size={14} /> Make admin</button>
-		{/snippet}
-	</Modal>
-{/if}
+<Modal bind:open={adminOpen} title="Make {adminTarget?.name || adminTarget?.id} an admin?">
+	<p class="text-sm text-muted">
+		They get in-game admin on this server straight away, including its admin commands. You can take it back under
+		<a class="text-accent hover:underline" href="/s/{ctx.id}/bans">Bans &amp; admins</a>.
+	</p>
+	{#snippet actions()}
+		<button class="btn" onclick={() => (adminOpen = false)}>Cancel</button>
+		<button class="btn btn-primary" onclick={makeAdmin}><Icon name="shield" size={14} /> Make admin</button>
+	{/snippet}
+</Modal>

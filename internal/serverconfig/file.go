@@ -147,7 +147,7 @@ func (f *File) Write(path string) error {
 		}
 	}
 	if f.rolesSet {
-		if err := f.writeRoles(path); err != nil {
+		if err := f.WriteRoles(path); err != nil {
 			return err
 		}
 	}
