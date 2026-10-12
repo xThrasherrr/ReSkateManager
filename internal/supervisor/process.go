@@ -17,9 +17,8 @@ import (
 
 // Options are how to start a server.
 type Options struct {
-	Exe  string   // full path to ReSkateServer(.exe)
-	Dir  string   // working directory (the server resolves everything from its exe folder anyway)
-	Args []string // extra arguments, after Args()
+	Exe string // full path to ReSkateServer(.exe)
+	Dir string // working directory (the server resolves everything from its exe folder anyway)
 }
 
 // Args are what every server is started with: no updates of its own, as the
@@ -58,7 +57,7 @@ const drainTime = 5 * time.Second
 // Start runs the server, calling onLine with each line it prints, in order,
 // and onIdle when its output has paused for IdleGap.
 func Start(o Options, onLine func(string), onIdle func()) (*Process, error) {
-	cmd := exec.Command(o.Exe, append(Args(), o.Args...)...)
+	cmd := exec.Command(o.Exe, Args()...)
 	cmd.Dir = o.Dir
 	configure(cmd)
 	stdin, err := cmd.StdinPipe()

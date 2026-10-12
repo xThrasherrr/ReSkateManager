@@ -3,12 +3,9 @@ package instance
 import (
 	"context"
 	"errors"
-	"regexp"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
 )
-
-var mapsReplyRe = regexp.MustCompile(`^\d+ maps\b`)
 
 // Maps lists the maps the running server can load, retail and custom from
 // Mods. It asks once per run (Mods only change across restarts) and keeps the
@@ -20,7 +17,7 @@ func (in *Instance) Maps(ctx context.Context) ([]string, error) {
 	if cached != nil {
 		return cached, nil
 	}
-	reply, err := in.send(ctx, "maps", "", true, replyShape(mapsReplyRe))
+	reply, err := in.send(ctx, "maps", "", true, replyShape(logparse.MapsHeadRe))
 	if err != nil {
 		return nil, err
 	}

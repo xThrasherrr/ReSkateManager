@@ -31,14 +31,31 @@ func (a *Assembler) Push(line string) *Entry {
 	done := a.Flush()
 	now := a.now()
 	// Shown beside the manager's own lines, as they are: HH:MM:SS.
-	if h, m, s, ok := Clock(stamp); ok {
-		stamp = fmt.Sprintf("%02d:%02d:%02d", h, m, s)
-	} else {
-		stamp = now.Format("15:04:05")
+	if !plainStamp(stamp) {
+		if h, m, s, ok := Clock(stamp); ok {
+			stamp = fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+		} else {
+			stamp = now.Format("15:04:05")
+		}
 	}
 	a.pending = &Entry{Stamp: stamp, At: now.UnixMilli()}
 	a.lines = append(a.lines[:0], text)
 	return done
+}
+
+// plainStamp reports whether a stamp is a valid HH:MM:SS already, as every
+// server but 2.0.6's on Windows writes it: reading its clock would give it
+// back as it is.
+func plainStamp(s string) bool {
+	if len(s) != 8 || s[2] != ':' || s[5] != ':' {
+		return false
+	}
+	for i := range len(s) {
+		if i != 2 && i != 5 && (s[i] < '0' || s[i] > '9') {
+			return false
+		}
+	}
+	return s[:2] <= "23" && s[3:5] <= "59" && s[6:] <= "59"
 }
 
 // Flush completes the pending entry, if any.
@@ -52,6 +69,3 @@ func (a *Assembler) Flush() *Entry {
 	Classify(e)
 	return e
 }
-
-// Pending reports whether an entry is held, waiting for more of its lines.
-func (a *Assembler) Pending() bool { return a.pending != nil }

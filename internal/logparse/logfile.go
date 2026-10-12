@@ -11,7 +11,7 @@ import (
 
 // ReSkateServer.log stamps lines with the date as well: "[2006-01-02 15:04:05] text",
 // with the time as the console has it (2.0.6's Windows server: "3:04:05 PM").
-var fileStampRe = regexp.MustCompile(`^\[(\d{4})-(\d{2})-(\d{2}) ([^\[\]]{0,24}?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?[^\[\]]{0,24}?)\] ?(.*)$`)
+var fileStampRe = regexp.MustCompile(`^\[(\d{4})-(\d{2})-(\d{2}) (` + stampTime + `)\] ?(.*)$`)
 
 const fileStamp = "2006-01-02 15:04:05"
 

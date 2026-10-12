@@ -63,7 +63,7 @@ func TestStrayLinesAreNotReplies(t *testing.T) {
 
 	// An in-game admin's result can't be told from a reply by order alone, so
 	// parsed replies also check their shape.
-	w = queue(in, replyShape(playersReplyRe))
+	w = queue(in, replyShape(logparse.PlayersHeadRe))
 	for _, l := range []string{
 		"[10:01:00] [admin] Bob: ban Eve",
 		"[10:01:00] Eve was banned.",
@@ -77,7 +77,7 @@ func TestStrayLinesAreNotReplies(t *testing.T) {
 		t.Errorf("players reply %q", text)
 	}
 
-	w = queue(in, replyShape(mapsReplyRe))
+	w = queue(in, replyShape(logparse.MapsHeadRe))
 	in.onLine(`[10:02:00] Unknown command "maps". Type help.`)
 	in.onIdle()
 	if _, ok := got(w); !ok {

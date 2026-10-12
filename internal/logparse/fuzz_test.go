@@ -35,9 +35,6 @@ func FuzzAssembler(f *testing.F) {
 		if e := a.Flush(); e != nil {
 			entries = append(entries, e)
 		}
-		if a.Pending() {
-			t.Fatal("an entry is still pending after Flush")
-		}
 
 		var want, got []string
 		for _, l := range lines {

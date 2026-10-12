@@ -696,8 +696,7 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		in.info.Map = e.Fields["map"]
 		in.publishStateLocked()
 	case logparse.KindJoin:
-		role := in.givenRoleLocked(e.Fields["role"])
-		p := &Player{ID: e.ID, Name: e.Name, Role: role, Admin: role == serverconfig.AdminRole, JoinedAt: time.Now().UnixMilli()}
+		p := in.newPlayerLocked(e.ID, e.Name, e.Fields["role"])
 		in.players[e.ID] = p
 		in.publishPlayersLocked()
 		if in.OnJoin != nil {
@@ -967,7 +966,7 @@ func (in *Instance) setRoleLocked(who, role string) {
 	if role = in.givenRoleLocked(role); p == nil || p.Role == role {
 		return
 	}
-	p.Role, p.Admin = role, role == serverconfig.AdminRole
+	p.setRole(role)
 	in.publishPlayersLocked()
 }
 
@@ -980,7 +979,16 @@ func (in *Instance) givenRoleLocked(role string) string {
 	return role
 }
 
-var playersReplyRe = regexp.MustCompile(`^\d+ players$`)
+// newPlayerLocked is a player who joined just now, with the role the server
+// names for them.
+func (in *Instance) newPlayerLocked(id, name, role string) *Player {
+	p := &Player{ID: id, Name: name, JoinedAt: time.Now().UnixMilli()}
+	p.setRole(in.givenRoleLocked(role))
+	return p
+}
+
+// setRole gives the player a role as the roster keeps it (givenRoleLocked).
+func (p *Player) setRole(role string) { p.Role, p.Admin = role, role == serverconfig.AdminRole }
 
 // Reconcile replaces the roster with the server's own `players` list. The
 // reply is hidden from the console but still lands in ReSkateServer.log, so
@@ -989,7 +997,7 @@ func (in *Instance) Reconcile() {
 	in.mu.Lock()
 	in.reconciling = false
 	in.mu.Unlock()
-	reply, err := in.send(context.Background(), "players", "", true, replyShape(playersReplyRe))
+	reply, err := in.send(context.Background(), "players", "", true, replyShape(logparse.PlayersHeadRe))
 	if err != nil {
 		return
 	}
@@ -1001,8 +1009,7 @@ func (in *Instance) Reconcile() {
 	defer in.mu.Unlock()
 	next := map[string]*Player{}
 	for _, r := range rows {
-		role := in.givenRoleLocked(r.Role)
-		p := &Player{ID: r.ID, Name: r.Name, Role: role, Admin: role == serverconfig.AdminRole, JoinedAt: time.Now().UnixMilli()}
+		p := in.newPlayerLocked(r.ID, r.Name, r.Role)
 		if old, ok := in.players[r.ID]; ok {
 			p.JoinedAt = old.JoinedAt
 		} else if in.OnJoin != nil {

@@ -48,11 +48,14 @@ type Entry struct {
 	Fields map[string]string `json:"fields,omitempty"`
 }
 
+// stampTime is the time in a line's stamp: HH:MM:SS, but ReSkate 2.0.6's
+// Windows server writes it as Windows shows the time, which follows the
+// user's settings: "1:28:15 PM", "13.28.15"...
+const stampTime = `[^\[\]]{0,24}?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?[^\[\]]{0,24}?`
+
 var (
-	// A line's stamp is "[HH:MM:SS] ", but ReSkate 2.0.6's Windows server
-	// writes the time as Windows shows it, which follows the user's settings:
-	// "[1:28:15 PM] ", "[13.28.15] "...
-	stampRe = regexp.MustCompile(`^\[([^\[\]]{0,24}?\d{1,2}[:.]\d{2}(?:[:.]\d{2})?[^\[\]]{0,24}?)\] ?(.*)$`)
+	// A line's stamp is "[HH:MM:SS] ".
+	stampRe = regexp.MustCompile(`^\[(` + stampTime + `)\] ?(.*)$`)
 	clockRe = regexp.MustCompile(`(\d{1,2})[:.](\d{2})(?:[:.](\d{2}))?`)
 	pmRe    = regexp.MustCompile(`(?i)\bp\.? ?m\b`)
 	amRe    = regexp.MustCompile(`(?i)\ba\.? ?m\b`)
@@ -104,9 +107,9 @@ func Clock(stamp string) (h, m, s int, ok bool) {
 	m, _ = strconv.Atoi(c[2])
 	s, _ = strconv.Atoi(c[3]) // 0 when the format has no seconds
 	switch {
-	case pmRe.MatchString(stamp) && h < 12:
+	case h < 12 && pmRe.MatchString(stamp):
 		h += 12
-	case amRe.MatchString(stamp) && h == 12:
+	case h == 12 && amRe.MatchString(stamp):
 		h = 0
 	}
 	if h > 23 || m > 59 || s > 59 {
@@ -132,6 +135,9 @@ var startupPrefixes = []string{"Signing in to Steam", "Wrote a default ", "Added
 // straight after it's up.
 const ChatWords = "Chat words: "
 
+// chatKinds are the kinds of the tags a player's own line has, by tag.
+var chatKinds = map[string]Kind{"chat": KindChat, "command": KindCommand, "admin": KindAdmin, "party chat": KindPartyChat}
+
 // Classify fills Kind, Tag, Name, ID and Fields from e.Text.
 func Classify(e *Entry) {
 	first, _, _ := strings.Cut(e.Text, "\n")
@@ -141,7 +147,7 @@ func Classify(e *Entry) {
 		body := m[3]
 		switch e.Tag {
 		case "chat", "command", "admin", "party chat":
-			e.Kind = map[string]Kind{"chat": KindChat, "command": KindCommand, "admin": KindAdmin, "party chat": KindPartyChat}[e.Tag]
+			e.Kind = chatKinds[e.Tag]
 			if name, msg, ok := strings.Cut(body, ": "); ok {
 				e.Name = name
 				e.Fields = map[string]string{"message": msg}
@@ -274,7 +280,8 @@ type RosterLine struct {
 	Admin bool   `json:"admin"`
 }
 
-var playersHeadRe = regexp.MustCompile(`^(\d+) players$`)
+// PlayersHeadRe is the first line of the reply to `players`.
+var PlayersHeadRe = regexp.MustCompile(`^(\d+) players$`)
 
 // ParsePlayers reads the reply to `players`:
 //
@@ -285,7 +292,7 @@ var playersHeadRe = regexp.MustCompile(`^(\d+) players$`)
 // ("player") for those given none.
 func ParsePlayers(text string) ([]RosterLine, bool) {
 	lines := strings.Split(text, "\n")
-	m := playersHeadRe.FindStringSubmatch(lines[0])
+	m := PlayersHeadRe.FindStringSubmatch(lines[0])
 	if m == nil {
 		return nil, false
 	}
@@ -306,13 +313,14 @@ func ParsePlayers(text string) ([]RosterLine, bool) {
 	return out, len(out) == want
 }
 
-var mapsHeadRe = regexp.MustCompile(`^\d+ maps\b`)
+// MapsHeadRe is the first line of the reply to `maps`.
+var MapsHeadRe = regexp.MustCompile(`^\d+ maps\b`)
 
 // ParseMaps reads the reply to "maps": a count line, then one map per line,
 // the current one marked "(now)" and those in the map pool "(pool)".
 func ParseMaps(text string) ([]string, bool) {
 	lines := strings.Split(text, "\n")
-	if !mapsHeadRe.MatchString(lines[0]) {
+	if !MapsHeadRe.MatchString(lines[0]) {
 		return nil, false
 	}
 	out := []string{}
