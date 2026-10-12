@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/xThrasherrr/ReSkateManager/internal/atomicfile"
 )
 
 // Config is data/manager.toml, as the manager reads it.
@@ -172,26 +174,10 @@ func Save(path string, c Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".manager-*.toml")
-	if err != nil {
+	var buf bytes.Buffer
+	buf.WriteString(header)
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(header)
-	if err == nil {
-		err = toml.NewEncoder(f).Encode(c)
-	}
-	if err == nil {
-		err = f.Sync() // on disk before it replaces the old file
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Chmod(f.Name(), 0o644) // CreateTemp makes it private
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
+	return atomicfile.Write(path, buf.Bytes(), 0o644)
 }

@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/xThrasherrr/ReSkateManager/internal/atomicfile"
 )
 
 // File is ReSkateServer.json as a generic tree, so keys the manager does not
@@ -147,7 +149,7 @@ func (f *File) Write(path string) error {
 		if err := os.MkdirAll(filepath.Dir(bansPath), 0o755); err != nil {
 			return err
 		}
-		if err := writeAtomic(bansPath, append(bans, '\n')); err != nil {
+		if err := atomicfile.Write(bansPath, append(bans, '\n'), 0o600); err != nil {
 			return err
 		}
 	}
@@ -156,26 +158,7 @@ func (f *File) Write(path string) error {
 			return err
 		}
 	}
-	return writeAtomic(path, data)
-}
-
-func writeAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name()) // gone already, once renamed
-	_, err = tmp.Write(data)
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return atomicfile.Write(path, data, 0o600)
 }
 
 // sections says where a sectioned file keeps each flat key (load_config in

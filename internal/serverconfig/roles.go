@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/xThrasherrr/ReSkateManager/internal/atomicfile"
 )
 
 // RolesFile is where a server from ReSkate 2.0.6 on keeps its roles, what
@@ -221,5 +223,5 @@ func (f *File) writeRoles(configPath string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return writeAtomic(path, append(data, '\n'))
+	return atomicfile.Write(path, append(data, '\n'), 0o600)
 }

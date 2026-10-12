@@ -465,7 +465,8 @@ func sweepLeftovers(log *slog.Logger, root, exe string) {
 	}
 	remove(filepath.Join(root, "backups", ".partial-*.zip"))
 	remove(filepath.Join(root, "backups", ".manager-*.db"))
-	remove(filepath.Join(root, "data", ".manager-*.toml"))
+	remove(filepath.Join(root, "data", ".manager.toml-*.tmp"))
+	remove(filepath.Join(root, "data", ".manager-*.toml")) // as older managers named it
 	remove(filepath.Join(root, "data", "manager.db.restore*"))
 	remove(filepath.Join(root, "servers", ".importing-*"))
 	if exe != "" {

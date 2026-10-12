@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/atomicfile"
 	"github.com/xThrasherrr/ReSkateManager/internal/config"
 	"github.com/xThrasherrr/ReSkateManager/internal/safezip"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
@@ -142,7 +143,7 @@ func (r *Reader) RestoreConfig(id, dir string) ([]string, error) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return done, err
 		}
-		if err := writeFileAtomic(path, data, 0o600); err != nil {
+		if err := atomicfile.Write(path, data, 0o600); err != nil {
 			return done, err
 		}
 		done = append(done, name)
@@ -551,31 +552,6 @@ func syncPrivate(path string) error {
 		err = cerr
 	}
 	return err
-}
-
-// writeFileAtomic replaces path with data in one step: written beside it,
-// flushed to disk, then renamed over it. A crash leaves the old file or the
-// new one, never half of either.
-func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name()) // gone already, once renamed
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Chmod(perm)
-	}
-	if err == nil {
-		err = f.Sync()
-	}
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
 }
 
 // checkRestoredDB checks a database about to be restored: whole, with a
