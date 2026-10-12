@@ -7,10 +7,12 @@
 	import { Busy } from '#lib/busy.svelte.js';
 	import { ago, dateTime } from '#lib/format.js';
 	import { onLine, roleLine } from '#lib/lines.svelte.js';
+	import { Paged } from '#lib/paged.svelte.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
+	import Pager from '#lib/components/Pager.svelte';
 	import RolePick from '#lib/components/RolePick.svelte';
 	import ServerRoles from '#lib/components/ServerRoles.svelte';
 	import SteamId from '#lib/components/SteamId.svelte';
@@ -28,10 +30,12 @@
 	const live = $derived(ctx.live);
 	const players = $derived([...live.players].sort((a, b) => a.name.localeCompare(b.name)));
 	const running = $derived(live.state?.state === 'running');
+	const online = new Paged('players', () => players);
 
 	let q = $state('');
 	let history = $state.raw<Seen[] | null>(null);
 	let historyError = $state('');
+	const past = new Paged('history', () => history ?? []);
 	const begin = newest();
 	async function loadHistory() {
 		const current = begin();
@@ -39,6 +43,7 @@
 			const r = await api.get<Seen[]>(`/instances/${ctx.id}/history?q=${encodeURIComponent(q.trim())}`);
 			if (!current()) return;
 			history = r;
+			past.page = 1;
 			historyError = '';
 		} catch (e) {
 			if (current()) historyError = message(e);
@@ -121,7 +126,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each players as p (p.id)}
+						{#each online.shown as p (p.id)}
 							<tr>
 								<td>
 									<span class="font-medium">{p.name}</span>
@@ -151,6 +156,7 @@
 					</tbody>
 				</table>
 			</div>
+			<Pager paged={online} label="Players to show" />
 		{:else}
 			<p class="px-4 py-8 text-center font-marker text-faint">nobody's skating right now.</p>
 		{/if}
@@ -182,7 +188,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{#each history as h (h.id)}
+						{#each past.shown as h (h.id)}
 							<tr>
 								<td class="font-medium">
 									{h.name}
@@ -203,6 +209,7 @@
 					</tbody>
 				</table>
 			</div>
+			<Pager paged={past} label="Players to show" />
 		{:else}
 			{#if history}
 				<p class="px-4 py-6 text-sm text-faint">No players recorded{q ? ' matching that' : ' yet'}.</p>

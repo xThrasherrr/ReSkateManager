@@ -7,10 +7,12 @@
 	import { Busy } from '#lib/busy.svelte.js';
 	import { dateTime } from '#lib/format.js';
 	import { onLine } from '#lib/lines.svelte.js';
+	import { Paged } from '#lib/paged.svelte.js';
 	import { isSteamId } from '#lib/text.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
+	import Pager from '#lib/components/Pager.svelte';
 	import SteamId from '#lib/components/SteamId.svelte';
 	import { ask } from '#lib/ask.svelte.js';
 
@@ -23,6 +25,8 @@
 	const ctx = useLive();
 	let bans = $state.raw<Ban[]>([]);
 	let admins = $state.raw<Admin[]>([]);
+	const bansPaged = new Paged('bans', () => bans);
+	const adminsPaged = new Paged('admins', () => admins);
 	let banId = $state('');
 	let banName = $state('');
 	let adminId = $state('');
@@ -99,7 +103,7 @@
 			<table class="table">
 				<thead><tr><th>Player</th><th class="hidden sm:table-cell">SteamID64</th><th class="hidden md:table-cell">Banned</th><th></th></tr></thead>
 				<tbody>
-					{#each bans as b, i (i)}
+					{#each bansPaged.shown as b, i (i)}
 						<tr>
 							<td class="font-medium">{b.name || '—'}<SteamId id={b.id} small class="font-normal sm:hidden" /></td>
 							<td class="hidden sm:table-cell"><SteamId id={b.id} /></td>
@@ -109,6 +113,7 @@
 					{/each}
 				</tbody>
 			</table>
+			<Pager paged={bansPaged} label="Bans to show" />
 		{:else if loaded}
 			<p class="px-4 py-6 text-sm text-faint">Nobody is banned.</p>
 		{:else if !error}
@@ -134,7 +139,7 @@
 				<table class="table">
 					<thead><tr><th>Player</th><th class="hidden sm:table-cell">SteamID64</th><th></th></tr></thead>
 					<tbody>
-						{#each admins as a, i (i)}
+						{#each adminsPaged.shown as a, i (i)}
 							<tr>
 								<td class="font-medium">
 									{a.name || '—'}
@@ -149,6 +154,7 @@
 						{/each}
 					</tbody>
 				</table>
+				<Pager paged={adminsPaged} label="Admins to show" />
 			{:else if loaded}
 				<p class="px-4 py-6 text-sm text-faint">No in-game admins.</p>
 			{:else if !error}
