@@ -20,8 +20,12 @@ log("tab\there\n" + std::to_string(id) + " joined (");
 std::string s = u8"\x41\101\"";
 `
 	want := []string{"server_host.h", "onetwo", "wide", `raw "text"`, "tab\there\n", " joined (", `AA"`}
-	if got := cppStrings(src); !slices.Equal(got, want) {
-		t.Errorf("cppStrings:\n got %q\nwant %q", got, want)
+	var got []string
+	for _, l := range cppLiterals(src) {
+		got = append(got, l.text)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("cppLiterals:\n got %q\nwant %q", got, want)
 	}
 }
 

@@ -1,6 +1,10 @@
 package auth
 
-import "testing"
+import (
+	"context"
+	"reflect"
+	"testing"
+)
 
 func TestCovers(t *testing.T) {
 	perms := func(global []string, byInstance map[string][]string) Perms {
@@ -45,5 +49,59 @@ func TestCovers(t *testing.T) {
 	}
 	if !perms([]string{InstancesManage}, nil).Sees("a") {
 		t.Error("managing servers should see every one")
+	}
+}
+
+// SteamUsers resolves what each user may do just as Perms does.
+func TestSteamUsers(t *testing.T) {
+	s := newService(t)
+	ctx := context.Background()
+	admin, err := s.SaveRole(ctx, Role{Name: "In-game", Permissions: []string{IngameAdmin, AuditView}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod, err := s.SaveRole(ctx, Role{Name: "Kicks", Permissions: []string{PlayersKick}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(name, steam string, owner bool, grants ...Grant) *User {
+		u, err := s.CreateUser(ctx, NewUser{Username: name, Password: "correct horse battery staple", SteamID: steam, Owner: owner, Grants: grants})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	add("owner", "76561198000000001", true, Grant{RoleID: mod.ID, Instance: "*"})
+	add("alice", "76561198000000002", false, Grant{RoleID: admin.ID, Instance: "a"}, Grant{RoleID: mod.ID, Instance: "*"})
+	add("bob", "76561198000000003", false, Grant{RoleID: admin.ID, Instance: "*"})
+	add("erin", "76561198000000005", false)
+	add("dave", "", false, Grant{RoleID: admin.ID, Instance: "*"})
+	carol := add("carol", "76561198000000004", false, Grant{RoleID: admin.ID, Instance: "*"})
+	disabled := true
+	if _, err := s.UpdateUser(ctx, carol.ID, UserUpdate{Disabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.SteamUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users, err := s.Users(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []*SteamUser
+	for _, u := range users {
+		if u.Disabled || u.SteamID == "" {
+			continue
+		}
+		p, err := s.Perms(ctx, u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, &SteamUser{SteamID: u.SteamID, Username: u.Username, Perms: p})
+	}
+	if len(want) != 4 || !reflect.DeepEqual(got, want) {
+		t.Errorf("steam users:\n got %+v\nwant %+v", got, want)
 	}
 }

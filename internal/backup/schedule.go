@@ -37,7 +37,7 @@ func (s *Service) Run(ctx context.Context, onFail func(error)) {
 		if !due(set, last, failed, now) {
 			continue
 		}
-		info, err := s.Create(ctx, Options{Kind: Scheduled, Database: true, Servers: s.serverIDs(), Mods: set.Mods})
+		info, err := s.Create(ctx, Options{Kind: Scheduled, Database: true, Servers: s.Reg.IDs(), Mods: set.Mods})
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -78,5 +78,3 @@ func (s *Service) prune(ctx context.Context) {
 		s.Log.Info("deleted an old backup", "file", name)
 	}
 }
-
-func (s *Service) serverIDs() []string { return s.Reg.IDs() }

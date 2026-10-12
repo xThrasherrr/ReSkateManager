@@ -514,18 +514,6 @@ func meaningful(s string) bool {
 	return letters >= 3
 }
 
-// cppStrings returns the string literals in C++ source with their escapes
-// resolved, adjacent ones joined as the compiler joins them. It skips
-// comments, character literals and numbers (1'000), so a quote in any of them
-// can't throw it.
-func cppStrings(src string) []string {
-	var out []string
-	for _, l := range cppLiterals(src) {
-		out = append(out, l.text)
-	}
-	return out
-}
-
 // cppLiteral is one literal of cppLiterals, and whether the source only
 // compares text with it: tag == "[ban]", text.find("[cmd]"),
 // starts_with("[error]").
@@ -540,7 +528,10 @@ var (
 	comparedAfter  = regexp.MustCompile(`^\s*[=!]=`)
 )
 
-// cppLiterals is cppStrings, each literal with whether it's only compared.
+// cppLiterals returns the string literals in C++ source with their escapes
+// resolved, adjacent ones joined as the compiler joins them, each with whether
+// it's only compared. It skips comments, character literals and numbers
+// (1'000), so a quote in any of them can't throw it.
 func cppLiterals(src string) []cppLiteral {
 	var out []cppLiteral
 	joinable := false // only spaces and comments since the last literal

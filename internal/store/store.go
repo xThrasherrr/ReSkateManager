@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -173,6 +174,29 @@ func (s *Store) Set(ctx context.Context, key, value string) error {
 	return err
 }
 
+// LoadJSON reads a setting kept as JSON, decoded over def; def when unset. One
+// that doesn't decode comes back as far as it got, with the error.
+func LoadJSON[T any](ctx context.Context, s *Store, key string, def T) (T, error) {
+	v, err := s.Get(ctx, key)
+	if errors.Is(err, ErrNotFound) {
+		return def, nil
+	}
+	if err != nil {
+		return def, err
+	}
+	err = json.Unmarshal([]byte(v), &def)
+	return def, err
+}
+
+// SaveJSON keeps a setting in the database as JSON.
+func SaveJSON(ctx context.Context, s *Store, key string, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return s.Set(ctx, key, string(b))
+}
+
 // ---- server builds ----
 
 // ServerBuilds maps the SHA-256 of each server program the manager has
@@ -290,20 +314,8 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 // ManagedAdmins lists the in-game admins the manager added to an instance for
 // panel users, as opposed to admins added by hand.
 func (s *Store) ManagedAdmins(ctx context.Context, instanceID string) ([]string, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT steam_id FROM managed_admins WHERE instance_id = ? ORDER BY steam_id", instanceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.DB, func(id *string) []any { return []any{id} },
+		"SELECT steam_id FROM managed_admins WHERE instance_id = ? ORDER BY steam_id", instanceID)
 }
 
 // SetManagedAdmins replaces the in-game admins the manager added to an instance.
@@ -340,36 +352,29 @@ type Announcement struct {
 	ChatOnly bool   `json:"chatOnly,omitempty"` // without ReSkate 2.0.2's card
 }
 
+const announcementCols = "id, instance_id, message, interval, enabled, chat_only"
+
+// fields are where announcementCols scan to.
+func (a *Announcement) fields() []any {
+	return []any{&a.ID, &a.Instance, &a.Message, &a.Interval, &a.Enabled, &a.ChatOnly}
+}
+
 // Announcements lists one server's announcements and those for every server,
 // or all of them when instanceID is "".
 func (s *Store) Announcements(ctx context.Context, instanceID string) ([]Announcement, error) {
-	q := "SELECT id, instance_id, message, interval, enabled, chat_only FROM announcements"
+	q := "SELECT " + announcementCols + " FROM announcements"
 	var args []any
 	if instanceID != "" {
 		q += " WHERE instance_id IN (?, ?)"
 		args = append(args, instanceID, AllInstances)
 	}
-	rows, err := s.DB.QueryContext(ctx, q+" ORDER BY id", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Announcement{}
-	for rows.Next() {
-		var a Announcement
-		if err := rows.Scan(&a.ID, &a.Instance, &a.Message, &a.Interval, &a.Enabled, &a.ChatOnly); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.DB, (*Announcement).fields, q+" ORDER BY id", args...)
 }
 
 // Announcement finds an announcement by ID.
 func (s *Store) Announcement(ctx context.Context, id int64) (Announcement, error) {
 	var a Announcement
-	err := s.DB.QueryRowContext(ctx, "SELECT id, instance_id, message, interval, enabled, chat_only FROM announcements WHERE id = ?", id).
-		Scan(&a.ID, &a.Instance, &a.Message, &a.Interval, &a.Enabled, &a.ChatOnly)
+	err := s.DB.QueryRowContext(ctx, "SELECT "+announcementCols+" FROM announcements WHERE id = ?", id).Scan(a.fields()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrNotFound
 	}
@@ -447,20 +452,9 @@ func (s *Store) PlayerHistory(ctx context.Context, instanceID, search string, li
 	}
 	q += " ORDER BY last_seen DESC LIMIT ?"
 	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []PlayerRecord
-	for rows.Next() {
-		var p PlayerRecord
-		if err := rows.Scan(&p.SteamID, &p.Name, &p.FirstSeen, &p.LastSeen, &p.Sessions); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.DB, func(p *PlayerRecord) []any {
+		return []any{&p.SteamID, &p.Name, &p.FirstSeen, &p.LastSeen, &p.Sessions}
+	}, q, args...)
 }
 
 // ---- audit log ----
@@ -516,20 +510,9 @@ func (s *Store) AuditLog(ctx context.Context, instanceID string, before int64, l
 	}
 	q += " ORDER BY id DESC LIMIT ?"
 	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []AuditEntry{}
-	for rows.Next() {
-		var e AuditEntry
-		if err := rows.Scan(&e.ID, &e.At, &e.UserID, &e.Username, &e.Instance, &e.Action, &e.Detail, &e.IP); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return queryAll(ctx, s.DB, func(e *AuditEntry) []any {
+		return []any{&e.ID, &e.At, &e.UserID, &e.Username, &e.Instance, &e.Action, &e.Detail, &e.IP}
+	}, q, args...)
 }
 
 // ---- performance ----
@@ -616,26 +599,15 @@ type NetPoint struct {
 // into buckets `bucket` seconds wide. A run's totals become how many in each
 // bucket; the first sample in range has nothing to count from, so adds none.
 func (s *Store) NetPoints(ctx context.Context, instanceID string, since, bucket int64) ([]NetPoint, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT at - at % ? AS t, MAX(players), AVG(out_kbs), MAX(out_kbs), AVG(in_kbs), MAX(in_kbs), MAX(ping_ms),
+	return queryAll(ctx, s.DB, func(p *NetPoint) []any {
+		return []any{&p.At, &p.Players, &p.Out, &p.OutMax, &p.In, &p.InMax, &p.Ping,
+			&p.Queued, &p.QueueMs, &p.Failed, &p.Skipped, &p.Dropped, &p.Busy, &p.PassMs, &p.GapMs}
+	}, `SELECT at - at % ? AS t, MAX(players), AVG(out_kbs), MAX(out_kbs), AVG(in_kbs), MAX(in_kbs), MAX(ping_ms),
 		MAX(queued_kb), MAX(queue_ms), SUM(failed_n), SUM(skipped_n), SUM(dropped_n), MAX(busy_pct), MAX(pass_ms), MAX(gap_ms)
 		FROM (SELECT *, failed - LAG(failed) OVER run_order AS failed_n, skipped - LAG(skipped) OVER run_order AS skipped_n,
 			dropped - LAG(dropped) OVER run_order AS dropped_n
 			FROM net_samples WHERE instance_id = ? AND at >= ? WINDOW run_order AS (PARTITION BY run ORDER BY at))
 		GROUP BY t ORDER BY t`, bucket, instanceID, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []NetPoint{}
-	for rows.Next() {
-		var p NetPoint
-		if err := rows.Scan(&p.At, &p.Players, &p.Out, &p.OutMax, &p.In, &p.InMax, &p.Ping,
-			&p.Queued, &p.QueueMs, &p.Failed, &p.Skipped, &p.Dropped, &p.Busy, &p.PassMs, &p.GapMs); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
 }
 
 // PerfPoint sums up the samples of one run within one time bucket.
@@ -650,21 +622,10 @@ type PerfPoint struct {
 
 // PerfPoints returns samples since `since`, averaged into buckets `bucket` seconds wide.
 func (s *Store) PerfPoints(ctx context.Context, instanceID string, since, bucket int64) ([]PerfPoint, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT at - at % ? AS t, run, AVG(cpu), MAX(cpu), CAST(AVG(mem) AS INTEGER), MAX(players)
+	return queryAll(ctx, s.DB, func(p *PerfPoint) []any {
+		return []any{&p.At, &p.Run, &p.CPU, &p.CPUMax, &p.Mem, &p.Players}
+	}, `SELECT at - at % ? AS t, run, AVG(cpu), MAX(cpu), CAST(AVG(mem) AS INTEGER), MAX(players)
 		FROM perf_samples WHERE instance_id = ? AND at >= ? GROUP BY t, run ORDER BY t, run`, bucket, instanceID, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []PerfPoint{}
-	for rows.Next() {
-		var p PerfPoint
-		if err := rows.Scan(&p.At, &p.Run, &p.CPU, &p.CPUMax, &p.Mem, &p.Players); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
 }
 
 // PerfRun sums up one run's samples.
@@ -681,21 +642,10 @@ type PerfRun struct {
 
 // PerfRuns lists the runs with samples since `since`, newest first.
 func (s *Store) PerfRuns(ctx context.Context, instanceID string, since int64, limit int) ([]PerfRun, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT run, MIN(at), MAX(at), AVG(cpu), MAX(cpu), CAST(AVG(mem) AS INTEGER), MAX(mem), MAX(players)
+	return queryAll(ctx, s.DB, func(r *PerfRun) []any {
+		return []any{&r.Run, &r.First, &r.Last, &r.CPU, &r.CPUMax, &r.Mem, &r.MemMax, &r.Players}
+	}, `SELECT run, MIN(at), MAX(at), AVG(cpu), MAX(cpu), CAST(AVG(mem) AS INTEGER), MAX(mem), MAX(players)
 		FROM perf_samples WHERE instance_id = ? AND at >= ? GROUP BY run ORDER BY run DESC LIMIT ?`, instanceID, since, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []PerfRun{}
-	for rows.Next() {
-		var r PerfRun
-		if err := rows.Scan(&r.Run, &r.First, &r.Last, &r.CPU, &r.CPUMax, &r.Mem, &r.MemMax, &r.Players); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
 }
 
 // ServerPerfPoint sums up one server's samples within one time bucket, all
@@ -713,21 +663,10 @@ type ServerPerfPoint struct {
 // ServersPerfPoints returns every server's samples since `since`, summed into
 // buckets `bucket` seconds wide, by server and then time.
 func (s *Store) ServersPerfPoints(ctx context.Context, since, bucket int64) ([]ServerPerfPoint, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT instance_id, at - at % ? AS t, SUM(cpu), MAX(cpu), SUM(mem), MAX(mem), COUNT(*)
+	return queryAll(ctx, s.DB, func(p *ServerPerfPoint) []any {
+		return []any{&p.Instance, &p.At, &p.CPU, &p.CPUMax, &p.Mem, &p.MemMax, &p.Samples}
+	}, `SELECT instance_id, at - at % ? AS t, SUM(cpu), MAX(cpu), SUM(mem), MAX(mem), COUNT(*)
 		FROM perf_samples WHERE at >= ? GROUP BY instance_id, t ORDER BY instance_id, t`, bucket, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []ServerPerfPoint{}
-	for rows.Next() {
-		var p ServerPerfPoint
-		if err := rows.Scan(&p.Instance, &p.At, &p.CPU, &p.CPUMax, &p.Mem, &p.MemMax, &p.Samples); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
 }
 
 // HostSample is one reading of the machine the manager runs on, with its
@@ -788,22 +727,30 @@ type HostPoint struct {
 // HostPoints returns host samples since `since`, averaged into buckets
 // `bucket` seconds wide.
 func (s *Store) HostPoints(ctx context.Context, since, bucket int64) ([]HostPoint, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT at - at % ? AS t, AVG(cpu), MAX(cpu), CAST(AVG(mem_total) AS INTEGER), CAST(AVG(mem_used) AS INTEGER),
+	return queryAll(ctx, s.DB, func(p *HostPoint) []any {
+		return []any{&p.At, &p.CPU, &p.CPUMax, &p.MemTotal, &p.MemUsed, &p.MemCached, &p.LimitMax, &p.LimitUsed, &p.ServersCPU, &p.ServersMem,
+			&p.ManagerMem, &p.Running, &p.Servers, &p.Players, &p.Samples}
+	}, `SELECT at - at % ? AS t, AVG(cpu), MAX(cpu), CAST(AVG(mem_total) AS INTEGER), CAST(AVG(mem_used) AS INTEGER),
 		CAST(AVG(mem_cached) AS INTEGER), MAX(limit_max), CAST(AVG(limit_used) AS INTEGER), AVG(servers_cpu), CAST(AVG(servers_mem) AS INTEGER),
 		CAST(AVG(manager_mem) AS INTEGER), MAX(running), MAX(servers), MAX(players), COUNT(*)
 		FROM host_samples WHERE at >= ? GROUP BY t ORDER BY t`, bucket, since)
+}
+
+// queryAll runs q and gathers a T from each row, scanned into the pointers
+// fields gives; [] for no rows.
+func queryAll[T any](ctx context.Context, db *sql.DB, fields func(*T) []any, q string, args ...any) ([]T, error) {
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []HostPoint{}
+	out := []T{}
 	for rows.Next() {
-		var p HostPoint
-		if err := rows.Scan(&p.At, &p.CPU, &p.CPUMax, &p.MemTotal, &p.MemUsed, &p.MemCached, &p.LimitMax, &p.LimitUsed, &p.ServersCPU, &p.ServersMem,
-			&p.ManagerMem, &p.Running, &p.Servers, &p.Players, &p.Samples); err != nil {
+		var v T
+		if err := rows.Scan(fields(&v)...); err != nil {
 			return nil, err
 		}
-		out = append(out, p)
+		out = append(out, v)
 	}
 	return out, rows.Err()
 }

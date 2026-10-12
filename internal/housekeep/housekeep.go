@@ -5,8 +5,6 @@ package housekeep
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -35,16 +33,7 @@ const retentionKey = "retention"
 
 // LoadRetention reads the retention, or the default when none is saved.
 func LoadRetention(ctx context.Context, s *store.Store) (Retention, error) {
-	v, err := s.Get(ctx, retentionKey)
-	if errors.Is(err, store.ErrNotFound) {
-		return DefaultRetention, nil
-	}
-	if err != nil {
-		return DefaultRetention, err
-	}
-	r := DefaultRetention
-	err = json.Unmarshal([]byte(v), &r)
-	return r, err
+	return store.LoadJSON(ctx, s, retentionKey, DefaultRetention)
 }
 
 // SaveRetention checks and stores the retention.
@@ -54,11 +43,7 @@ func SaveRetention(ctx context.Context, s *store.Store, r Retention) error {
 			return fmt.Errorf("keep things 1 to %d days, or 0 for good", MaxDays)
 		}
 	}
-	b, err := json.Marshal(r)
-	if err != nil {
-		return err
-	}
-	return s.Set(ctx, retentionKey, string(b))
+	return store.SaveJSON(ctx, s, retentionKey, r)
 }
 
 // Keeper prunes what would otherwise grow forever: the audit log, player

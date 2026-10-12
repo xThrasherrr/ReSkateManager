@@ -168,12 +168,12 @@ func (r *report) checkConfig(ctx context.Context, dir string) {
 	reached := false
 	for _, l := range lines {
 		switch {
-		case strings.HasPrefix(l, "Config problem: "), strings.HasPrefix(l, "Cannot read "):
+		case refused(l):
 			r.Breaking = append(r.Breaking, "The server won't start on a config the manager edited: "+code(l))
 			reached = true
 		case strings.HasPrefix(l, "Added new settings to "):
 			r.Breaking = append(r.Breaking, "The server misses settings in a config the manager edited: "+code(l))
-		case strings.Contains(l, "steam_api"), strings.HasPrefix(l, "Signing in to Steam"):
+		case reachedSteam(l):
 			reached = true
 		}
 	}
@@ -325,8 +325,7 @@ func runServer(ctx context.Context, dir string) ([]string, error) {
 		mu.Unlock()
 		// The Windows server waits on a failure until someone reads it, so
 		// it is stopped as soon as the outcome is known.
-		if strings.HasPrefix(text, "Signing in to Steam") || strings.HasPrefix(text, "Config problem: ") ||
-			strings.HasPrefix(text, "Cannot read ") || strings.Contains(text, "steam_api") {
+		if reachedSteam(text) || refused(text) {
 			once.Do(func() { close(outcome) })
 		}
 	}, nil)
@@ -352,6 +351,17 @@ func runServer(ctx context.Context, dir string) ([]string, error) {
 		return lines, errors.New("the server ran for a minute without reaching Steam")
 	}
 	return lines, nil
+}
+
+// refused reports a server line saying it won't start on its config.
+func refused(l string) bool {
+	return strings.HasPrefix(l, "Config problem: ") || strings.HasPrefix(l, "Cannot read ")
+}
+
+// reachedSteam reports a server line from the step after its config: signing
+// in to Steam, or failing to load Steam's library.
+func reachedSteam(l string) bool {
+	return strings.HasPrefix(l, "Signing in to Steam") || strings.Contains(l, "steam_api")
 }
 
 // leafPaths lists the dotted paths of the values in a config tree. An empty

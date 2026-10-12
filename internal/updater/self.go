@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -94,7 +95,7 @@ func (s *SelfChecker) Check(ctx context.Context) error {
 	best := cur
 	for _, rel := range rels {
 		v := parseVersion(rel.TagName)
-		if cur == nil || v == nil || rel.Draft || (!candidate && v[3] != final) || !versionLess(best, v) {
+		if cur == nil || v == nil || rel.Draft || (!candidate && v[3] != final) || slices.Compare(best, v) >= 0 {
 			continue
 		}
 		best = v
@@ -162,13 +163,4 @@ func parseVersion(v string) []int {
 		out[3] = final
 	}
 	return out
-}
-
-func versionLess(a, b []int) bool {
-	for i := range a {
-		if a[i] != b[i] {
-			return a[i] < b[i]
-		}
-	}
-	return false
 }

@@ -12,14 +12,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/discord"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
@@ -71,16 +70,9 @@ func CheckWebhook(u string) error {
 // Load reads the settings; none saved yet is no webhook, every kind on and
 // the default thresholds.
 func Load(ctx context.Context, s *store.Store) (Settings, error) {
-	out := Defaults
-	out.Off = []string{}
-	v, err := s.Get(ctx, settingsKey)
-	if errors.Is(err, store.ErrNotFound) {
-		return out, nil
-	}
-	if err != nil {
-		return out, err
-	}
-	err = json.Unmarshal([]byte(v), &out)
+	def := Defaults
+	def.Off = []string{}
+	out, err := store.LoadJSON(ctx, s, settingsKey, def)
 	if out.Off == nil {
 		out.Off = []string{}
 	}
@@ -105,11 +97,7 @@ func Save(ctx context.Context, s *store.Store, set Settings) error {
 	case set.MemMinutes < 1 || set.MemMinutes > 1440:
 		return errors.New("memory must stay high for 1 to 1440 minutes")
 	}
-	b, err := json.Marshal(set)
-	if err != nil {
-		return err
-	}
-	return s.Set(ctx, settingsKey, string(b))
+	return store.SaveJSON(ctx, s, settingsKey, set)
 }
 
 // Alert is one message for the channel.
@@ -215,22 +203,9 @@ func (n *Notifier) post(ctx context.Context, webhook string, a Alert) (retry tim
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "ReSkateManager/"+n.Version)
-	client := n.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
-	// A webhook answers itself; a redirect would take the alert, and the
-	// token in its address, somewhere else.
-	cl := *client
-	cl.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, err := cl.Do(req)
+	resp, err := discord.Do(n.HTTP, req)
 	if err != nil {
-		// Without the address, which holds the webhook's token and would
-		// land in the manager's log.
-		if ue, ok := errors.AsType[*url.Error](err); ok {
-			err = ue.Err
-		}
-		return 5 * time.Second, fmt.Errorf("discord: %w", err)
+		return 5 * time.Second, err
 	}
 	defer resp.Body.Close()
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
@@ -238,40 +213,28 @@ func (n *Notifier) post(ctx context.Context, webhook string, a Alert) (retry tim
 	case resp.StatusCode < 300:
 		return 0, nil
 	case resp.StatusCode == http.StatusTooManyRequests:
-		// Discord says how long in seconds, in the header and the body.
-		var limit struct {
-			RetryAfter float64 `json:"retry_after"`
-		}
-		wait := 5 * time.Second
-		if s, err := strconv.ParseFloat(resp.Header.Get("Retry-After"), 64); err == nil {
-			wait = time.Duration(s * float64(time.Second))
-		} else if json.Unmarshal(msg, &limit) == nil && limit.RetryAfter > 0 {
-			wait = time.Duration(limit.RetryAfter * float64(time.Second))
-		}
-		return min(max(wait, time.Second), time.Minute), errors.New("discord: rate limited")
+		return discord.RetryAfter(resp.Header, msg, time.Minute), errors.New("discord: rate limited")
 	case resp.StatusCode >= 500:
-		return 10 * time.Second, fmt.Errorf("discord: HTTP %d", resp.StatusCode)
+		return 10 * time.Second, discord.StatusError(resp.StatusCode, "")
 	}
 	var e struct {
 		Message string `json:"message"`
 	}
-	if json.Unmarshal(msg, &e) == nil && e.Message != "" {
-		return 0, fmt.Errorf("discord: %s (HTTP %d)", e.Message, resp.StatusCode)
-	}
-	return 0, fmt.Errorf("discord: HTTP %d", resp.StatusCode)
+	_ = json.Unmarshal(msg, &e)
+	return 0, discord.StatusError(resp.StatusCode, e.Message)
 }
 
 var colors = map[string]int{
 	Crash:          0xff5ca8,
-	GaveUp:         0xff4f5c,
-	Stopped:        0xff4f5c,
-	UpdateFailed:   0xff4f5c,
-	BackupFailed:   0xff4f5c,
-	DiskLow:        0xffd23f,
-	MemoryHigh:     0xffd23f,
-	Updated:        0x7ee26b,
-	ManagerUpdated: 0x7ee26b,
-	Test:           0x4cc3ff,
+	GaveUp:         discord.Red,
+	Stopped:        discord.Red,
+	UpdateFailed:   discord.Red,
+	BackupFailed:   discord.Red,
+	DiskLow:        discord.Yellow,
+	MemoryHigh:     discord.Yellow,
+	Updated:        discord.Green,
+	ManagerUpdated: discord.Green,
+	Test:           discord.Blue,
 }
 
 // message is the webhook's JSON for a. Text from a server, such as a player's
@@ -280,11 +243,11 @@ func (n *Notifier) message(a Alert) map[string]any {
 	desc := a.Text
 	if line := strings.TrimSpace(a.Line); line != "" {
 		// Inside a code block nothing formats; a ``` in the line would end it.
-		desc += "\n```\n" + strings.ReplaceAll(truncate(line, 900), "```", "ˋˋˋ") + "\n```"
+		desc += "\n```\n" + strings.ReplaceAll(discord.Truncate(line, 900), "```", "ˋˋˋ") + "\n```"
 	}
 	embed := map[string]any{
-		"title":       truncate(a.Title, 250),
-		"description": truncate(desc, 4000),
+		"title":       discord.Truncate(a.Title, 250),
+		"description": discord.Truncate(desc, 4000),
 		"color":       colors[a.Kind],
 		"timestamp":   time.Now().UTC().Format(time.RFC3339),
 		"footer":      map[string]string{"text": "ReSkateManager " + n.Version},
@@ -300,11 +263,4 @@ func (n *Notifier) message(a Alert) map[string]any {
 		"embeds":           []any{embed},
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	}
-}
-
-func truncate(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n-1]) + "…"
-	}
-	return s
 }

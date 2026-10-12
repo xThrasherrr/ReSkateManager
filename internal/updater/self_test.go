@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -115,7 +116,7 @@ func TestVersionOrder(t *testing.T) {
 		if a == nil || b == nil {
 			t.Fatalf("%q or %q unread", c.a, c.b)
 		}
-		if versionLess(a, b) != c.less {
+		if (slices.Compare(a, b) < 0) != c.less {
 			t.Errorf("%s < %s: %v, want %v", c.a, c.b, !c.less, c.less)
 		}
 	}

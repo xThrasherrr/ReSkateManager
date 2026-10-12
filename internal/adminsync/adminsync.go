@@ -153,19 +153,12 @@ func (s *Syncer) PanelAdmins(ctx context.Context, instanceID string) (map[string
 	if s == nil {
 		return out, nil
 	}
-	users, err := s.Auth.Users(ctx)
+	users, err := s.Auth.SteamUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, u := range users {
-		if u.Disabled || u.SteamID == "" {
-			continue
-		}
-		p, err := s.Auth.Perms(ctx, u)
-		if err != nil {
-			return nil, err
-		}
-		if p.Can(auth.IngameAdmin, instanceID) {
+		if u.Perms.Can(auth.IngameAdmin, instanceID) {
 			out[u.SteamID] = u.Username
 		}
 	}

@@ -774,16 +774,7 @@ const settingsKey = "backups"
 
 // LoadSettings reads the backup schedule, the defaults where unset.
 func LoadSettings(ctx context.Context, s *store.Store) (Settings, error) {
-	v, err := s.Get(ctx, settingsKey)
-	if errors.Is(err, store.ErrNotFound) {
-		return DefaultSettings, nil
-	}
-	if err != nil {
-		return DefaultSettings, err
-	}
-	set := DefaultSettings
-	err = json.Unmarshal([]byte(v), &set)
-	return set, err
+	return store.LoadJSON(ctx, s, settingsKey, DefaultSettings)
 }
 
 // SaveSettings checks and saves the backup schedule.
@@ -794,11 +785,7 @@ func SaveSettings(ctx context.Context, s *store.Store, set Settings) error {
 	if set.Keep < 1 || set.Keep > MaxKeep {
 		return fmt.Errorf("keep 1 to %d backups", MaxKeep)
 	}
-	b, err := json.Marshal(set)
-	if err != nil {
-		return err
-	}
-	return s.Set(ctx, settingsKey, string(b))
+	return store.SaveJSON(ctx, s, settingsKey, set)
 }
 
 // cleanRel turns a name in a zip into a path below it, or "" when it's one

@@ -3,6 +3,7 @@ package updater
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"os"
 	"sync"
 	"time"
@@ -47,9 +48,7 @@ func (b *Builds) Load(ctx context.Context) error {
 	if b.learned == nil {
 		b.learned = map[string]string{}
 	}
-	for sum, v := range m {
-		b.learned[sum] = v
-	}
+	maps.Copy(b.learned, m)
 	return nil
 }
 
@@ -86,11 +85,20 @@ func (b *Builds) Named(sum string) string {
 }
 
 // Version is the release the program at exe is from: "" when it isn't there
-// or isn't a release this manager knows. The file is hashed again only once
-// it changes.
+// or isn't a release this manager knows.
 func (b *Builds) Version(exe string) string {
 	if b == nil {
 		return ""
+	}
+	return b.Named(b.Sum(exe))
+}
+
+// Sum is the SHA-256 of the program at exe, or "" when it isn't there. The
+// file is hashed again only once it changes; a nil Builds hashes it each time.
+func (b *Builds) Sum(exe string) string {
+	if b == nil {
+		sum, _ := FileSHA256(exe)
+		return sum
 	}
 	fi, err := os.Stat(exe)
 	if err != nil {
@@ -112,5 +120,5 @@ func (b *Builds) Version(exe string) string {
 		b.sums[exe] = c
 		b.mu.Unlock()
 	}
-	return b.Named(c.sum)
+	return c.sum
 }

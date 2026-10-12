@@ -21,6 +21,8 @@ import (
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
+
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 )
 
 const (
@@ -43,10 +45,21 @@ var (
 	ErrSteamTaken = errors.New("that Steam account is linked to another user")
 )
 
-var (
-	usernameRe = regexp.MustCompile(`^[A-Za-z0-9_.\-]{3,32}$`)
-	steamIDRe  = regexp.MustCompile(`^7656119\d{10}$`)
-)
+var usernameRe = regexp.MustCompile(`^[A-Za-z0-9_.\-]{3,32}$`)
+
+func checkUsername(name string) error {
+	if !usernameRe.MatchString(name) {
+		return errors.New("usernames are 3-32 letters, digits, '.', '_' or '-'")
+	}
+	return nil
+}
+
+func checkSteamID(id string) error {
+	if !serverconfig.SteamIDRe.MatchString(id) {
+		return errors.New("not a SteamID64")
+	}
+	return nil
+}
 
 // Grant gives a user a role, on one instance or, as "*", on all.
 type Grant struct {
@@ -186,8 +199,8 @@ type NewUser struct {
 
 // CreateUser adds a user with their grants, all or nothing.
 func (s *Service) CreateUser(ctx context.Context, n NewUser) (*User, error) {
-	if !usernameRe.MatchString(n.Username) {
-		return nil, errors.New("usernames are 3-32 letters, digits, '.', '_' or '-'")
+	if err := checkUsername(n.Username); err != nil {
+		return nil, err
 	}
 	if n.Password == "" && n.SteamID == "" {
 		return nil, errors.New("a user needs a password or a linked Steam account")
@@ -205,8 +218,8 @@ func (s *Service) CreateUser(ctx context.Context, n NewUser) (*User, error) {
 	}
 	var sid any
 	if n.SteamID != "" {
-		if !steamIDRe.MatchString(n.SteamID) {
-			return nil, errors.New("not a SteamID64")
+		if err := checkSteamID(n.SteamID); err != nil {
+			return nil, err
 		}
 		sid = n.SteamID
 	}
@@ -282,21 +295,7 @@ func (s *Service) User(ctx context.Context, id int64) (*User, error) {
 
 // Users lists every user by name, with their grants.
 func (s *Service) Users(ctx context.Context) ([]*User, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+userCols+" FROM users ORDER BY username")
-	if err != nil {
-		return nil, err
-	}
-	var out []*User
-	for rows.Next() {
-		u, err := scanUser(rows)
-		if err != nil {
-			rows.Close()
-			return nil, err
-		}
-		out = append(out, u)
-	}
-	err = rows.Err()
-	rows.Close()
+	out, err := s.users(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -308,22 +307,30 @@ func (s *Service) Users(ctx context.Context) ([]*User, error) {
 	return out, nil
 }
 
-func (s *Service) grants(ctx context.Context, userID int64) ([]Grant, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT ur.role_id, r.name, ur.instance_id FROM user_roles ur
-		JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? ORDER BY r.name, ur.instance_id`, userID)
+// users lists every user by name, without their grants yet. The rows are
+// closed by the time it returns, so the caller can query again: the database
+// has one connection.
+func (s *Service) users(ctx context.Context) ([]*User, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+userCols+" FROM users ORDER BY username")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Grant{}
+	var out []*User
 	for rows.Next() {
-		var g Grant
-		if err := rows.Scan(&g.RoleID, &g.Role, &g.Instance); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, g)
+		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+func (s *Service) grants(ctx context.Context, userID int64) ([]Grant, error) {
+	return queryAll(ctx, s.db, func(g *Grant) []any { return []any{&g.RoleID, &g.Role, &g.Instance} },
+		`SELECT ur.role_id, r.name, ur.instance_id FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? ORDER BY r.name, ur.instance_id`, userID)
 }
 
 // UserUpdate is a change to a user: each field set is changed, each nil left.
@@ -349,8 +356,8 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, up UserUpdate) (*Use
 	}
 	defer tx.Rollback()
 	if up.Username != nil {
-		if !usernameRe.MatchString(*up.Username) {
-			return nil, errors.New("usernames are 3-32 letters, digits, '.', '_' or '-'")
+		if err := checkUsername(*up.Username); err != nil {
+			return nil, err
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE users SET username = ? WHERE id = ?", *up.Username, id)
 		if isUnique(err) {
@@ -379,8 +386,8 @@ func (s *Service) UpdateUser(ctx context.Context, id int64, up UserUpdate) (*Use
 	if up.SteamID != nil {
 		var v any
 		if *up.SteamID != "" {
-			if !steamIDRe.MatchString(*up.SteamID) {
-				return nil, errors.New("not a SteamID64")
+			if err := checkSteamID(*up.SteamID); err != nil {
+				return nil, err
 			}
 			v = *up.SteamID
 		} else if !u.HasPassword && up.Password == nil {
@@ -469,21 +476,8 @@ func (s *Service) DeleteUser(ctx context.Context, id int64) error {
 
 // RoleHolders lists the users granted a role, on any server.
 func (s *Service) RoleHolders(ctx context.Context, roleID int64) ([]*User, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT user_id FROM user_roles WHERE role_id = ? ORDER BY user_id", roleID)
-	if err != nil {
-		return nil, err
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
+	ids, err := queryAll(ctx, s.db, func(id *int64) []any { return []any{id} },
+		"SELECT DISTINCT user_id FROM user_roles WHERE role_id = ? ORDER BY user_id", roleID)
 	if err != nil {
 		return nil, err
 	}
@@ -520,6 +514,57 @@ func (s *Service) Perms(ctx context.Context, u *User) (Perms, error) {
 		p.add(keys, inst)
 	}
 	return p, rows.Err()
+}
+
+// SteamUser is an enabled user with a linked Steam account, and what they may
+// do.
+type SteamUser struct {
+	SteamID  string
+	Username string
+	Perms    Perms
+}
+
+// SteamUsers lists the enabled users with a linked Steam account by name, each
+// with their Perms, in two queries however many users there are.
+func (s *Service) SteamUsers(ctx context.Context) ([]*SteamUser, error) {
+	users, err := s.users(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []*SteamUser
+	byID := map[int64]*SteamUser{} // those whose grants count: not owners
+	for _, u := range users {
+		if u.Disabled || u.SteamID == "" {
+			continue
+		}
+		su := &SteamUser{SteamID: u.SteamID, Username: u.Username,
+			Perms: Perms{Owner: u.Owner, Global: map[string]bool{}, ByInstance: map[string]map[string]bool{}}}
+		out = append(out, su)
+		if !u.Owner {
+			byID[u.ID] = su
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT ur.user_id, r.permissions, ur.instance_id FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var raw, inst string
+		if err := rows.Scan(&id, &raw, &inst); err != nil {
+			return nil, err
+		}
+		su, ok := byID[id]
+		if !ok {
+			continue
+		}
+		var keys []string
+		_ = json.Unmarshal([]byte(raw), &keys)
+		su.Perms.add(keys, inst)
+	}
+	return out, rows.Err()
 }
 
 // GrantPerms is what a user holding exactly these grants could do.
@@ -779,6 +824,26 @@ func randomDigits(n int) string {
 func constantEq(a, b string) bool {
 	ha, hb := sha256.Sum256([]byte(a)), sha256.Sum256([]byte(b))
 	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
+}
+
+// queryAll runs q and gathers a T from each row, scanned into the pointers
+// fields gives; [] for no rows. store has its own: this package keeps clear of
+// what store depends on.
+func queryAll[T any](ctx context.Context, db *sql.DB, fields func(*T) []any, q string, args ...any) ([]T, error) {
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []T{}
+	for rows.Next() {
+		var v T
+		if err := rows.Scan(fields(&v)...); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
 }
 
 // isUnique reports whether err is a UNIQUE constraint failing.

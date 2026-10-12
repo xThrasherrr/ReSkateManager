@@ -169,10 +169,7 @@ func (c *Checker) latestRelease(ctx context.Context) (string, map[string]asset, 
 	if err != nil {
 		return "", nil, fmt.Errorf("GitHub could not be reached: %w", err)
 	}
-	var rel struct {
-		TagName string  `json:"tag_name"`
-		Assets  []asset `json:"assets"`
-	}
+	var rel githubRelease
 	if err := json.Unmarshal(body, &rel); err != nil {
 		return "", nil, fmt.Errorf("unexpected GitHub reply: %w", err)
 	}
@@ -333,38 +330,17 @@ func (c *Checker) Download(ctx context.Context, r *Release, cacheDir string, pro
 	}
 	tmp := f.Name()
 	h := sha256.New()
-	var done int64
-	buf := make([]byte, 256<<10)
-	body := io.LimitReader(resp.Body, r.Size+1)
-	for {
-		n, rerr := body.Read(buf)
-		if n > 0 {
-			if _, err := f.Write(buf[:n]); err != nil {
-				f.Close()
-				os.Remove(tmp)
-				return "", err
-			}
-			h.Write(buf[:n])
-			done += int64(n)
-			if progress != nil {
-				progress(done, r.Size)
-			}
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			f.Close()
-			os.Remove(tmp)
-			return "", rerr
-		}
+	n := &counter{total: r.Size, progress: progress}
+	_, err = io.CopyBuffer(io.MultiWriter(f, h, n), io.LimitReader(resp.Body, r.Size+1), make([]byte, 256<<10))
+	// A write that failed late (a full disk) can surface only on Close.
+	if cerr := f.Close(); err == nil {
+		err = cerr
 	}
-	// A write that failed late (a full disk) can surface only here.
-	if err := f.Close(); err != nil {
+	if err != nil {
 		os.Remove(tmp)
 		return "", err
 	}
-	if done != r.Size || hex.EncodeToString(h.Sum(nil)) != r.SHA256 {
+	if n.done != r.Size || hex.EncodeToString(h.Sum(nil)) != r.SHA256 {
 		os.Remove(tmp)
 		return "", errors.New("the download does not match the release (size or SHA-256)")
 	}
@@ -373,6 +349,21 @@ func (c *Checker) Download(ctx context.Context, r *Release, cacheDir string, pro
 		return "", err
 	}
 	return target, verifyExe(target, r.ExeSHA256)
+}
+
+// counter counts the bytes written through it, telling progress of each
+// write, when given.
+type counter struct {
+	done, total int64
+	progress    func(done, total int64)
+}
+
+func (c *counter) Write(p []byte) (int, error) {
+	c.done += int64(len(p))
+	if c.progress != nil {
+		c.progress(c.done, c.total)
+	}
+	return len(p), nil
 }
 
 // linuxAsset picks the release's Linux server: the one, or of several (more

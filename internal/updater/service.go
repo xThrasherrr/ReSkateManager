@@ -106,7 +106,9 @@ func (s *Service) setJob(id string, fn func(*Job)) {
 // the release up again rather than reading what was found minutes ago.
 func (s *Service) Status(ctx context.Context, in *instance.Instance, force bool) InstanceStatus {
 	st := InstanceStatus{Supported: Supported(), Job: s.job(in.ID())}
-	sum, _ := FileSHA256(in.Def().Exe())
+	// Hashed again only once the file changes: the Updates page asks every
+	// second or two while an update runs.
+	sum := s.Builds.Sum(in.Def().Exe())
 	st.ExeSHA256, st.Installed = sum, sum != ""
 	st.Version = s.Builds.Named(sum)
 	if !st.Supported {

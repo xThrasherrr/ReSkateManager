@@ -132,7 +132,7 @@ func TestRender(t *testing.T) {
 		{Name: "Broken", State: instance.Crashed},
 	}
 	e := render(list, Defaults, false, now)
-	if e.Color != yellow || !strings.Contains(e.Description, "2 of 4 servers online") || !strings.Contains(e.Description, "24 players on") {
+	if e.Color != Yellow || !strings.Contains(e.Description, "2 of 4 servers online") || !strings.Contains(e.Description, "24 players on") {
 		t.Errorf("summary %q, colour %x", e.Description, e.Color)
 	}
 	if len(e.Fields) != 4 {
@@ -170,17 +170,17 @@ func TestRender(t *testing.T) {
 		t.Errorf("codes hidden: %q / %q", hidden.Fields[0].Value, hidden.Fields[1].Value)
 	}
 
-	if e := render(list[:2], Defaults, false, now); e.Color != green {
+	if e := render(list[:2], Defaults, false, now); e.Color != Green {
 		t.Errorf("all online: colour %x", e.Color)
 	}
-	if e := render(list[2:], Defaults, false, now); e.Color != red || strings.Contains(e.Description, "players on") {
+	if e := render(list[2:], Defaults, false, now); e.Color != Red || strings.Contains(e.Description, "players on") {
 		t.Errorf("none online: %q, colour %x", e.Description, e.Color)
 	}
 	if e := render(nil, Defaults, false, now); e.Description != "No servers yet." {
 		t.Errorf("no servers: %q", e.Description)
 	}
 	down := render(list, Defaults, true, now)
-	if down.Color != grey || !strings.Contains(down.Description, "<t:1800000000:R>") || strings.Contains(down.Fields[0].Value, "ABCD") || down.Fields[0].Value != "**Offline**" {
+	if down.Color != Grey || !strings.Contains(down.Description, "<t:1800000000:R>") || strings.Contains(down.Fields[0].Value, "ABCD") || down.Fields[0].Value != "**Offline**" {
 		t.Errorf("manager stopped: %q, %q", down.Description, down.Fields[0].Value)
 	}
 }

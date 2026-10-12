@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -215,41 +216,36 @@ func (r *Reader) RestoreMods(ctx context.Context, id, dir string, fn func(done, 
 		moved = append(moved, move{from, to})
 		return nil
 	}
-	// The server's own mods go aside, and links in the way of the backup's.
-	for _, sub := range modDirs {
-		list, err := os.ReadDir(filepath.Join(dir, sub))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			undo()
-			return 0, errors.Join(err, undoErr)
-		}
-		for _, e := range list {
-			if !e.IsDir() && !coming[fold(e.Name())] {
+	// moveAll moves what take picks from each mod folder under from to the
+	// same folder under to; a folder that isn't there has nothing to move.
+	moveAll := func(from, to string, take func(fs.DirEntry) bool) error {
+		for _, sub := range modDirs {
+			list, err := os.ReadDir(filepath.Join(from, sub))
+			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			if err := rename(filepath.Join(dir, sub, e.Name()), filepath.Join(tmp, "old", sub, e.Name())); err != nil {
-				undo()
-				return 0, errors.Join(err, undoErr)
+			if err != nil {
+				return err
+			}
+			for _, e := range list {
+				if !take(e) {
+					continue
+				}
+				if err := rename(filepath.Join(from, sub, e.Name()), filepath.Join(to, sub, e.Name())); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
 	}
-	for _, sub := range modDirs {
-		list, err := os.ReadDir(filepath.Join(tmp, "new", sub))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			undo()
-			return 0, errors.Join(err, undoErr)
-		}
-		for _, e := range list {
-			if err := rename(filepath.Join(tmp, "new", sub, e.Name()), filepath.Join(dir, sub, e.Name())); err != nil {
-				undo()
-				return 0, errors.Join(err, undoErr)
-			}
-		}
+	// The server's own mods go aside, and links in the way of the backup's.
+	err = moveAll(dir, filepath.Join(tmp, "old"), func(e fs.DirEntry) bool { return e.IsDir() || coming[fold(e.Name())] })
+	if err == nil {
+		err = moveAll(filepath.Join(tmp, "new"), dir, func(fs.DirEntry) bool { return true })
+	}
+	if err != nil {
+		undo()
+		return 0, errors.Join(err, undoErr)
 	}
 	return len(coming), nil
 }
@@ -293,7 +289,7 @@ func (r *Reader) RestoreShared(ctx context.Context, shared string, fn func(done,
 		return nil, err
 	}
 	var done []string
-	for _, folder := range sortedKeys(folders) {
+	for _, folder := range slices.Sorted(maps.Keys(folders)) {
 		if err := os.Rename(filepath.Join(tmp, folder), filepath.Join(lib, folder)); err != nil {
 			return done, err
 		}
@@ -504,7 +500,7 @@ func (r *Reader) unpack(ctx context.Context, files map[string]*zip.File, dir str
 	for _, f := range files {
 		p.total += int64(f.UncompressedSize64)
 	}
-	for _, rel := range sortedKeys(files) {
+	for _, rel := range slices.Sorted(maps.Keys(files)) {
 		if err := r.unzip(ctx, files[rel], filepath.Join(dir, filepath.FromSlash(rel)), p); err != nil {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
@@ -657,13 +653,4 @@ func fold(name string) string {
 		return strings.ToLower(name)
 	}
 	return name
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
 }

@@ -51,22 +51,20 @@ var AllPerms = []PermInfo{
 	{HostView, "See the machine's performance and every server's share of it", true},
 }
 
-func isGlobal(key string) bool {
+// globalPerm maps every permission's key to whether it is global.
+var globalPerm = func() map[string]bool {
+	m := make(map[string]bool, len(AllPerms))
 	for _, p := range AllPerms {
-		if p.Key == key {
-			return p.Global
-		}
+		m[p.Key] = p.Global
 	}
-	return false
-}
+	return m
+}()
+
+func isGlobal(key string) bool { return globalPerm[key] }
 
 func validPerm(key string) bool {
-	for _, p := range AllPerms {
-		if p.Key == key {
-			return true
-		}
-	}
-	return false
+	_, ok := globalPerm[key]
+	return ok
 }
 
 // Perms is what one user may do.

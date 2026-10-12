@@ -124,16 +124,7 @@ func Invite(token string) string {
 
 // Load reads the settings; none saved yet is no bot, with the defaults.
 func Load(ctx context.Context, s *store.Store) (Settings, error) {
-	out := Defaults
-	v, err := s.Get(ctx, settingsKey)
-	if errors.Is(err, store.ErrNotFound) {
-		return out, nil
-	}
-	if err != nil {
-		return out, err
-	}
-	err = json.Unmarshal([]byte(v), &out)
-	return out, err
+	return store.LoadJSON(ctx, s, settingsKey, Defaults)
 }
 
 // Save checks and stores the settings.
@@ -149,12 +140,11 @@ func Save(ctx context.Context, s *store.Store, set Settings) error {
 	if _, err := CleanTitle(set.Title); err != nil {
 		return err
 	}
-	b, err := json.Marshal(set)
-	if err != nil {
-		return err
-	}
-	return s.Set(ctx, settingsKey, string(b))
+	return store.SaveJSON(ctx, s, settingsKey, set)
 }
+
+// key tells one bot and channel from another.
+func (s Settings) key() string { return s.Token + " " + s.Channel }
 
 // posted is the status message, once there is one.
 type posted struct {
@@ -163,6 +153,9 @@ type posted struct {
 	Guild   string `json:"guild"` // the Discord server the channel is in
 	Name    string `json:"name"`  // the channel's name
 }
+
+// path is the message's address in the API.
+func (p posted) path() string { return "/channels/" + p.Channel + "/messages/" + p.Message }
 
 // Status is how the message is doing, for the Manager page.
 type Status struct {
@@ -265,20 +258,23 @@ func (p *Poster) update(ctx context.Context, now time.Time, force bool) {
 		p.setStatus(Status{})
 		return
 	}
-	key := set.Token + " " + set.Channel
+	key := set.key()
 	if force {
 		p.stopFor, p.later, p.refused = "", time.Time{}, 0
 	}
 	if p.stopFor == key || now.Before(p.until) || now.Before(p.later) {
 		return
 	}
+	if !force && now.Sub(p.tried) < minGap {
+		return
+	}
 	e := p.render(set, false, now)
 	body, _ := json.Marshal(e)
-	if !force && (now.Sub(p.tried) < minGap || string(body) == p.sent && now.Sub(p.tried) < heartbeat) {
+	if !force && string(body) == p.sent && now.Sub(p.tried) < heartbeat {
 		return
 	}
 	p.tried = now
-	e.Description += fmt.Sprintf("\n\nUpdated <t:%d:R>", now.Unix())
+	e.Description += updated(now)
 	pst, err := p.send(ctx, set, e)
 	if err != nil && !errors.Is(err, errNoEmbed) {
 		if ctx.Err() != nil {
@@ -317,17 +313,21 @@ func (p *Poster) update(ctx context.Context, now time.Time, force bool) {
 	p.setStatus(st)
 }
 
+// updated ends the message's text with when it was sent, which Discord shows
+// as a time ago.
+func updated(now time.Time) string { return fmt.Sprintf("\n\nUpdated <t:%d:R>", now.Unix()) }
+
 // send edits the message in set's channel, or posts it there when there is
 // none yet or someone deleted it.
 func (p *Poster) send(ctx context.Context, set Settings, e embed) (posted, error) {
 	pst := p.loadPosted(ctx)
-	msg := message{Embeds: []embed{e}, AllowedMentions: noMentions}
+	msg := messageOf(e)
 	var got struct {
 		ID     string            `json:"id"`
 		Embeds []json.RawMessage `json:"embeds"`
 	}
 	if pst.Channel == set.Channel && pst.Message != "" {
-		err := p.call(ctx, set.Token, http.MethodPatch, "/channels/"+pst.Channel+"/messages/"+pst.Message, msg, &got)
+		err := p.call(ctx, set.Token, http.MethodPatch, pst.path(), msg, &got)
 		if err == nil {
 			return pst, withoutEmbed(len(got.Embeds))
 		}
@@ -348,8 +348,7 @@ func (p *Poster) send(ctx context.Context, set Settings, e embed) (posted, error
 		return pst, err
 	}
 	pst = posted{Channel: set.Channel, Message: got.ID, Guild: ch.Guild, Name: ch.Name}
-	b, _ := json.Marshal(pst)
-	if err := p.Store.Set(ctx, postedKey, string(b)); err != nil {
+	if err := store.SaveJSON(ctx, p.Store, postedKey, pst); err != nil {
 		return pst, err
 	}
 	return pst, withoutEmbed(len(got.Embeds))
@@ -365,10 +364,7 @@ func withoutEmbed(n int) error {
 var errNoEmbed = errors.New("the message went out without its embed")
 
 func (p *Poster) loadPosted(ctx context.Context) posted {
-	var pst posted
-	if v, err := p.Store.Get(ctx, postedKey); err == nil {
-		_ = json.Unmarshal([]byte(v), &pst)
-	}
+	pst, _ := store.LoadJSON(ctx, p.Store, postedKey, posted{})
 	return pst
 }
 
@@ -384,7 +380,7 @@ func (p *Poster) Retire(ctx context.Context, old Settings) {
 		return
 	}
 	if old.Token != "" && pst.Channel == old.Channel {
-		err := p.call(ctx, old.Token, http.MethodDelete, "/channels/"+pst.Channel+"/messages/"+pst.Message, nil, nil)
+		err := p.call(ctx, old.Token, http.MethodDelete, pst.path(), nil, nil)
 		if e, ok := errors.AsType[*apiError](err); err != nil && (!ok || e.Code != unknownMessage) {
 			p.Log.Warn("delete the old discord status message", "err", err)
 		}
@@ -406,13 +402,13 @@ func (p *Poster) Test(ctx context.Context, token, channel string) (string, error
 		text, _ := problem(err)
 		return "", errors.New(text)
 	}
-	e := embed{Title: "Test from ReSkateManager", Color: blue,
+	e := embed{Title: "Test from ReSkateManager", Color: Blue,
 		Description: "The servers' status will show here, in one message the manager keeps up to date.",
 		Footer:      &footer{Text: footerText}}
 	var got struct {
 		Embeds []json.RawMessage `json:"embeds"`
 	}
-	err := p.call(ctx, token, http.MethodPost, "/channels/"+channel+"/messages", message{Embeds: []embed{e}, AllowedMentions: noMentions}, &got)
+	err := p.call(ctx, token, http.MethodPost, "/channels/"+channel+"/messages", messageOf(e), &got)
 	if err == nil {
 		err = withoutEmbed(len(got.Embeds))
 	}
@@ -430,7 +426,7 @@ func (p *Poster) farewell() {
 	p.run.Lock()
 	defer p.run.Unlock()
 	set, err := Load(ctx, p.Store)
-	if err != nil || set.Token == "" || set.Channel == "" || p.stopFor == set.Token+" "+set.Channel {
+	if err != nil || set.Token == "" || set.Channel == "" || p.stopFor == set.key() {
 		return
 	}
 	pst := p.loadPosted(ctx)
@@ -439,8 +435,8 @@ func (p *Poster) farewell() {
 	}
 	now := time.Now()
 	e := p.render(set, true, now)
-	e.Description += fmt.Sprintf("\n\nUpdated <t:%d:R>", now.Unix())
-	err = p.call(ctx, set.Token, http.MethodPatch, "/channels/"+pst.Channel+"/messages/"+pst.Message, message{Embeds: []embed{e}, AllowedMentions: noMentions}, nil)
+	e.Description += updated(now)
+	err = p.call(ctx, set.Token, http.MethodPatch, pst.path(), messageOf(e), nil)
 	if err != nil {
 		p.Log.Warn("discord status message at shutdown", "err", err)
 	}
@@ -522,19 +518,9 @@ func (p *Poster) call(ctx context.Context, token, method, path string, in, out a
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	client := p.HTTP
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
-	// The token rides in a header a redirect would carry somewhere else.
-	cl := *client
-	cl.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	resp, err := cl.Do(req)
+	resp, err := Do(p.HTTP, req)
 	if err != nil {
-		if ue, ok := errors.AsType[*url.Error](err); ok {
-			err = ue.Err
-		}
-		return fmt.Errorf("discord: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -545,21 +531,56 @@ func (p *Poster) call(ctx context.Context, token, method, path string, in, out a
 		return json.Unmarshal(b, out)
 	}
 	var d struct {
-		Message    string  `json:"message"`
-		Code       int     `json:"code"`
-		RetryAfter float64 `json:"retry_after"`
+		Message string `json:"message"`
+		Code    int    `json:"code"`
 	}
 	_ = json.Unmarshal(b, &d)
 	e := &apiError{Status: resp.StatusCode, Code: d.Code, Message: d.Message}
 	if resp.StatusCode == http.StatusTooManyRequests {
-		// In seconds, in the header and the body.
-		wait := 5 * time.Second
-		if s, err := strconv.ParseFloat(resp.Header.Get("Retry-After"), 64); err == nil {
-			wait = time.Duration(s * float64(time.Second))
-		} else if d.RetryAfter > 0 {
-			wait = time.Duration(d.RetryAfter * float64(time.Second))
-		}
-		e.Retry = min(max(wait, time.Second), 10*time.Minute)
+		e.Retry = RetryAfter(resp.Header, b, 10*time.Minute)
 	}
 	return e
+}
+
+// Do sends req with c, or with a client with a 15 s timeout when c is nil. It
+// follows no redirect: Discord answers itself, and a redirect would carry the
+// token, in a webhook's address or a bot's header, somewhere else. A request
+// that fails says why without its address, so a webhook's token stays out of
+// the manager's log.
+func Do(c *http.Client, req *http.Request) (*http.Response, error) {
+	if c == nil {
+		c = &http.Client{Timeout: 15 * time.Second}
+	}
+	cl := *c
+	cl.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := cl.Do(req)
+	if err != nil {
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err
+		}
+		return nil, fmt.Errorf("discord: %w", err)
+	}
+	return resp, nil
+}
+
+// RetryAfter is how long a rate-limited answer asks to wait, from a second up
+// to most: Discord says it in seconds, in the header and the body. 5 s when
+// neither does.
+func RetryAfter(h http.Header, body []byte, most time.Duration) time.Duration {
+	var limit struct {
+		RetryAfter float64 `json:"retry_after"`
+	}
+	wait := 5 * time.Second
+	if s, err := strconv.ParseFloat(h.Get("Retry-After"), 64); err == nil {
+		wait = time.Duration(s * float64(time.Second))
+	} else if json.Unmarshal(body, &limit) == nil && limit.RetryAfter > 0 {
+		wait = time.Duration(limit.RetryAfter * float64(time.Second))
+	}
+	return min(max(wait, time.Second), most)
+}
+
+// StatusError is Discord turning a request down with status, and the message
+// its answer gave, if any.
+func StatusError(status int, message string) error {
+	return &apiError{Status: status, Message: message}
 }

@@ -22,6 +22,10 @@ type mentions struct {
 // noMentions turns off every ping, should a name hold one.
 var noMentions = mentions{Parse: []string{}}
 
+func messageOf(e embed) message {
+	return message{Embeds: []embed{e}, AllowedMentions: noMentions}
+}
+
 type embed struct {
 	Title       string  `json:"title"`
 	Description string  `json:"description"`
@@ -39,12 +43,13 @@ type footer struct {
 	Text string `json:"text"`
 }
 
+// The colours of an embed's edge, shared with the alerts.
 const (
-	green  = 0x7ee26b
-	yellow = 0xffd23f
-	red    = 0xff4f5c
-	blue   = 0x4cc3ff
-	grey   = 0x8a8f98
+	Green  = 0x7ee26b
+	Yellow = 0xffd23f
+	Red    = 0xff4f5c
+	Blue   = 0x4cc3ff
+	Grey   = 0x8a8f98
 )
 
 // Discord's limits on an embed, kept under with room to spare.
@@ -96,17 +101,17 @@ func render(list []server, set Settings, down bool, now time.Time) embed {
 	}
 	switch {
 	case down:
-		e.Color = grey
+		e.Color = Grey
 		e.Description = fmt.Sprintf("The manager stopped <t:%d:R>, so the servers are offline until it's back.", now.Unix())
 	case len(list) == 0:
-		e.Color = grey
+		e.Color = Grey
 		e.Description = "No servers yet."
 	default:
-		e.Color = red
+		e.Color = Red
 		if online == len(list) {
-			e.Color = green
+			e.Color = Green
 		} else if online > 0 {
-			e.Color = yellow
+			e.Color = Yellow
 		}
 		e.Description = fmt.Sprintf("**%d of %s online**", online, plural(len(list), "server"))
 		if online > 0 {
@@ -148,7 +153,7 @@ var stateLabel = map[instance.State]string{
 // serverField is one server's state, and while it runs its players, map,
 // join code, release, uptime and next restart.
 func serverField(s server, set Settings) field {
-	f := field{Name: truncate(stateEmoji[s.State]+" "+escape(s.Def.Name), 256)}
+	f := field{Name: Truncate(stateEmoji[s.State]+" "+escape(s.Def.Name), 256)}
 	label := stateLabel[s.State]
 	if label == "" {
 		label = string(s.State)
@@ -164,13 +169,13 @@ func serverField(s server, set Settings) field {
 		line += plural(s.Players, "player")
 	}
 	if s.Info.Map != "" {
-		line += " · " + escape(truncate(s.Info.Map, 100))
+		line += " · " + escape(Truncate(s.Info.Map, 100))
 	}
 	lines := []string{line}
 
 	var join []string
 	if code := strings.ReplaceAll(s.Info.JoinCode, "`", ""); set.JoinCodes && code != "" {
-		join = append(join, "Join code `"+truncate(code, 64)+"`")
+		join = append(join, "Join code `"+Truncate(code, 64)+"`")
 	}
 	if s.Info.Password {
 		join = append(join, "🔒 Password required")
@@ -193,7 +198,7 @@ func serverField(s server, set Settings) field {
 		run[0] = strings.ToUpper(run[0][:1]) + run[0][1:]
 		lines = append(lines, strings.Join(run, " · "))
 	}
-	f.Value = truncate(strings.Join(lines, "\n"), 1024)
+	f.Value = Truncate(strings.Join(lines, "\n"), 1024)
 	return f
 }
 
@@ -210,7 +215,9 @@ func plural(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-func truncate(s string, n int) string {
+// Truncate cuts s to n characters, the last of them an ellipsis, to fit one
+// of Discord's limits.
+func Truncate(s string, n int) string {
 	if r := []rune(s); len(r) > n {
 		return string(r[:n-1]) + "…"
 	}
