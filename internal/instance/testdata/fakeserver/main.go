@@ -167,6 +167,13 @@ func main() {
 			log("[parks] " + arg + " removed (expired)")
 		case "say":
 			log("[chat] Server: " + arg)
+		case "msg": // "msg <id> <text>", to one player
+			id, _, _ := strings.Cut(arg, " ")
+			if name, on := players[id]; on {
+				log("Sent to " + name + ".")
+			} else {
+				log("No single connected player matches \"" + id + "\".")
+			}
 		case "announce": // 2.0.2; test hook: a file "before-2.0.2" beside it makes it older
 			if _, err := os.Stat(filepath.Join(filepath.Dir(exe), "before-2.0.2")); err == nil {
 				log("Unknown command \"" + verb + "\". Type help.")

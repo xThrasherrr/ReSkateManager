@@ -257,6 +257,9 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 			if err := db.SeenPlayer(context.Background(), id, p.ID, p.Name); err != nil {
 				log.Warn("player history", "err", err)
 			}
+			if err := restarts.Tell(ctx, in, p); err != nil && ctx.Err() == nil {
+				log.Warn("restart notice", "instance", id, "err", err)
+			}
 		}
 		in.OnNetwork = func(run time.Time, n logparse.Network) {
 			if err := db.AddNetSample(context.Background(), id, time.Now().Unix(), run.Unix(), n); err != nil {

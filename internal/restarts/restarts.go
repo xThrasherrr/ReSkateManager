@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,4 +139,75 @@ func (r *run) step(d instance.Def, now time.Time, players int) (say string, rest
 		break
 	}
 	return "", false, due
+}
+
+// Tell lets a player who just joined know when the server restarts, in a
+// message to them alone, if it restarts on a schedule. The server sends its
+// welcome before it logs the join, so this lands after it.
+func Tell(ctx context.Context, in *instance.Instance, p instance.Player) error {
+	v := in.View()
+	if v.State != instance.Running || v.NextRestart == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err := in.Command(ctx, "msg "+p.ID+" "+Notice(v.Def, time.UnixMilli(v.NextRestart), time.Now()), "schedule")
+	return err
+}
+
+// Notice is what Tell says: how often the server restarts, and how long
+// until the next restart, due at next.
+func Notice(d instance.Def, next, now time.Time) string {
+	every := func(n int, unit string) string {
+		if n == 1 {
+			return "every " + unit
+		}
+		return "every " + plural(n, unit)
+	}
+	var how string
+	switch n, h := len(d.RestartTimes), d.RestartHours; {
+	case h > 0 && n > 0:
+		how = "on a schedule"
+	case h > 0 && h%24 == 0:
+		how = every(h/24, "day")
+	case h > 0:
+		how = every(h, "hour")
+	case n == 1:
+		how = "once a day"
+	case n == 2:
+		how = "twice a day"
+	default:
+		how = fmt.Sprintf("%d times a day", n)
+	}
+	return fmt.Sprintf("This server restarts %s. Next restart in %s.", how, span(next.Sub(now)))
+}
+
+// span is d rounded up to the minute, as "2 hours 13 minutes"; past a day,
+// up to the hour, as "6 days 6 hours".
+func span(d time.Duration) string {
+	type part struct {
+		n    int
+		unit string
+	}
+	mins := max(int((d+time.Minute-1)/time.Minute), 1)
+	units := []part{{mins / 60, "hour"}, {mins % 60, "minute"}}
+	if mins > 24*60 {
+		hours := (mins + 59) / 60
+		units = []part{{hours / 24, "day"}, {hours % 24, "hour"}}
+	}
+	var parts []string
+	for _, u := range units {
+		if u.n > 0 {
+			parts = append(parts, plural(u.n, u.unit))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// plural is n of unit, as "1 hour" or "6 hours".
+func plural(n int, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return fmt.Sprintf("%d %ss", n, unit)
 }

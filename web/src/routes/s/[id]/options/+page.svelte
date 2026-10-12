@@ -118,8 +118,8 @@
 			<div>
 				<h2>Scheduled restarts</h2>
 				<p class="mt-1 text-sm text-muted">
-					Restart the server on a timer, such as each night. Players get a warning in chat 10, 5 and 1 minute before; with nobody on, it restarts
-					straight away.
+					Restart the server on a timer, such as each night. Players who join are told, after the welcome message, how often it restarts and when
+					the next one is, and get a warning in chat 10, 5 and 1 minute before; with nobody on, it restarts straight away.
 				</p>
 			</div>
 			<div class="seg" role="group" aria-label="Scheduled restarts">
