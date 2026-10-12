@@ -37,8 +37,11 @@ func readRoles(configPath string) (map[string]any, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var root map[string]any
-	if err := dec.Decode(&root); err != nil || root == nil {
-		return nil, fmt.Errorf("%s is not a JSON object: %v", RolesFile, err)
+	if err := dec.Decode(&root); err != nil {
+		return nil, fmt.Errorf("%s is not a JSON object: %w", RolesFile, err)
+	}
+	if root == nil {
+		return nil, fmt.Errorf("%s holds null, not roles", RolesFile)
 	}
 	return root, nil
 }
