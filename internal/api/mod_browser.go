@@ -54,13 +54,8 @@ func unixMilli(t thunderstore.Time) int64 {
 
 // browseMods lists the community's packages on Thunderstore, newest first.
 func (a *API) browseMods(w http.ResponseWriter, r *http.Request) {
-	if a.Thunderstore == nil {
-		writeErr(w, 404, "Thunderstore is turned off")
-		return
-	}
-	pkgs, err := a.Thunderstore.Packages(r.Context(), r.URL.Query().Has("refresh"))
-	if err != nil {
-		a.fail(w, r, http.StatusBadGateway, fmt.Errorf("cannot reach Thunderstore: %w", err))
+	pkgs, ok := a.packages(w, r, r.URL.Query().Has("refresh"))
+	if !ok {
 		return
 	}
 	out := make([]browseMod, 0, len(pkgs))

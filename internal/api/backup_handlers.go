@@ -27,10 +27,6 @@ var errNoBackups = errors.New("backups are not set up in this manager")
 // ---- the backups (owners: they hold the database, with password hashes) ----
 
 func (a *API) backups(w http.ResponseWriter, r *http.Request) {
-	if a.Backups == nil {
-		writeErr(w, 404, errNoBackups.Error())
-		return
-	}
 	list, err := a.Backups.List()
 	if err != nil {
 		a.internalErr(w, r, err)
@@ -50,10 +46,6 @@ func (a *API) createBackup(w http.ResponseWriter, r *http.Request) {
 		Mods bool `json:"mods"`
 	}
 	if !readJSON(w, r, &req) {
-		return
-	}
-	if a.Backups == nil {
-		writeErr(w, 404, errNoBackups.Error())
 		return
 	}
 	audit := a.auditLater(r, "", "backup.create")
@@ -86,15 +78,9 @@ func (a *API) saveBackupSettings(w http.ResponseWriter, r *http.Request) {
 		a.internalErr(w, r, err)
 		return
 	}
-	if req.Every != nil {
-		set.Every = *req.Every
-	}
-	if req.Keep != nil {
-		set.Keep = *req.Keep
-	}
-	if req.Mods != nil {
-		set.Mods = *req.Mods
-	}
+	setIf(&set.Every, req.Every)
+	setIf(&set.Keep, req.Keep)
+	setIf(&set.Mods, req.Mods)
 	if err := backup.SaveSettings(r.Context(), a.Store, set); err != nil {
 		a.fail(w, r, 400, err)
 		return
@@ -104,10 +90,6 @@ func (a *API) saveBackupSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) downloadBackup(w http.ResponseWriter, r *http.Request) {
-	if a.Backups == nil {
-		writeErr(w, 404, errNoBackups.Error())
-		return
-	}
 	name, _ := pathParam(r, "name") // a name the backups never use is refused below
 	f, err := a.Backups.Open(name)
 	if err != nil {
@@ -129,10 +111,6 @@ func (a *API) downloadBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteBackup(w http.ResponseWriter, r *http.Request) {
-	if a.Backups == nil {
-		writeErr(w, 404, errNoBackups.Error())
-		return
-	}
 	name, _ := pathParam(r, "name") // a name the backups never use is refused below
 	if err := a.Backups.Delete(name); errors.Is(err, backup.ErrNoBackup) {
 		a.fail(w, r, 404, err)
@@ -161,10 +139,6 @@ type serverBackup struct {
 }
 
 func (a *API) serverBackups(w http.ResponseWriter, r *http.Request) {
-	if a.Backups == nil {
-		writeErr(w, 404, errNoBackups.Error())
-		return
-	}
 	list, err := a.Backups.List()
 	if err != nil {
 		a.internalErr(w, r, err)
@@ -193,10 +167,6 @@ func (a *API) restoreServer(w http.ResponseWriter, r *http.Request) {
 		Mods   bool   `json:"mods"`
 	}
 	if !readJSON(w, r, &req) {
-		return
-	}
-	if a.Backups == nil {
-		writeErr(w, 404, errNoBackups.Error())
 		return
 	}
 	p, err := a.Backups.Path(req.Backup)
@@ -430,8 +400,8 @@ func (a *API) importServer(ctx context.Context, rd *backup.Reader, perms auth.Pe
 	}
 	dropped := 0
 	for _, an := range src.Announcements {
-		msg := cleanText(an.Message)
-		if msg == "" || len(msg) > 200 || !announce.ValidInterval(an.Interval) {
+		msg, ok := chatText(an.Message)
+		if !ok || !announce.ValidInterval(an.Interval) {
 			continue
 		}
 		if room <= 0 {
@@ -462,20 +432,23 @@ func (a *API) importServer(ctx context.Context, rd *backup.Reader, perms auth.Pe
 func (a *API) reserveID(name string) (string, error) {
 	a.instMu.Lock()
 	defer a.instMu.Unlock()
-	id := slugify(name)
-	for i := 2; ; i++ {
+	tried := 0
+	id, err := freeID(name, func(id string) (bool, error) {
 		_, taken := a.Reg.Get(id)
 		_, err := os.Lstat(filepath.Join(a.ServersDir, id))
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return "", err
+			return false, err
 		}
 		if !taken && !a.reserved[id] && err != nil {
-			break
+			return true, nil
 		}
-		if i > 1000 {
-			return "", errors.New("no free folder name for it in the servers folder")
+		if tried++; tried >= 1000 {
+			return false, errors.New("no free folder name for it in the servers folder")
 		}
-		id = fmt.Sprintf("%s-%d", slugify(name), i)
+		return false, nil
+	})
+	if err != nil {
+		return "", err
 	}
 	if a.reserved == nil {
 		a.reserved = map[string]bool{}

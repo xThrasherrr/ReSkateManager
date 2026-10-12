@@ -67,11 +67,9 @@ func (a *API) meta(w http.ResponseWriter, r *http.Request) {
 		fields = slices.DeleteFunc(slices.Clone(fields), func(f serverconfig.Field) bool { return f.Owner })
 	}
 	m := map[string]any{
-		"version":     a.Version,
 		"permissions": auth.AllPerms,
 		"settings":    fields,
 		"groupInfo":   serverconfig.GroupInfo,
-		"updates":     map[string]any{"repo": a.conf().UpdateRepo},
 		// Scheduled restarts run on the manager's clock, which may not be the viewer's.
 		"timeZone": managerZone(time.Now()),
 	}

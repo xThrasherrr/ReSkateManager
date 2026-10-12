@@ -22,6 +22,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
+	"github.com/xThrasherrr/ReSkateManager/internal/backup"
+	"github.com/xThrasherrr/ReSkateManager/internal/discord"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
@@ -202,7 +204,10 @@ func TestRoutesNeedPermission(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
 	reg := instance.NewRegistry(log)
 	reg.Add(instance.Def{ID: "a", Name: "a", Dir: t.TempDir()})
-	a := &API{Store: st, Auth: svc, Reg: reg, Log: log, Static: fstest.MapFS{}, SharedDir: t.TempDir()}
+	// The shared mods, backups and Discord on: a route of one turned off
+	// turns everyone away, which would hide a missing permission check.
+	a := &API{Store: st, Auth: svc, Reg: reg, Log: log, Static: fstest.MapFS{}, SharedDir: t.TempDir(),
+		Backups: &backup.Service{}, Discord: &discord.Poster{}}
 
 	tokens := map[string]string{} // missing permission -> session
 	for i, p := range auth.AllPerms {

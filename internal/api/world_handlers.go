@@ -16,9 +16,8 @@ func (a *API) world(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, 400, err)
 		return
 	}
-	f, err := serverconfig.Read(in.Def().ConfigPath())
-	if err != nil {
-		writeErr(w, 404, "the server has no config yet; start it once")
+	f, ok := readConfig(w, in)
+	if !ok {
 		return
 	}
 	layers := f.Layers()

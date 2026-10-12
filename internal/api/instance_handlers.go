@@ -1,7 +1,6 @@
 package api
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -21,13 +20,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/xThrasherrr/ReSkateManager/internal/adminsync"
 	"github.com/xThrasherrr/ReSkateManager/internal/announce"
-	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/perf"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
-	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
 type instanceView struct {
@@ -65,6 +61,20 @@ func slugify(name string) string {
 		s = "server"
 	}
 	return s
+}
+
+// freeID is the ID for a new server called name: its slug, or failing that
+// the slug with -2, -3 and so on, whichever free says is free first. The
+// caller holds instMu.
+func freeID(name string, free func(id string) (bool, error)) (string, error) {
+	slug := slugify(name)
+	id := slug
+	for i := 2; ; i++ {
+		if ok, err := free(id); ok || err != nil {
+			return id, err
+		}
+		id = fmt.Sprintf("%s-%d", slug, i)
+	}
 }
 
 // usedPorts collects every port the instances' configs claim.
@@ -139,13 +149,10 @@ func (a *API) createInstance(w http.ResponseWriter, r *http.Request) {
 	req.Name = name
 	a.instMu.Lock()
 	defer a.instMu.Unlock()
-	id := slugify(req.Name)
-	for i := 2; ; i++ {
-		if _, taken := a.Reg.Get(id); !taken && !a.reserved[id] {
-			break
-		}
-		id = fmt.Sprintf("%s-%d", slugify(req.Name), i)
-	}
+	id, _ := freeID(req.Name, func(id string) (bool, error) {
+		_, taken := a.Reg.Get(id)
+		return !taken && !a.reserved[id], nil
+	})
 	dir := strings.TrimSpace(req.Dir)
 	if dir == "" {
 		dir = filepath.Join(a.ServersDir, id)
@@ -262,15 +269,9 @@ func (a *API) updateInstance(w http.ResponseWriter, r *http.Request) {
 		}
 		d.Name = n
 	}
-	if req.AutoStart != nil {
-		d.AutoStart = *req.AutoStart
-	}
-	if req.AutoRestart != nil {
-		d.AutoRestart = *req.AutoRestart
-	}
-	if req.AutoUpdate != nil {
-		d.AutoUpdate = *req.AutoUpdate
-	}
+	setIf(&d.AutoStart, req.AutoStart)
+	setIf(&d.AutoRestart, req.AutoRestart)
+	setIf(&d.AutoUpdate, req.AutoUpdate)
 	if err := a.Store.UpdateInstance(r.Context(), d); err != nil {
 		a.fail(w, r, errStatus(err), err)
 		return
@@ -438,117 +439,6 @@ func (a *API) lifecycle(action string) http.HandlerFunc {
 	}
 }
 
-func (a *API) command(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	var req struct {
-		Line string `json:"line"`
-	}
-	if !readJSON(w, r, &req) {
-		return
-	}
-	line := strings.TrimSpace(req.Line)
-	if line == "" {
-		writeErr(w, 400, "empty command")
-		return
-	}
-	if len(line) > maxCommand {
-		writeErr(w, 400, fmt.Sprintf("a command can be at most %d bytes", maxCommand))
-		return
-	}
-	c := from(r)
-	if p := consolePerm(line); p != "" && !c.perms.Can(p, in.ID()) {
-		writeErr(w, 403, "that command needs a permission you don't have: "+permLabel(p))
-		return
-	}
-	if verb, _, _ := strings.Cut(line, " "); slices.Contains(ownerCommands, strings.ToLower(verb)) && !c.perms.Owner {
-		writeErr(w, 403, "only owners can run "+strings.ToLower(verb)+": it runs a server command of its own")
-		return
-	}
-	reply, err := in.Command(r.Context(), line, c.user.Username)
-	a.auditOutcome(r, in.ID(), "console.exec", auditLine(line), err)
-	a.answerReply(w, r, reply, err)
-}
-
-// maxCommand is the longest console line the panel sends. The server's own
-// longest, a list of score-allow fingerprints, is well under it.
-const maxCommand = 1024
-
-// consoleOnly are the console commands console.exec alone may run: they only
-// read, or act on players in a way no finer permission covers.
-var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "teleport", "vote-cancel", "clear-objects"}
-
-// consolePerms are the console commands that do what a finer permission
-// grants, and need it too. The verbs are the server's own (Host::command in
-// Server/server_host.cpp), aliases included.
-var consolePerms = func() map[string]string {
-	// Roles (2.0.6) are who may run which commands in the game, and admins
-	// are one of them; "roles reload" takes in an edit of the file.
-	m := map[string]string{"admin": auth.IngameAdmins, "admins": auth.IngameAdmins, "role": auth.IngameAdmins, "roles": auth.IngameAdmins,
-		"ban": auth.PlayersBan, "unban": auth.PlayersBan,
-		"kick": auth.PlayersKick, "say": auth.PlayersChat, "announce": auth.PlayersChat, "announce-to": auth.PlayersChat,
-		"msg": auth.PlayersChat, "msg-party": auth.PlayersChat, "msg-admins": auth.PlayersChat, "poll": auth.PlayersChat,
-		// The console starts votes too (2.0.3): they change what their
-		// settings would, and a kick vote (consolePerm) kicks.
-		"vote": auth.SettingsEdit}
-	for _, verb := range serverconfig.SettingVerbs {
-		m[verb] = auth.SettingsEdit
-	}
-	return m
-}()
-
-// ownerCommands are the console commands only owners may run: poll-run
-// (2.0.3) runs any command for the winning answer, as custom votes do.
-var ownerCommands = []string{"poll-run"}
-
-// consolePerm is the permission a console line needs besides console.exec,
-// "" for none. A command the manager doesn't know needs settings.edit, so one
-// a newer server adds can't change settings for someone who may not.
-func consolePerm(line string) string {
-	fields := strings.Fields(strings.ToLower(line))
-	verb := fields[0]
-	if slices.Contains(consoleOnly, verb) {
-		return ""
-	}
-	if verb == "vote" && len(fields) > 1 && fields[1] == "kick" {
-		return auth.PlayersKick
-	}
-	if p, ok := consolePerms[verb]; ok {
-		return p
-	}
-	return auth.SettingsEdit
-}
-
-// ConsoleVerbs are the console commands the panel has decided on: those
-// console.exec alone may run, those that need a finer permission too, and
-// the owners'. One a newer server adds needs settings.edit until it's here,
-// so cmd/reskate-watch reports each new command that isn't.
-func ConsoleVerbs() []string {
-	out := slices.Concat(consoleOnly, ownerCommands)
-	for verb := range consolePerms {
-		out = append(out, verb)
-	}
-	slices.Sort(out)
-	return out
-}
-
-// permLabel names a permission as the Users page does.
-func permLabel(key string) string {
-	for _, p := range auth.AllPerms {
-		if p.Key == key {
-			return p.Label
-		}
-	}
-	return key
-}
-
-// auditLine keeps a password out of the audit log.
-func auditLine(line string) string {
-	if verb, arg, ok := strings.Cut(line, " "); ok && strings.EqualFold(verb, "password") && !strings.EqualFold(strings.TrimSpace(arg), "off") {
-		return "password <hidden>"
-	}
-	return line
-}
-
 // ---- players ----
 
 func (a *API) players(w http.ResponseWriter, r *http.Request) {
@@ -561,19 +451,24 @@ func (a *API) history(w http.ResponseWriter, r *http.Request) {
 		a.internalErr(w, r, err)
 		return
 	}
-	if rows == nil {
-		rows = []store.PlayerRecord{}
-	}
 	writeJSON(w, 200, rows)
 }
 
 func steamParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := chi.URLParam(r, "steamId")
-	if !serverconfig.SteamIDRe.MatchString(id) {
-		writeErr(w, 400, "not a SteamID64")
+	if !validSteamID(w, id) {
 		return "", false
 	}
 	return id, true
+}
+
+// validSteamID reports whether id is a SteamID64, or answers 400.
+func validSteamID(w http.ResponseWriter, id string) bool {
+	if !serverconfig.SteamIDRe.MatchString(id) {
+		writeErr(w, 400, "not a SteamID64")
+		return false
+	}
+	return true
 }
 
 func running(in *instance.Instance) bool {
@@ -593,12 +488,22 @@ func (a *API) kick(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) bans(w http.ResponseWriter, r *http.Request) {
-	f, err := serverconfig.Read(inst(r).Def().ConfigPath())
-	if err != nil {
-		writeErr(w, 404, "the server has no config yet; start it once")
+	f, ok := readConfig(w, inst(r))
+	if !ok {
 		return
 	}
 	writeJSON(w, 200, f.Bans())
+}
+
+// readConfig reads the server's ReSkateServer.json, or answers 404: the
+// server writes it the first time it starts.
+func readConfig(w http.ResponseWriter, in *instance.Instance) (*serverconfig.File, bool) {
+	f, err := serverconfig.Read(in.Def().ConfigPath())
+	if err != nil {
+		writeErr(w, 404, "the server has no config yet; start it once")
+		return nil, false
+	}
+	return f, true
 }
 
 // cleanText makes text someone typed fit on a console line, as the server's
@@ -615,6 +520,16 @@ func cleanText(s string) string {
 		return r
 	}, strings.ToValidUTF8(s, ""))
 	return strings.TrimSpace(s)
+}
+
+// maxMessage is the longest chat message or announcement the panel sends, in
+// bytes.
+const maxMessage = 200
+
+// chatText is s as cleanText makes it, and whether it's 1 to maxMessage bytes.
+func chatText(s string) (string, bool) {
+	msg := cleanText(s)
+	return msg, msg != "" && len(msg) <= maxMessage
 }
 
 // cut shortens s to at most n bytes, on a character boundary.
@@ -637,8 +552,7 @@ func (a *API) ban(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if !serverconfig.SteamIDRe.MatchString(req.ID) {
-		writeErr(w, 400, "not a SteamID64")
+	if !validSteamID(w, req.ID) {
 		return
 	}
 	name := strings.TrimSpace(cut(cleanText(req.Name), 64))
@@ -743,8 +657,8 @@ func (a *API) say(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	msg := cleanText(req.Message)
-	if msg == "" || len(msg) > 200 {
+	msg, ok := chatText(req.Message)
+	if !ok {
 		writeErr(w, 400, "messages are 1-200 bytes")
 		return
 	}
@@ -757,9 +671,8 @@ func (a *API) say(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) settings(w http.ResponseWriter, r *http.Request) {
 	in := inst(r)
-	f, err := serverconfig.Read(in.Def().ConfigPath())
-	if err != nil {
-		writeErr(w, 404, "the server has no config yet; start it once")
+	f, ok := readConfig(w, in)
+	if !ok {
 		return
 	}
 	// Settings the server that wrote the file no longer has.
@@ -805,9 +718,8 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	path := in.Def().ConfigPath()
-	f, err := serverconfig.Read(path)
-	if err != nil {
-		writeErr(w, 404, "the server has no config yet; start it once")
+	f, ok := readConfig(w, in)
+	if !ok {
 		return
 	}
 	// The map pool, and the maps park mods are for, are checked against the
@@ -815,6 +727,7 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 	var known []string
 	_, pool := req.Values["map_pool"]
 	if _, parks := req.Values["park_mods"]; pool || parks {
+		var err error
 		if running(in) {
 			if known, err = in.Maps(r.Context()); err != nil {
 				a.fail(w, r, 400, fmt.Errorf("could not list the server's maps: %w", err))
@@ -830,13 +743,9 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, 400, err)
 		return
 	}
-	keys := make([]string, 0, len(plan.Changed))
-	for k := range plan.Changed {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
+	keys := slices.Sorted(maps.Keys(plan.Changed))
 	if len(keys) == 0 {
-		writeJSON(w, 200, map[string]any{"changed": keys, "results": []cmdResult{}})
+		writeJSON(w, 200, map[string]any{"changed": []string{}, "results": []cmdResult{}})
 		return
 	}
 	user := from(r).user.Username
@@ -851,11 +760,7 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(plan.Restart) > 0 && !req.Restart {
-		restartKeys := make([]string, 0, len(plan.Restart))
-		for k := range plan.Restart {
-			restartKeys = append(restartKeys, k)
-		}
-		writeJSON(w, 409, map[string]any{"error": "some settings need a restart", "restartKeys": restartKeys})
+		writeJSON(w, 409, map[string]any{"error": "some settings need a restart", "restartKeys": slices.Sorted(maps.Keys(plan.Restart))})
 		return
 	}
 	results := []cmdResult{}
@@ -883,15 +788,11 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, 500, fmt.Errorf("could not stop the server: %w", err))
 			return
 		}
-		ran, err := in.IfStopped(func() error {
-			f, err := serverconfig.Read(path)
-			if err != nil {
-				return err
-			}
+		_, err = a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
 			f.ApplyOffline(plan.Restart)
-			return f.Write(path)
+			return "", nil
 		})
-		if !ran {
+		if errors.Is(err, errJustStarted) {
 			writeErr(w, http.StatusConflict, "the server was started by someone else before the settings were written")
 			return
 		}
@@ -920,276 +821,6 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"changed": keys, "results": results, "restarted": restarted, "notApplied": notApplied})
-}
-
-// ---- in-game admins ----
-
-// liveAdminChange makes a running server's player an admin or not. From
-// ReSkate 2.0.6 that's their role, and taking it away leaves them the default
-// one: a player who isn't an admin keeps whatever role they have.
-func (a *API) liveAdminChange(r *http.Request, in *instance.Instance, op, id string) (string, error) {
-	f, err := serverconfig.Read(in.Def().ConfigPath())
-	if err != nil {
-		return "", err
-	}
-	if op == "add" {
-		return in.Command(r.Context(), adminsync.AddCommand(f, id), from(r).user.Username)
-	}
-	if f.HasRoles() && !slices.Contains(f.Admins(), id) {
-		return id + " is not an admin.", nil
-	}
-	return in.Command(r.Context(), adminsync.RemoveCommand(f, id), from(r).user.Username)
-}
-
-type adminRow struct {
-	ID    string `json:"id"`
-	Name  string `json:"name,omitempty"`
-	Panel string `json:"panel,omitempty"` // the panel user this admin is kept for
-}
-
-// playerNames names the players a server has seen, by SteamID64: as they
-// were last on, or are now.
-func (a *API) playerNames(r *http.Request, in *instance.Instance) map[string]string {
-	names := map[string]string{}
-	if hist, err := a.Store.PlayerHistory(r.Context(), in.ID(), "", 5000); err == nil {
-		for _, h := range hist {
-			names[h.SteamID] = h.Name
-		}
-	}
-	for _, p := range in.Players() {
-		names[p.ID] = p.Name
-	}
-	return names
-}
-
-func (a *API) admins(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	f, err := serverconfig.Read(in.Def().ConfigPath())
-	if err != nil {
-		writeErr(w, 404, "the server has no config yet; start it once")
-		return
-	}
-	names := a.playerNames(r, in)
-	panel, err := a.Admins.PanelAdmins(r.Context(), in.ID())
-	if err != nil {
-		a.internalErr(w, r, err)
-		return
-	}
-	out := []adminRow{}
-	for _, id := range f.Admins() {
-		out = append(out, adminRow{ID: id, Name: names[id], Panel: panel[id]})
-	}
-	writeJSON(w, 200, out)
-}
-
-// roleRow is one of a server's roles and the players given it.
-type roleRow struct {
-	serverconfig.Role
-	Players []adminRow `json:"players"`
-}
-
-// roles lists a server's roles (ReSkate 2.0.6) and who was given each, from
-// its data/roles.json, which it rewrites whenever a role is given: so with
-// nobody on, and while it's stopped.
-func (a *API) roles(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	f, err := serverconfig.Read(in.Def().ConfigPath())
-	if err != nil {
-		writeErr(w, 404, "the server has no config yet; start it once")
-		return
-	}
-	list, given, def := f.Roles()
-	names := a.playerNames(r, in)
-	panel, err := a.Admins.PanelAdmins(r.Context(), in.ID())
-	if err != nil {
-		a.internalErr(w, r, err)
-		return
-	}
-	out := []roleRow{}
-	for _, role := range list {
-		row := roleRow{Role: role, Players: []adminRow{}}
-		for _, id := range slices.Sorted(maps.Keys(given)) {
-			if given[id] == role.Name {
-				row.Players = append(row.Players, adminRow{ID: id, Name: names[id], Panel: panel[id]})
-			}
-		}
-		out = append(out, row)
-	}
-	writeJSON(w, 200, map[string]any{"roles": out, "default": def, "hasRoles": f.HasRoles()})
-}
-
-// errPanelAdmin is a role change the in-game admin sync would undo.
-var errPanelAdmin = errors.New("kept in step with a panel user")
-
-// giveRole gives a player one of a server's roles, or with role "" takes
-// theirs away: with the role command while it runs, so they see it at once,
-// else in its data/roles.json. An admin kept in step with a panel user is the
-// sync's: it would make them an admin again.
-func (a *API) giveRole(r *http.Request, in *instance.Instance, id, role string) (string, error) {
-	panel, err := a.Admins.PanelAdmins(r.Context(), in.ID())
-	if err != nil {
-		return "", err
-	}
-	if user := panel[id]; user != "" {
-		return "", fmt.Errorf("%w: %s is an admin for panel user %s; change their roles or Steam link instead", errPanelAdmin, id, user)
-	}
-	if !running(in) {
-		return a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
-			if err := f.SetRole(id, role); err != nil {
-				return "", err
-			}
-			// As the server says it.
-			if _, _, def := f.Roles(); role == "" && def != "" {
-				return id + " is " + def + " again.", nil
-			} else if role == "" {
-				return id + " no longer has a role.", nil
-			}
-			return id + " is now " + role + ".", nil
-		})
-	}
-	f, err := serverconfig.Read(in.Def().ConfigPath())
-	if err != nil {
-		return "", err
-	}
-	list, given, _ := f.Roles()
-	switch {
-	case !f.HasRoles():
-		return "", serverconfig.ErrNoRoles
-	case role == "" && given[id] == "":
-		return id + " was given no role.", nil
-	case role != "" && !slices.ContainsFunc(list, func(x serverconfig.Role) bool { return x.Name == role }):
-		return "", fmt.Errorf("the server has no %q role", role)
-	}
-	return in.Command(r.Context(), "role "+id+" "+cmp.Or(role, "none"), from(r).user.Username)
-}
-
-// answerRole answers a role change, or why there's none.
-func (a *API) answerRole(w http.ResponseWriter, r *http.Request, reply string, err error) {
-	if errors.Is(err, errPanelAdmin) || errors.Is(err, serverconfig.ErrNoRoles) {
-		writeErr(w, http.StatusConflict, err.Error())
-		return
-	}
-	a.answerReply(w, r, reply, err)
-}
-
-// roleResult is how giving a role went on one server.
-type roleResult struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Reply string `json:"reply,omitempty"`
-	Error string `json:"error,omitempty"`
-}
-
-// setRole gives a player a role on this server, or on every server the user
-// manages admins on: each defines its own roles, so one without the role is
-// left out, and said so.
-func (a *API) setRole(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	var req struct {
-		ID         string `json:"id"`
-		Role       string `json:"role"`
-		Everywhere bool   `json:"everywhere"`
-	}
-	if !readJSON(w, r, &req) {
-		return
-	}
-	req.ID, req.Role = strings.TrimSpace(req.ID), strings.ToLower(strings.TrimSpace(req.Role))
-	if !serverconfig.SteamIDRe.MatchString(req.ID) {
-		writeErr(w, 400, "not a SteamID64")
-		return
-	}
-	if req.Role == "" || req.Role == "none" {
-		writeErr(w, 400, "pick a role")
-		return
-	}
-	if !req.Everywhere {
-		reply, err := a.giveRole(r, in, req.ID, req.Role)
-		a.auditOutcome(r, in.ID(), "role.give", req.ID+" "+req.Role, err)
-		a.answerRole(w, r, reply, err)
-		return
-	}
-	results := []roleResult{}
-	for _, other := range a.Reg.List() {
-		if !from(r).perms.Can(auth.IngameAdmins, other.ID()) {
-			continue
-		}
-		res := roleResult{ID: other.ID(), Name: other.Def().Name}
-		reply, err := a.giveRole(r, other, req.ID, req.Role)
-		a.auditOutcome(r, other.ID(), "role.give", req.ID+" "+req.Role, err)
-		if err != nil {
-			res.Error = err.Error()
-		} else {
-			res.Reply = reply
-		}
-		results = append(results, res)
-	}
-	writeJSON(w, 200, map[string]any{"results": results})
-}
-
-// takeRole takes a player's role away on this server.
-func (a *API) takeRole(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	id, ok := steamParam(w, r)
-	if !ok {
-		return
-	}
-	reply, err := a.giveRole(r, in, id, "")
-	a.auditOutcome(r, in.ID(), "role.take", id, err)
-	a.answerRole(w, r, reply, err)
-}
-
-func (a *API) addAdmin(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	var req struct {
-		ID string `json:"id"`
-	}
-	if !readJSON(w, r, &req) {
-		return
-	}
-	if !serverconfig.SteamIDRe.MatchString(req.ID) {
-		writeErr(w, 400, "not a SteamID64")
-		return
-	}
-	a.adminChange(w, r, in, "add", req.ID)
-}
-
-func (a *API) removeAdmin(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
-	id, ok := steamParam(w, r)
-	if !ok {
-		return
-	}
-	panel, err := a.Admins.PanelAdmins(r.Context(), in.ID())
-	if err != nil {
-		a.internalErr(w, r, err)
-		return
-	}
-	if user := panel[id]; user != "" {
-		writeErr(w, 409, "this admin comes from panel user "+user+"; change their roles or Steam link instead")
-		return
-	}
-	a.adminChange(w, r, in, "remove", id)
-}
-
-func (a *API) adminChange(w http.ResponseWriter, r *http.Request, in *instance.Instance, op, id string) {
-	var reply string
-	var err error
-	if running(in) {
-		reply, err = a.liveAdminChange(r, in, op, id)
-	} else {
-		reply, err = a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
-			list := f.Admins()
-			if op == "add" {
-				if !slices.Contains(list, id) {
-					list = append(list, id)
-				}
-				return id + " is an admin.", f.SetAdmins(list)
-			}
-			return id + " is no longer an admin.", f.SetAdmins(slices.DeleteFunc(list, func(x string) bool { return x == id }))
-		})
-	}
-	a.auditOutcome(r, in.ID(), "admin."+op, id, err)
-	a.answerReply(w, r, reply, err)
 }
 
 // ---- updates ----
@@ -1228,18 +859,12 @@ func (a *API) mods(w http.ResponseWriter, r *http.Request) {
 	}
 	var loaded []string
 	if in.State() == instance.Running {
-		if loaded, err = in.Maps(r.Context()); err != nil {
-			loaded = nil
-		}
+		loaded, _ = in.Maps(r.Context())
 	}
 	// The map setting and the map pool, so disabling a mod they need can warn.
-	var current any
-	pool := []string{}
-	if f, err := serverconfig.Read(in.Def().ConfigPath()); err == nil {
-		current, _ = f.Get("map")
-		if p, ok := f.Values()["map_pool"].([]string); ok {
-			pool = p
-		}
+	current, pool := mapAndPool(in.Def().ConfigPath())
+	if pool == nil {
+		pool = []string{}
 	}
 	// The server's own copies that keep a shared mod of the same folder out.
 	var shared map[string]any
@@ -1266,6 +891,18 @@ func (a *API) mods(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// mapAndPool reads the map setting and the map pool from the config at path;
+// nil for either one it can't read.
+func mapAndPool(path string) (current any, pool []string) {
+	f, err := serverconfig.Read(path)
+	if err != nil {
+		return nil, nil
+	}
+	current, _ = f.Get("map")
+	pool, _ = f.Values()["map_pool"].([]string)
+	return current, pool
+}
+
 // perfRanges are the windows the performance page offers, each averaged into
 // buckets so a chart gets at most a few hundred points.
 var perfRanges = map[string]struct{ span, bucket time.Duration }{
@@ -1275,13 +912,19 @@ var perfRanges = map[string]struct{ span, bucket time.Duration }{
 	"7d":  {7 * 24 * time.Hour, 30 * time.Minute},
 }
 
-func (a *API) performance(w http.ResponseWriter, r *http.Request) {
+// perfWindow is the range a performance page asks for, the last hour when it
+// names none of perfRanges: where it starts, and its buckets' length in
+// seconds.
+func perfWindow(r *http.Request) (since, bucket int64) {
 	rg, ok := perfRanges[r.URL.Query().Get("range")]
 	if !ok {
 		rg = perfRanges["1h"]
 	}
-	since := time.Now().Add(-rg.span).Unix()
-	bucket := int64(rg.bucket / time.Second)
+	return time.Now().Add(-rg.span).Unix(), int64(rg.bucket / time.Second)
+}
+
+func (a *API) performance(w http.ResponseWriter, r *http.Request) {
+	since, bucket := perfWindow(r)
 	points, err := a.Store.PerfPoints(r.Context(), inst(r).ID(), since, bucket)
 	if err != nil {
 		a.internalErr(w, r, err)

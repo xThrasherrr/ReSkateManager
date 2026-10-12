@@ -154,14 +154,10 @@ func (a *API) saveAlertSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Webhook != nil {
 		set.Webhook = strings.TrimSpace(*req.Webhook)
 	}
-	if req.Off != nil {
-		set.Off = *req.Off
-	}
-	for _, f := range []struct{ to, from *int }{{&set.DiskGB, req.DiskGB}, {&set.MemPct, req.MemPct}, {&set.MemMinutes, req.MemMinutes}} {
-		if f.from != nil {
-			*f.to = *f.from
-		}
-	}
+	setIf(&set.Off, req.Off)
+	setIf(&set.DiskGB, req.DiskGB)
+	setIf(&set.MemPct, req.MemPct)
+	setIf(&set.MemMinutes, req.MemMinutes)
 	if err := alerts.Save(r.Context(), a.Store, set); err != nil {
 		a.fail(w, r, http.StatusBadRequest, err)
 		return
@@ -233,7 +229,7 @@ type discordView struct {
 	Status    discord.Status `json:"status"`
 }
 
-func (a *API) discordView(set discord.Settings, st discord.Status) discordView {
+func discordViewOf(set discord.Settings, st discord.Status) discordView {
 	return discordView{TokenSet: set.Token != "", Channel: set.Channel, JoinCodes: set.JoinCodes, Title: set.Title, DefTitle: discord.DefaultTitle,
 		Invite: discord.Invite(set.Token), Status: st}
 }
@@ -247,26 +243,18 @@ type discordChange struct {
 }
 
 func (a *API) discordSettings(w http.ResponseWriter, r *http.Request) {
-	if a.Discord == nil {
-		writeErr(w, http.StatusNotFound, "the Discord status message is not set up in this manager")
-		return
-	}
 	set, err := discord.Load(r.Context(), a.Store)
 	if err != nil {
 		a.internalErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, a.discordView(set, a.Discord.Status()))
+	writeJSON(w, http.StatusOK, discordViewOf(set, a.Discord.Status()))
 }
 
 // saveDiscordSettings saves the bot and its channel, then brings the message
 // up to date at once, so the answer says whether Discord took them. An empty
 // token removes the one saved; no change at all only tries Discord again.
 func (a *API) saveDiscordSettings(w http.ResponseWriter, r *http.Request) {
-	if a.Discord == nil {
-		writeErr(w, http.StatusNotFound, "the Discord status message is not set up in this manager")
-		return
-	}
 	var req discordChange
 	if !readJSON(w, r, &req) {
 		return
@@ -304,7 +292,7 @@ func (a *API) saveDiscordSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	writeJSON(w, http.StatusOK, a.discordView(set, a.Discord.Refresh(ctx)))
+	writeJSON(w, http.StatusOK, discordViewOf(set, a.Discord.Refresh(ctx)))
 }
 
 // changeDiscord applies a checked change to the saved settings, one at a
@@ -319,18 +307,10 @@ func (a *API) changeDiscord(r *http.Request, c discordChange) (discord.Settings,
 		return old, "", err
 	}
 	set := old
-	if c.Token != nil {
-		set.Token = *c.Token
-	}
-	if c.Channel != nil {
-		set.Channel = *c.Channel
-	}
-	if c.JoinCodes != nil {
-		set.JoinCodes = *c.JoinCodes
-	}
-	if c.Title != nil {
-		set.Title = *c.Title
-	}
+	setIf(&set.Token, c.Token)
+	setIf(&set.Channel, c.Channel)
+	setIf(&set.JoinCodes, c.JoinCodes)
+	setIf(&set.Title, c.Title)
 	if set == old {
 		return set, "", nil // only trying again
 	}
@@ -369,10 +349,6 @@ func (a *API) changeDiscord(r *http.Request, c discordChange) (discord.Settings,
 // they're saved, or else the saved ones, and answers Discord's error if it
 // failed.
 func (a *API) testDiscord(w http.ResponseWriter, r *http.Request) {
-	if a.Discord == nil {
-		writeErr(w, http.StatusNotFound, "the Discord status message is not set up in this manager")
-		return
-	}
 	var req struct {
 		Token   string `json:"token"`
 		Channel string `json:"channel"`
@@ -441,12 +417,8 @@ func (a *API) saveRetention(w http.ResponseWriter, r *http.Request) {
 		a.internalErr(w, r, err)
 		return
 	}
-	if req.AuditDays != nil {
-		ret.AuditDays = *req.AuditDays
-	}
-	if req.PlayerDays != nil {
-		ret.PlayerDays = *req.PlayerDays
-	}
+	setIf(&ret.AuditDays, req.AuditDays)
+	setIf(&ret.PlayerDays, req.PlayerDays)
 	if err := housekeep.SaveRetention(r.Context(), a.Store, ret); err != nil {
 		a.fail(w, r, http.StatusBadRequest, err)
 		return

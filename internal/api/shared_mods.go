@@ -125,12 +125,7 @@ func (a *API) sharedMods(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		s := server{ID: d.ID, Name: d.Name, Use: d.SharedMods, CanEdit: perms.Can(auth.SettingsEdit, d.ID), Enabled: []string{}, Disabled: []string{}, Own: []string{}}
-		if f, err := serverconfig.Read(d.ConfigPath()); err == nil {
-			s.Map, _ = f.Get("map")
-			if p, ok := f.Values()["map_pool"].([]string); ok {
-				s.Pool = p
-			}
-		}
+		s.Map, s.Pool = mapAndPool(d.ConfigPath())
 		if d.SharedMods != serverconfig.SharedOff {
 			own, _ := serverconfig.ReadMods(d.Dir)
 			for _, m := range own {
@@ -163,27 +158,8 @@ func (a *API) startSharedModUpload(w http.ResponseWriter, r *http.Request) {
 func (a *API) sharedModUploadChunk(w http.ResponseWriter, r *http.Request) {
 	audit := a.auditLater(r, "", "shared.upload")
 	a.uploadChunk(w, r, sharedTarget, func(zipPath, name string) {
-		a.startJob(w, r, func(ctx context.Context, progress func(done, total int64)) (any, error) {
-			defer os.Remove(zipPath)
-			un, err := serverconfig.UnpackMod(a.SharedDir, zipPath, name)
-			if err != nil {
-				return nil, err
-			}
-			defer un.Discard()
-			servers := a.sharedServers()
-			a.modMu.Lock()
-			folder, replaced, err := un.Install("")
-			var swapped []string
-			if err == nil {
-				swapped = a.adopt(servers, folder)
-				a.relink(servers)
-			}
-			a.modMu.Unlock()
-			if err != nil {
-				return nil, err
-			}
-			audit(folder)
-			return map[string]any{"folder": folder, "replaced": replaced, "swapped": swapped}, nil
+		a.startJob(w, r, func(context.Context, func(done, total int64)) (any, error) {
+			return a.installUploaded(a.SharedDir, zipPath, name, true, audit)
 		})
 	})
 }

@@ -102,30 +102,30 @@ func defaultRoot() string {
 	return filepath.Dir(exe)
 }
 
-func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
+// openRoot resolves the manager's folder, the default when root is empty,
+// makes its data/ folder and takes the lock in it: one manager per folder.
+// root comes back resolved when another process holds the lock, too
+// (lockfile.ErrLocked).
+func openRoot(root string) (string, *lockfile.Lock, error) {
 	if root == "" {
 		root = defaultRoot()
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 	dataDir := filepath.Join(root, "data")
-	serversDir := filepath.Join(root, "servers")
-	for _, d := range []string{dataDir, serversDir} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return root, nil, err
 	}
-	// data/ holds the password hashes and sessions; keep other users on the
-	// host out of it, in installs made before this too. (Windows goes by the
-	// folder's ACL instead.)
-	if err := os.Chmod(dataDir, 0o700); err != nil {
-		return err
-	}
-	// One manager per folder: two would run each server twice and write one
-	// database from both. Let go before an update relaunches the manager.
 	lock, err := lockfile.Acquire(filepath.Join(dataDir, "manager.lock"))
+	return root, lock, err
+}
+
+func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
+	// Two managers on one folder would run each server twice and write one
+	// database from both. Let go before an update relaunches the manager.
+	root, lock, err := openRoot(root)
 	if errors.Is(err, lockfile.ErrLocked) {
 		return fmt.Errorf("another manager is already running with %s; stop it first", root)
 	}
@@ -133,6 +133,17 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 		return err
 	}
 	defer lock.Release()
+	dataDir := filepath.Join(root, "data")
+	serversDir := filepath.Join(root, "servers")
+	if err := os.MkdirAll(serversDir, 0o755); err != nil {
+		return err
+	}
+	// data/ holds the password hashes and sessions; keep other users on the
+	// host out of it, in installs made before this too. (Windows goes by the
+	// folder's ACL instead.)
+	if err := os.Chmod(dataDir, 0o700); err != nil {
+		return err
+	}
 
 	logFile, err := logfile.Open(filepath.Join(dataDir, api.ManagerLog))
 	if err != nil {
@@ -386,8 +397,8 @@ func banner(ctx context.Context, url string, cfg config.Config, a *auth.Service)
 	fmt.Println("  ReSkateManager " + version)
 	fmt.Println("  Panel: " + url)
 	if strings.HasPrefix(cfg.Listen, "0.0.0.0") || strings.HasPrefix(cfg.Listen, ":") {
+		_, port, _ := net.SplitHostPort(cfg.Listen)
 		for _, ip := range lanIPs() {
-			_, port, _ := net.SplitHostPort(cfg.Listen)
 			fmt.Println("         http://" + net.JoinHostPort(ip, port))
 		}
 	}

@@ -26,7 +26,6 @@ const (
 type modJob struct {
 	jobBase
 	target string // the instance it installs to, or sharedTarget
-	owner  bool   // the user is an owner, who may see what the system said
 	pkg    string // lowercased, so one package is not installed twice at once
 	st     modJobStatus
 }
@@ -83,7 +82,7 @@ func (a *API) startModJob(w http.ResponseWriter, r *http.Request, m modInstall, 
 // addModJob registers a job for m that starts in phase, unless one for the
 // same package and place is still running.
 func (a *API) addModJob(r *http.Request, m modInstall, phase string) (*modJob, bool) {
-	j := &modJob{jobBase: jobBase{id: rand.Text(), user: from(r).user.ID}, target: m.target, owner: isOwner(r), pkg: strings.ToLower(m.pkg.FullName),
+	j := &modJob{id: rand.Text(), user: from(r).user.ID, owner: isOwner(r), target: m.target, pkg: strings.ToLower(m.pkg.FullName),
 		st: modJobStatus{Phase: phase, Package: m.pkg.FullName, Version: m.ver.Number, Total: m.ver.FileSize}}
 	ok := a.modJobs.add(j, func(o *modJob) bool { return o.target == j.target && o.pkg == j.pkg })
 	return j, ok
@@ -194,16 +193,27 @@ func (a *API) sharedInstallStatus(w http.ResponseWriter, r *http.Request) {
 	a.modJobStatus(w, r, sharedTarget)
 }
 
+// packages is the community's packages on Thunderstore, by lowercased full
+// name, fetched again first with refresh. On failure it has answered the
+// request.
+func (a *API) packages(w http.ResponseWriter, r *http.Request, refresh bool) (map[string]*thunderstore.Package, bool) {
+	if a.Thunderstore == nil {
+		writeErr(w, 404, "Thunderstore is turned off")
+		return nil, false
+	}
+	pkgs, err := a.Thunderstore.Packages(r.Context(), refresh)
+	if err != nil {
+		a.fail(w, r, http.StatusBadGateway, fmt.Errorf("cannot reach Thunderstore: %w", err))
+		return nil, false
+	}
+	return pkgs, true
+}
+
 // findPackage looks up a package on Thunderstore, and one of its versions:
 // the newest when version is empty. On failure it has answered the request.
 func (a *API) findPackage(w http.ResponseWriter, r *http.Request, name, version string) (*thunderstore.Package, *thunderstore.Version, bool) {
-	if a.Thunderstore == nil {
-		writeErr(w, 404, "Thunderstore is turned off")
-		return nil, nil, false
-	}
-	pkgs, err := a.Thunderstore.Packages(r.Context(), false)
-	if err != nil {
-		a.fail(w, r, http.StatusBadGateway, fmt.Errorf("cannot reach Thunderstore: %w", err))
+	pkgs, ok := a.packages(w, r, false)
+	if !ok {
 		return nil, nil, false
 	}
 	p := pkgs[strings.ToLower(name)]
@@ -434,18 +444,13 @@ type updateJob struct {
 // installed there is left out, and counted as running. It answers the jobs in
 // the order they run, none when everything is up to date or under way.
 func (a *API) startUpdateAll(w http.ResponseWriter, r *http.Request, target, dir, action string) {
-	if a.Thunderstore == nil {
-		writeErr(w, 404, "Thunderstore is turned off")
+	pkgs, ok := a.packages(w, r, false)
+	if !ok {
 		return
 	}
 	mods, err := serverconfig.ReadMods(dir)
 	if err != nil {
 		a.internalErr(w, r, err)
-		return
-	}
-	pkgs, err := a.Thunderstore.Packages(r.Context(), false)
-	if err != nil {
-		a.fail(w, r, http.StatusBadGateway, fmt.Errorf("cannot reach Thunderstore: %w", err))
 		return
 	}
 	a.sweepModUploads()

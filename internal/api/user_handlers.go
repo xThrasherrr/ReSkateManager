@@ -154,12 +154,8 @@ func grantsText(grants []auth.Grant) string {
 	return strings.Join(parts, ", ")
 }
 
-func userParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	return int64Param(w, r, "uid", "user")
-}
-
 func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
-	id, ok := userParam(w, r)
+	id, ok := int64Param(w, r, "uid", "user")
 	if !ok {
 		return
 	}
@@ -235,7 +231,7 @@ func (a *API) updateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) deleteUser(w http.ResponseWriter, r *http.Request) {
-	id, ok := userParam(w, r)
+	id, ok := int64Param(w, r, "uid", "user")
 	if !ok {
 		return
 	}
@@ -297,8 +293,6 @@ func (a *API) saveRole(w http.ResponseWriter, r *http.Request) {
 		if !a.mayEditRole(w, r, old.Permissions) || !a.mayChangeHolders(w, r, id) {
 			return
 		}
-	} else {
-		role.ID = 0
 	}
 	if !a.mayEditRole(w, r, role.Permissions) {
 		return

@@ -23,8 +23,9 @@ type job struct {
 // jobBase is what every kind of job has: an id, whose it is, and when it
 // ended. mu also guards the status each kind keeps beside it.
 type jobBase struct {
-	id   string
-	user int64
+	id    string
+	user  int64
+	owner bool // the user is an owner, who may see what the system said
 
 	mu       sync.Mutex
 	finished time.Time // zero while it runs
@@ -94,8 +95,7 @@ const jobKeep = 15 * time.Minute // a finished job is kept this long for the pan
 // startJob runs work in the background as the caller's job and answers 202
 // with its id. work reports how far it got through the function it's given.
 func (a *API) startJob(w http.ResponseWriter, r *http.Request, work func(ctx context.Context, progress func(done, total int64)) (any, error)) {
-	j := &job{jobBase: jobBase{id: rand.Text(), user: from(r).user.ID}, st: jobStatus{Phase: "running"}}
-	owner := isOwner(r)
+	j := &job{id: rand.Text(), user: from(r).user.ID, owner: isOwner(r), st: jobStatus{Phase: "running"}}
 	a.jobs.add(j, nil)
 	a.goWork(func(base context.Context) {
 		ctx, cancel := context.WithTimeout(base, 6*time.Hour)
@@ -112,7 +112,7 @@ func (a *API) startJob(w http.ResponseWriter, r *http.Request, work func(ctx con
 		defer j.mu.Unlock()
 		j.finished = time.Now()
 		if err != nil {
-			j.st.Phase, j.st.Error = "failed", a.failText(owner, err)
+			j.st.Phase, j.st.Error = "failed", a.failText(j.owner, err)
 		} else {
 			j.st.Phase, j.st.Result = "done", res
 		}

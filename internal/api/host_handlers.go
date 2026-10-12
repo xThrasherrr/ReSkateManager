@@ -28,12 +28,7 @@ type hostServerPoint struct {
 }
 
 func (a *API) hostPerformance(w http.ResponseWriter, r *http.Request) {
-	rg, ok := perfRanges[r.URL.Query().Get("range")]
-	if !ok {
-		rg = perfRanges["1h"]
-	}
-	since := time.Now().Add(-rg.span).Unix()
-	bucket := int64(rg.bucket / time.Second)
+	since, bucket := perfWindow(r)
 	points, err := a.Store.HostPoints(r.Context(), since, bucket)
 	if err != nil {
 		a.internalErr(w, r, err)

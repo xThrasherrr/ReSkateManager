@@ -32,8 +32,8 @@ type announcementReq struct {
 
 // fill validates req into an announcement for the server in the URL.
 func (a *API) fill(w http.ResponseWriter, r *http.Request, req announcementReq, out *store.Announcement) bool {
-	msg := cleanText(req.Message)
-	if msg == "" || len(msg) > 200 {
+	msg, ok := chatText(req.Message)
+	if !ok {
 		writeErr(w, 400, "messages are 1-200 bytes")
 		return false
 	}

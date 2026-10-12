@@ -2,7 +2,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -34,9 +33,8 @@ func (a *API) writeModUpdates(w http.ResponseWriter, r *http.Request, dir string
 		a.internalErr(w, r, err)
 		return
 	}
-	pkgs, err := a.Thunderstore.Packages(r.Context(), r.URL.Query().Has("refresh"))
-	if err != nil {
-		a.fail(w, r, http.StatusBadGateway, fmt.Errorf("cannot reach Thunderstore: %w", err))
+	pkgs, ok := a.packages(w, r, r.URL.Query().Has("refresh"))
+	if !ok {
 		return
 	}
 	out := map[string]modUpdate{}

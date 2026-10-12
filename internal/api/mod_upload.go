@@ -159,23 +159,44 @@ func (a *API) modUploadChunk(w http.ResponseWriter, r *http.Request) {
 	dir := in.Def().Dir
 	audit := a.auditLater(r, in.ID(), "mod.upload")
 	a.uploadChunk(w, r, in.ID(), func(zipPath, name string) {
-		a.startJob(w, r, func(ctx context.Context, progress func(done, total int64)) (any, error) {
-			defer os.Remove(zipPath)
-			un, err := serverconfig.UnpackMod(dir, zipPath, name)
-			if err != nil {
-				return nil, err
-			}
-			defer un.Discard()
-			a.modMu.Lock()
-			folder, replaced, err := un.Install("")
-			a.modMu.Unlock()
-			if err != nil {
-				return nil, err
-			}
-			audit(folder)
-			return map[string]any{"folder": folder, "replaced": replaced}, nil
+		a.startJob(w, r, func(context.Context, func(done, total int64)) (any, error) {
+			return a.installUploaded(dir, zipPath, name, false, audit)
 		})
 	})
+}
+
+// installUploaded installs an uploaded zip in dir's Mods, for a job, and
+// writes its audit entry. Into the shared mods (shared), it's linked into
+// every server that uses them, and their own copies of the same version give
+// way to it.
+func (a *API) installUploaded(dir, zipPath, name string, shared bool, audit func(detail string)) (any, error) {
+	defer os.Remove(zipPath)
+	un, err := serverconfig.UnpackMod(dir, zipPath, name)
+	if err != nil {
+		return nil, err
+	}
+	defer un.Discard()
+	var servers []sharedServer
+	if shared {
+		servers = a.sharedServers()
+	}
+	a.modMu.Lock()
+	folder, replaced, err := un.Install("")
+	var swapped []string
+	if err == nil && shared {
+		swapped = a.adopt(servers, folder)
+		a.relink(servers)
+	}
+	a.modMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	audit(folder)
+	res := map[string]any{"folder": folder, "replaced": replaced}
+	if shared {
+		res["swapped"] = swapped
+	}
+	return res, nil
 }
 
 // uploadChunk writes the request body at ?offset= into an upload to target
@@ -204,7 +225,7 @@ func (a *API) uploadChunk(w http.ResponseWriter, r *http.Request, target string,
 	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(15 * time.Minute))
 	n, err := u.write(http.MaxBytesReader(w, r.Body, min(maxModChunk, u.size-offset)), offset)
 	u.received, u.touched = offset+n, time.Now()
-	if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		writeErr(w, http.StatusRequestEntityTooLarge, "that chunk runs past the end of the file")
 		return
 	} else if err != nil {

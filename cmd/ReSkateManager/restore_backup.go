@@ -19,21 +19,11 @@ import (
 // for --restore, and exits. The manager must be stopped: a running one would
 // go on with the old database open.
 func restoreBackup(root, zip string) error {
-	if root == "" {
-		root = defaultRoot()
-	}
-	root, err := filepath.Abs(root)
+	zip, err := filepath.Abs(zip)
 	if err != nil {
 		return err
 	}
-	if zip, err = filepath.Abs(zip); err != nil {
-		return err
-	}
-	dataDir := filepath.Join(root, "data")
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
-		return err
-	}
-	lock, err := lockfile.Acquire(filepath.Join(dataDir, "manager.lock"))
+	root, lock, err := openRoot(root)
 	if errors.Is(err, lockfile.ErrLocked) {
 		return errors.New("the manager is running with this folder; stop it first")
 	}
@@ -41,6 +31,7 @@ func restoreBackup(root, zip string) error {
 		return err
 	}
 	defer lock.Release()
+	dataDir := filepath.Join(root, "data")
 	// A manager running from this folder holds its database open, and listens
 	// where its manager.toml says. With no database, as on a wiped install,
 	// none can be, and the default port may well be another manager's.

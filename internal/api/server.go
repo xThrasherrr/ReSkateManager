@@ -150,28 +150,31 @@ func (a *API) Handler() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireUser)
 			r.Get("/meta", a.meta)
-			r.With(a.ownerOnly).Post("/manager/update", a.installManager)
-			r.With(a.ownerOnly).Get("/manager/settings", a.managerSettings)
-			r.With(a.ownerOnly).Patch("/manager/settings", a.saveManagerSettings)
-			r.With(a.ownerOnly).Get("/manager/alerts", a.alertSettings)
-			r.With(a.ownerOnly).Patch("/manager/alerts", a.saveAlertSettings)
-			r.With(a.ownerOnly).Post("/manager/alerts/test", a.testAlert)
-			r.With(a.ownerOnly).Get("/manager/discord", a.discordSettings)
-			r.With(a.ownerOnly).Patch("/manager/discord", a.saveDiscordSettings)
-			r.With(a.ownerOnly).Post("/manager/discord/test", a.testDiscord)
-			r.With(a.ownerOnly).Get("/manager/retention", a.retention)
-			r.With(a.ownerOnly).Patch("/manager/retention", a.saveRetention)
+			r.Route("/manager", func(r chi.Router) {
+				r.Use(a.ownerOnly)
+				r.Post("/update", a.installManager)
+				r.Get("/settings", a.managerSettings)
+				r.Patch("/settings", a.saveManagerSettings)
+				r.Get("/alerts", a.alertSettings)
+				r.Patch("/alerts", a.saveAlertSettings)
+				r.Post("/alerts/test", a.testAlert)
+				r.With(a.discordOn).Get("/discord", a.discordSettings)
+				r.With(a.discordOn).Patch("/discord", a.saveDiscordSettings)
+				r.With(a.discordOn).Post("/discord/test", a.testDiscord)
+				r.Get("/retention", a.retention)
+				r.Patch("/retention", a.saveRetention)
+			})
 			r.Post("/auth/password", a.changePassword)
 			r.Post("/auth/steam/unlink", a.steamUnlink)
 			r.Get("/jobs/{jid}", a.jobStatus)
 
 			r.Route("/backups", func(r chi.Router) {
 				r.Use(a.ownerOnly)
-				r.Get("/", a.backups)
-				r.Post("/", a.createBackup)
-				r.Patch("/", a.saveBackupSettings)
-				r.Get("/{name}", a.downloadBackup)
-				r.Delete("/{name}", a.deleteBackup)
+				r.With(a.backupsOn).Get("/", a.backups)
+				r.With(a.backupsOn).Post("/", a.createBackup)
+				r.Patch("/", a.saveBackupSettings) // they're in the database, so this works without Backups
+				r.With(a.backupsOn).Get("/{name}", a.downloadBackup)
+				r.With(a.backupsOn).Delete("/{name}", a.deleteBackup)
 			})
 			// Importing a server goes to a new folder in servers/, as creating one does.
 			r.With(a.global(auth.InstancesManage)).Post("/imports", a.startImport)
@@ -235,8 +238,8 @@ func (a *API) Handler() http.Handler {
 				r.With(a.can(auth.ServerUpdate)).Get("/update", a.updateStatus)
 				r.With(a.can(auth.ServerUpdate)).Post("/update", a.startUpdate)
 
-				r.With(a.can(auth.InstancesManage)).Get("/backups", a.serverBackups)
-				r.With(a.can(auth.InstancesManage)).Post("/restore", a.restoreServer)
+				r.With(a.can(auth.InstancesManage), a.backupsOn).Get("/backups", a.serverBackups)
+				r.With(a.can(auth.InstancesManage), a.backupsOn).Post("/restore", a.restoreServer)
 				r.With(a.can(auth.InstancesManage)).Get("/export", a.exportServer)
 			})
 
@@ -547,16 +550,32 @@ func (a *API) anyServer(perm string) func(http.Handler) http.Handler {
 	}
 }
 
-// sharedOn answers 404 for the shared mods' routes in a manager that has
-// them turned off.
+// needs answers 404 with msg, for the routes of a part of the manager, while
+// off reports it turned off.
+func needs(off func() bool, msg string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if off() {
+				writeErr(w, http.StatusNotFound, msg)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// sharedOn, backupsOn and discordOn turn away the routes of the shared mods,
+// the backups and the Discord status message in a manager without them.
 func (a *API) sharedOn(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if a.SharedDir == "" {
-			writeErr(w, http.StatusNotFound, errSharedOff.Error())
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	return needs(func() bool { return a.SharedDir == "" }, errSharedOff.Error())(next)
+}
+
+func (a *API) backupsOn(next http.Handler) http.Handler {
+	return needs(func() bool { return a.Backups == nil }, errNoBackups.Error())(next)
+}
+
+func (a *API) discordOn(next http.Handler) http.Handler {
+	return needs(func() bool { return a.Discord == nil }, "the Discord status message is not set up in this manager")(next)
 }
 
 type instKey struct{}
@@ -591,16 +610,11 @@ func (a *API) can(perm string) func(http.Handler) http.Handler {
 	}
 }
 
-// audit records what the signed-in caller did.
+// audit records what the signed-in caller did. Routes with no signed-in
+// caller use auditAs.
 func (a *API) audit(r *http.Request, instanceID, action, detail string) {
 	c := from(r)
-	e := store.AuditEntry{Instance: instanceID, Action: action, Detail: detail}
-	if c != nil {
-		e.UserID, e.Username, e.IP = c.user.ID, c.user.Username, c.ip
-	} else {
-		e.IP = a.clientIP(r)
-	}
-	a.writeAudit(r, e)
+	a.writeAudit(r, auditEntry(c.user, c.ip, instanceID, action, detail))
 }
 
 // auditAs records what u did (nil: someone not signed in) on a route that
@@ -747,6 +761,13 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// setIf sets *dst to *v when a change carried v; nil leaves it as it is.
+func setIf[T any](dst, v *T) {
+	if v != nil {
+		*dst = *v
+	}
 }
 
 // errStatus is the status for an error from a request to change something:
