@@ -423,15 +423,30 @@ func (a *API) importServer(ctx context.Context, rd *backup.Reader, perms auth.Pe
 		os.RemoveAll(d.Dir)
 		return d, nil, err
 	}
+	// It takes as many of its own as every server's leave room for.
+	room := maxAnnouncements
+	if all, err := a.Store.Announcements(ctx, id); err == nil {
+		room -= len(all)
+	}
+	dropped := 0
 	for _, an := range src.Announcements {
 		msg := cleanText(an.Message)
 		if msg == "" || len(msg) > 200 || !announce.ValidInterval(an.Interval) {
 			continue
 		}
+		if room <= 0 {
+			dropped++
+			continue
+		}
 		next := store.Announcement{Instance: id, Message: msg, Interval: an.Interval, Enabled: an.Enabled, ChatOnly: an.ChatOnly}
 		if err := a.Store.SaveAnnouncement(ctx, &next); err != nil {
 			a.Log.Warn("announcement of an imported server", "err", err)
+			continue
 		}
+		room--
+	}
+	if dropped > 0 {
+		notes = append(notes, fmt.Sprintf("%d of its announcements didn't fit: a server has at most %d, every server's included.", dropped, maxAnnouncements))
 	}
 	a.Reg.Add(d)
 	a.Admins.Kick()

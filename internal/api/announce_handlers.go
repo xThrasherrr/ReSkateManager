@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/announce"
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
@@ -104,16 +105,8 @@ func (a *API) addAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if ann.Instance == store.AllInstances {
 		servers = a.Reg.List()
 	}
-	for _, in := range servers {
-		list, err := a.Store.Announcements(r.Context(), in.ID())
-		if err != nil {
-			a.internalErr(w, r, err)
-			return
-		}
-		if len(list) >= maxAnnouncements {
-			writeErr(w, http.StatusConflict, fmt.Sprintf("%s has %d announcements, the most a server can have; remove one first", in.Def().Name, len(list)))
-			return
-		}
+	if !a.roomFor(w, r, servers) {
+		return
 	}
 	if err := a.Store.SaveAnnouncement(r.Context(), &ann); err != nil {
 		a.internalErr(w, r, err)
@@ -123,14 +116,38 @@ func (a *API) addAnnouncement(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, ann)
 }
 
+// roomFor checks that each of servers can take one more announcement.
+func (a *API) roomFor(w http.ResponseWriter, r *http.Request, servers []*instance.Instance) bool {
+	for _, in := range servers {
+		list, err := a.Store.Announcements(r.Context(), in.ID())
+		if err != nil {
+			a.internalErr(w, r, err)
+			return false
+		}
+		if len(list) >= maxAnnouncements {
+			writeErr(w, http.StatusConflict, fmt.Sprintf("%s has %d announcements, the most a server can have; remove one first", in.Def().Name, len(list)))
+			return false
+		}
+	}
+	return true
+}
+
 func (a *API) updateAnnouncement(w http.ResponseWriter, r *http.Request) {
 	ann, ok := a.loadAnnouncement(w, r)
 	if !ok {
 		return
 	}
+	wasAll := ann.Instance == store.AllInstances
 	var req announcementReq
 	if !readJSON(w, r, &req) || !a.fill(w, r, req, &ann) {
 		return
+	}
+	// Made every server's, it now goes to the others too, so they need room.
+	if !wasAll && ann.Instance == store.AllInstances {
+		others := slices.DeleteFunc(a.Reg.List(), func(in *instance.Instance) bool { return in.ID() == inst(r).ID() })
+		if !a.roomFor(w, r, others) {
+			return
+		}
 	}
 	if err := a.Store.SaveAnnouncement(r.Context(), &ann); err != nil {
 		a.fail(w, r, errStatus(err), err)

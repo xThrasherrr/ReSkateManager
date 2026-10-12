@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -101,13 +102,25 @@ func TestAnnouncementsPerServer(t *testing.T) {
 	if code, b := p.do("POST", "/api/instances/a/announcements", body); code != http.StatusConflict {
 		t.Errorf("past the limit on a: %d %s", code, b)
 	}
-	if code, b := p.do("POST", "/api/instances/b/announcements", body); code != 200 {
-		t.Errorf("on b: %d %s", code, b)
+	code, b := p.do("POST", "/api/instances/b/announcements", body)
+	if code != 200 {
+		t.Fatalf("on b: %d %s", code, b)
 	}
 	// Every server's goes to a too, which has no room.
 	all := `{"allServers":true,"message":"to all","interval":3600,"enabled":true}`
 	if code, b := p.do("POST", "/api/instances/b/announcements", all); code != http.StatusConflict {
 		t.Errorf("every server's, with a full: %d %s", code, b)
+	}
+	// Nor can b's own become every server's.
+	var ann store.Announcement
+	if err := json.Unmarshal(b, &ann); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := p.do("PATCH", fmt.Sprintf("/api/instances/b/announcements/%d", ann.ID), all); code != http.StatusConflict {
+		t.Errorf("b's made every server's, with a full: %d %s", code, b)
+	}
+	if code, b := p.do("PATCH", fmt.Sprintf("/api/instances/b/announcements/%d", ann.ID), body); code != 200 {
+		t.Errorf("b's edited in place: %d %s", code, b)
 	}
 }
 
