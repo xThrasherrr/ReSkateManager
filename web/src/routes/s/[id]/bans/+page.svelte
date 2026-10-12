@@ -80,9 +80,21 @@
 		untrack(load);
 	});
 	// Changes made in game or from the console land in the file too; refresh when the server reports one.
+	// Lines come in batches (a ban's leave line right behind it), so look at every new one.
+	const changed = /was (un)?banned|is (no longer )?an admin|^\S.* (is now [a-z0-9_-]+|is [a-z0-9_-]+ again|no longer has a role)\.$/;
+	let lastSeq = ctx.live.console.at(-1)?.seq ?? 0;
 	$effect(() => {
-		const last = ctx.live.console.at(-1);
-		if (last && /was (un)?banned|is (no longer )?an admin|^\S.* (is now [a-z0-9_-]+|is [a-z0-9_-]+ again|no longer has a role)\.$/.test(last.text)) untrack(load);
+		const lines = ctx.live.console;
+		const end = lines.at(-1)?.seq ?? 0;
+		const restarted = end < lastSeq; // the manager restarted and counts from 0 again
+		let hit = false;
+		for (let i = lines.length - 1; i >= 0 && !hit; i--) {
+			const e = lines[i]!;
+			if (!restarted && e.seq <= lastSeq) break;
+			hit = changed.test(e.text);
+		}
+		lastSeq = end;
+		if (hit) untrack(load);
 	});
 
 	const steamOk = (s: string) => /^7656119\d{10}$/.test(s.trim());
