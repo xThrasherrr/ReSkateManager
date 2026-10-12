@@ -1,17 +1,18 @@
 <script lang="ts">
+	import { hexColour } from '#lib/text.js';
+
 	// A colour as the server writes it, "#RRGGBB": a swatch to pick it, and the
 	// hex to type or paste. Typed hex is tidied to the server's spelling, so
 	// "8e5cff" reads as unchanged from "#8E5CFF".
 	let { id, value = $bindable(), disabled = false }: { id: string; value: string | undefined; disabled?: boolean } = $props();
 
-	const hex = /^#?[0-9a-f]{6}$/i;
 	const tidy = (s: string) => {
 		s = s.trim().toUpperCase();
-		return hex.test(s) && !s.startsWith('#') ? `#${s}` : s;
+		return hexColour.test(s) && !s.startsWith('#') ? `#${s}` : s;
 	};
 	// The swatch only takes a full colour; while one is half typed it keeps the last.
 	let last = '#000000';
-	const swatch = $derived(value && hex.test(value) ? (last = `#${value.replace('#', '').toLowerCase()}`) : last);
+	const swatch = $derived(value && hexColour.test(value) ? (last = `#${value.replace('#', '').toLowerCase()}`) : last);
 </script>
 
 <div class="flex items-center gap-2">

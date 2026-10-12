@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount } from 'svelte';
 	import { api, message as explain, type Announcement } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { attempt, flip } from '#lib/toast.svelte.js';
@@ -11,6 +11,7 @@
 	import LoadError from '#lib/components/LoadError.svelte';
 	import { ask } from '#lib/ask.svelte.js';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
+	import { utf8Length } from '#lib/text.js';
 
 	const ctx = useLive();
 	let list = $state.raw<Announcement[]>([]);
@@ -32,10 +33,7 @@
 			if (current()) error = explain(e);
 		}
 	}
-	$effect(() => {
-		ctx.id;
-		untrack(load);
-	});
+	onMount(load);
 
 	const units = [
 		{ label: 'minutes', secs: 60 },
@@ -49,12 +47,11 @@
 	let unit = $state(60);
 	let everywhere = $state(false);
 	let card = $state(true);
-	let saving = $state(false);
 
-	const encoder = new TextEncoder();
-	const size = $derived(encoder.encode(message.trim()).length);
+	const size = $derived(utf8Length(message.trim()));
 	const interval = $derived(Math.round(every * unit));
-	const valid = $derived(size > 0 && size <= 200 && interval >= 60 && interval <= 7 * 86400);
+	const intervalOk = $derived(interval >= 60 && interval <= 7 * 86400);
+	const valid = $derived(size > 0 && size <= 200 && intervalOk);
 
 	function reset() {
 		editing = null;
@@ -73,7 +70,7 @@
 		card = !a.chatOnly;
 	}
 
-	const body = (a: { message: string; interval: number; enabled: boolean; instance: string; chatOnly?: boolean }) => ({
+	const body = (a: Announcement) => ({
 		message: a.message,
 		interval: a.interval,
 		enabled: a.enabled,
@@ -81,20 +78,20 @@
 		chatOnly: !!a.chatOnly
 	});
 
+	const busy = new Busy();
 	async function save(e: SubmitEvent) {
 		e.preventDefault();
-		saving = true;
-		const next = { message: message.trim(), interval, enabled: editing?.enabled ?? true, instance: everywhere ? '*' : ctx.id, chatOnly: !card };
-		const ok = editing
-			? await attempt(() => api.patch(`/instances/${ctx.id}/announcements/${editing!.id}`, body(next)), 'Saved')
-			: await attempt(() => api.post(`/instances/${ctx.id}/announcements`, body(next)), 'Added');
-		saving = false;
+		const next = { message: message.trim(), interval, enabled: editing?.enabled ?? true, allServers: everywhere, chatOnly: !card };
+		const ok = await busy.run('save', () =>
+			editing
+				? attempt(() => api.patch(`/instances/${ctx.id}/announcements/${editing!.id}`, next), 'Saved')
+				: attempt(() => api.post(`/instances/${ctx.id}/announcements`, next), 'Added')
+		);
 		if (ok) {
 			reset();
 			load();
 		}
 	}
-	const busy = new Busy();
 	async function toggle(a: Announcement, enabled: boolean) {
 		const r = await busy.run(`toggle:${a.id}`, () => attempt(() => api.patch(`/instances/${ctx.id}/announcements/${a.id}`, body({ ...a, enabled }))));
 		if (r) load();
@@ -171,13 +168,13 @@
 				/>
 				<div class="ml-auto flex gap-2">
 					{#if editing}<button type="button" class="btn" onclick={reset}>Cancel</button>{/if}
-					<button class="btn btn-primary" disabled={!valid || saving}>
+					<button class="btn btn-primary" disabled={!valid || busy.is()}>
 						<Icon name={editing ? 'check' : 'plus'} size={14} />
 						{editing ? 'Save' : 'Add'}
 					</button>
 				</div>
 			</div>
-			{#if interval < 60 || interval > 7 * 86400}<p class="text-xs text-bad">Pick 1 minute to 7 days.</p>{/if}
+			{#if !intervalOk}<p class="text-xs text-bad">Pick 1 minute to 7 days.</p>{/if}
 		</form>
 	</section>
 

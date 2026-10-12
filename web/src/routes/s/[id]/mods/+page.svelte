@@ -7,6 +7,7 @@
 	import { uploads, SHARED } from '#lib/uploads.svelte.js';
 	import { ModsPage } from '#lib/mods.svelte.js';
 	import { session } from '#lib/session.svelte.js';
+	import { plural } from '#lib/format.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Loading from '#lib/components/Loading.svelte';
@@ -47,7 +48,7 @@
 		return loaded.filter((n) => !known.has(n)).length;
 	});
 	const restartNote = $derived(
-		[pending && `${pending} map${pending === 1 ? '' : 's'} to load`, stale && `${stale} to unload`].filter(Boolean).join(' and ')
+		[pending && `${plural(pending, 'map')} to load`, stale && `${stale} to unload`].filter(Boolean).join(' and ')
 	);
 	const mapMods = $derived((list?.mods ?? []).filter((m) => m.maps.length || m.problem));
 	const otherMods = $derived((list?.mods ?? []).filter((m) => !m.maps.length && !m.problem));
@@ -136,6 +137,13 @@
 			{maps.length === 1 ? 'is' : 'are'} in the map pool, and the server won't start until {maps.length === 1 ? "it's" : "they're"} taken out under
 			<a class="underline" href="/s/{ctx.id}/settings">Settings</a>.</span
 		>
+	</p>
+{/snippet}
+
+{#snippet mapWarning(from: string)}
+	<p class="flex items-start gap-1.5 text-warn">
+		<Icon name="alert" size={14} class="mt-0.5" />
+		<span>The server's map, {list?.map}, comes from {from}. Pick another under <a class="underline" href="/s/{ctx.id}/settings">Settings</a> before the server next starts.</span>
 	</p>
 {/snippet}
 
@@ -332,10 +340,7 @@
 				<p>Their own copies of the same version are replaced with links. Copies of other versions stay.</p>
 			{/if}
 			{#if confirm.kind !== 'share' && isCurrentMap(mod)}
-				<p class="flex items-start gap-1.5 text-warn">
-					<Icon name="alert" size={14} class="mt-0.5" />
-					<span>The server's map, {list?.map}, comes from this mod. Pick another under <a class="underline" href="/s/{ctx.id}/settings">Settings</a> before the server next starts.</span>
-				</p>
+				{@render mapWarning('this mod')}
 			{/if}
 			{#if confirm.kind !== 'share' && pooled(mod).length}
 				{@render poolWarning(pooled(mod))}
@@ -362,10 +367,7 @@
 		{#if sharedNext === 'off'}
 			<p>The links to the shared mods are taken out of this server's Mods folder. The shared mods stay, for every other server that uses them.</p>
 			{#if list?.mods.some((m) => m.shared && isCurrentMap(m))}
-				<p class="flex items-start gap-1.5 text-warn">
-					<Icon name="alert" size={14} class="mt-0.5" />
-					<span>The server's map, {list?.map}, comes from a shared mod. Pick another under <a class="underline" href="/s/{ctx.id}/settings">Settings</a> before the server next starts.</span>
-				</p>
+				{@render mapWarning('a shared mod')}
 			{/if}
 			{#if sharedPooled.length}
 				{@render poolWarning(sharedPooled)}

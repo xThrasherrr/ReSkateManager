@@ -1,7 +1,7 @@
 import { api, message, type Mod, type ModUpdate } from './api';
 import { newest } from './newest';
 import { attempt } from './toast.svelte';
-import { modsPath, updatedAll, uploads } from './uploads.svelte';
+import { modsPath, running, updatedAll, uploads } from './uploads.svelte';
 
 /**
  * What a Mods page shows and does: a server's mods, or the shared ones
@@ -18,9 +18,7 @@ export class ModsPage<L extends { mods: Mod[]; folder: string }> {
 
 	outdated = $derived((this.list?.mods ?? []).filter((m) => this.updates[m.folder]?.newer));
 	/** A zip for here is on its way, or being unpacked. */
-	uploading = $derived(
-		uploads.list.some((u) => u.instance === this.instance && u.kind === 'upload' && (u.status === 'queued' || u.status === 'uploading' || u.status === 'installing'))
-	);
+	uploading = $derived(uploads.list.some((u) => u.instance === this.instance && u.kind === 'upload' && running(u)));
 
 	instance: string;
 	#place: () => string;

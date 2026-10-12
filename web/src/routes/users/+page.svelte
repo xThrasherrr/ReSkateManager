@@ -11,6 +11,7 @@
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import { ask } from '#lib/ask.svelte.js';
+	import { steamIdPattern, usernamePattern } from '#lib/text.js';
 
 	let users = $state.raw<User[]>([]);
 	let roles = $state.raw<Role[]>([]);
@@ -79,17 +80,8 @@
 		}
 	}
 
-	// The dialog closes itself on Escape, so its open flag is bound rather than
-	// derived from the target; a one-way flag would stay stuck closed.
-	let delTarget = $state.raw<User | null>(null);
-	let delOpen = $state(false);
-	function askRemove(u: User) {
-		delTarget = u;
-		delOpen = true;
-	}
-	async function removeUser() {
-		const u = delTarget!;
-		delOpen = false;
+	async function removeUser(u: User) {
+		if (!(await ask({ title: `Remove ${u.username}?`, body: 'They are signed out everywhere and can no longer reach the panel.', action: 'Remove' }))) return;
 		if (await attempt(() => api.del(`/users/${u.id}`), `Removed ${u.username}`)) load();
 	}
 
@@ -125,9 +117,6 @@
 		role.permissions = on ? [...role.permissions, key] : role.permissions.filter((p) => p !== key);
 	}
 
-	// For pattern attributes, where Svelte would read the braces as its own.
-	const usernamePattern = String.raw`[A-Za-z0-9_.\-]{3,32}`;
-	const steamIdPattern = String.raw`\s*7656119[0-9]{10}\s*`;
 	const notBlank = String.raw`.*\S.*`;
 </script>
 
@@ -179,7 +168,7 @@
 							<td class="text-right whitespace-nowrap">
 								{#if !u.owner || session.perms?.owner}
 									<button class="btn btn-sm btn-ghost" onclick={() => edit(u)}>Edit</button>
-									{#if u.id !== session.user?.id}<button class="btn btn-sm btn-ghost text-bad" onclick={() => askRemove(u)} aria-label="Remove {u.username}"
+									{#if u.id !== session.user?.id}<button class="btn btn-sm btn-ghost text-bad" onclick={() => removeUser(u)} aria-label="Remove {u.username}"
 											><Icon name="trash" size={14} /></button
 										>{/if}
 								{/if}
@@ -298,13 +287,5 @@
 		{#if role.id}<button class="btn btn-danger mr-auto" disabled={busy.is()} onclick={deleteRole}>Delete role</button>{/if}
 		<button class="btn" onclick={() => (roleOpen = false)}>Cancel</button>
 		<button class="btn btn-primary" form="roleform" disabled={busy.is()}>{busy.is('role') ? 'Saving…' : 'Save'}</button>
-	{/snippet}
-</Modal>
-
-<Modal bind:open={delOpen} title="Remove {delTarget?.username}?">
-	<p class="text-sm text-muted">They are signed out everywhere and can no longer reach the panel.</p>
-	{#snippet actions()}
-		<button class="btn" onclick={() => (delOpen = false)}>Cancel</button>
-		<button class="btn btn-danger" onclick={removeUser}>Remove</button>
 	{/snippet}
 </Modal>

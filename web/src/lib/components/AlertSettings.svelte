@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { api, message, type AlertSettings } from '#lib/api.js';
+	import { api, type AlertSettings } from '#lib/api.js';
 	import { attempt } from '#lib/toast.svelte.js';
+	import { Setting } from '#lib/setting.svelte.js';
 	import Icon from './Icon.svelte';
 	import Loading from './Loading.svelte';
 	import LoadError from './LoadError.svelte';
@@ -22,33 +22,21 @@
 		memoryHigh: { label: 'Memory stays high', help: "The machine's, or its container's limit when the manager runs in one. Again once it is back down." }
 	};
 
-	let saved = $state.raw<AlertSettings | null>(null);
 	let webhook = $state('');
 	let off = $state<string[]>([]);
 	let diskGB = $state(0);
 	let memPct = $state(0);
 	let memMinutes = $state(0);
-	let busy = $state(false);
 	let testing = $state(false);
 
-	function show(s: AlertSettings) {
-		saved = s;
+	const setting = new Setting<AlertSettings>('/manager/alerts', (s) => {
 		webhook = s.webhook;
 		off = [...s.off];
 		diskGB = s.diskGB;
 		memPct = s.memPct;
 		memMinutes = s.memMinutes;
-	}
-	let loadError = $state('');
-	async function load() {
-		loadError = '';
-		try {
-			show(await api.get<AlertSettings>('/manager/alerts'));
-		} catch (e) {
-			loadError = message(e);
-		}
-	}
-	onMount(load);
+	});
+	const saved = $derived(setting.saved);
 
 	const sorted = (l: string[]) => l.toSorted().join(',');
 	const changed = $derived(
@@ -62,12 +50,9 @@
 	const whole = (n: number, lo: number, hi: number) => Number.isInteger(n) && n >= lo && n <= hi;
 	const valid = $derived(whole(diskGB, 1, 10000) && whole(memPct, 50, 99) && whole(memMinutes, 1, 1440));
 
-	async function save(e: SubmitEvent) {
+	function save(e: SubmitEvent) {
 		e.preventDefault();
-		busy = true;
-		const s = await attempt(() => api.patch<AlertSettings>('/manager/alerts', { webhook: webhook.trim(), off, diskGB, memPct, memMinutes }), 'Saved');
-		busy = false;
-		if (s) show(s);
+		setting.save({ webhook: webhook.trim(), off, diskGB, memPct, memMinutes });
 	}
 
 	// Sends to the address in the box, saved or not, so it can be tried first.
@@ -81,7 +66,7 @@
 </script>
 
 {#if !saved}
-	{#if loadError}<LoadError error={loadError} onretry={load} />{:else}<Loading />{/if}
+	{#if setting.error}<LoadError error={setting.error} onretry={setting.load} />{:else}<Loading />{/if}
 {:else}
 	<form class="space-y-4" onsubmit={save}>
 		<p class="text-sm text-muted">
@@ -132,7 +117,7 @@
 			{/each}
 		</fieldset>
 		<div class="flex flex-wrap gap-2">
-			<button class="btn btn-primary" disabled={!changed || !valid || busy}>Save</button>
+			<button class="btn btn-primary" disabled={!changed || !valid || setting.busy}>Save</button>
 			<button type="button" class="btn" disabled={!webhook.trim() || testing} onclick={test}><Icon name="send" size={14} /> Send a test</button>
 		</div>
 	</form>

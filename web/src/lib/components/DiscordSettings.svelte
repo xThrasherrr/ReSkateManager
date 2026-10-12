@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, message, type DiscordSettings } from '#lib/api.js';
+	import { api, type DiscordSettings } from '#lib/api.js';
 	import { attempt } from '#lib/toast.svelte.js';
+	import { Setting } from '#lib/setting.svelte.js';
 	import { ask } from '#lib/ask.svelte.js';
 	import { ago, httpUrl } from '#lib/format.js';
 	import Icon from './Icon.svelte';
@@ -9,42 +10,32 @@
 	import LoadError from './LoadError.svelte';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
 
-	let saved = $state.raw<DiscordSettings | null>(null);
 	let token = $state(''); // a new token to save; the saved one never comes back
 	let channel = $state('');
 	let joinCodes = $state(true);
 	let title = $state('');
-	let busy = $state(false);
 	let testing = $state(false);
 
-	function show(s: DiscordSettings) {
-		saved = s;
+	const setting = new Setting<DiscordSettings>('/manager/discord', (s) => {
 		token = '';
 		channel = s.channel;
 		joinCodes = s.joinCodes;
 		title = s.title;
-	}
-	let loadError = $state('');
-	async function load() {
-		loadError = '';
-		try {
-			show(await api.get<DiscordSettings>('/manager/discord'));
-		} catch (e) {
-			loadError = message(e);
-		}
-	}
+	});
+	const saved = $derived(setting.saved);
+	const busy = $derived(setting.busy);
+
 	// The message is edited every minute or so: keep its time and any problem current.
 	async function refresh() {
 		if (!saved || busy) return;
 		try {
 			const s = await api.get<DiscordSettings>('/manager/discord');
-			if (saved) saved = { ...saved, status: s.status };
+			if (setting.saved) setting.saved = { ...setting.saved, status: s.status };
 		} catch {
 			// the next one may get through
 		}
 	}
 	onMount(() => {
-		load();
 		const t = setInterval(refresh, 30_000);
 		return () => clearInterval(t);
 	});
@@ -66,22 +57,20 @@
 	const on = $derived(!!saved?.tokenSet && !!saved.channel);
 	const status = $derived(saved?.status ?? {});
 
-	async function save(e: SubmitEvent) {
+	function save(e: SubmitEvent) {
 		e.preventDefault();
 		const body: Record<string, unknown> = { channel: channel.trim(), joinCodes, title: title.trim() };
 		if (token.trim()) body.token = token.trim();
-		busy = true;
-		const s = await attempt(() => api.patch<DiscordSettings>('/manager/discord', body), 'Saved');
-		busy = false;
-		if (s) show(s);
+		setting.save(body);
 	}
 
 	// Saving nothing new tries Discord again at once, as after inviting the bot.
+	// Only the status is taken from the answer: the boxes stay as they are.
 	async function retry() {
-		busy = true;
+		setting.busy = true;
 		const s = await attempt(() => api.patch<DiscordSettings>('/manager/discord', {}));
-		busy = false;
-		if (s) saved = { ...saved!, status: s.status };
+		setting.busy = false;
+		if (s) setting.saved = { ...setting.saved!, status: s.status };
 	}
 
 	async function removeToken() {
@@ -91,11 +80,11 @@
 			action: 'Remove'
 		});
 		if (!go) return;
-		busy = true;
+		setting.busy = true;
 		const s = await attempt(() => api.patch<DiscordSettings>('/manager/discord', { token: '' }), 'Removed the bot token');
-		busy = false;
+		setting.busy = false;
 		if (!s) return;
-		saved = s;
+		setting.saved = s;
 		token = '';
 	}
 
@@ -113,7 +102,7 @@
 </script>
 
 {#if !saved}
-	{#if loadError}<LoadError error={loadError} onretry={load} />{:else}<Loading />{/if}
+	{#if setting.error}<LoadError error={setting.error} onretry={setting.load} />{:else}<Loading />{/if}
 {:else}
 	<form class="space-y-4" onsubmit={save}>
 		<p class="text-sm text-muted">

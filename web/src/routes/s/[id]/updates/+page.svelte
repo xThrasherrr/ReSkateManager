@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount } from 'svelte';
 	import { api, message, type UpdateStatus } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { attempt, flip, toast } from '#lib/toast.svelte.js';
-	import { ago, bytes } from '#lib/format.js';
+	import { ago, bytes, plural } from '#lib/format.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
@@ -28,10 +28,7 @@
 		}
 		checking = false;
 	}
-	$effect(() => {
-		ctx.id;
-		untrack(load);
-	});
+	onMount(load);
 	// Poll while a job runs. On busy, not st, so each answer keeps the same timer.
 	$effect(() => {
 		if (!busy) return;
@@ -94,7 +91,7 @@
 				<div class="mt-4 flex flex-wrap gap-2 border-t-2 border-line pt-4">
 					{#if running && players > 0}
 						<button class="btn btn-primary" disabled={starting} onclick={() => start('empty')}><Icon name="download" size={14} /> Install when the server is empty</button>
-						<button class="btn h-auto min-h-8 py-1 text-left" disabled={starting} onclick={() => start('now')}>Install now (warns {players} player{players === 1 ? '' : 's'}, restarts in 60 s)</button>
+						<button class="btn h-auto min-h-8 py-1 text-left" disabled={starting} onclick={() => start('now')}>Install now (warns {plural(players, 'player')}, restarts in 60 s)</button>
 					{:else}
 						<button class="btn btn-primary" disabled={starting} onclick={() => start('now')}>
 							<Icon name="download" size={14} />

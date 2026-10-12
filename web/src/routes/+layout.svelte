@@ -6,11 +6,11 @@
 	import { page } from '$app/state';
 	import { session } from '#lib/session.svelte.js';
 	import { instances } from '#lib/instances.svelte.js';
-	import Icon from '#lib/components/Icon.svelte';
+	import Icon, { type IconName } from '#lib/components/Icon.svelte';
 	import Toasts from '#lib/components/Toasts.svelte';
 	import Uploads from '#lib/components/Uploads.svelte';
-	import Modal from '#lib/components/Modal.svelte';
 	import Asker from '#lib/components/Asker.svelte';
+	import { ask } from '#lib/ask.svelte.js';
 	import { afterSignIn, api, loginPath, message, sleep } from '#lib/api.js';
 	import { attempt, onRaise, toast } from '#lib/toast.svelte.js';
 	import { httpUrl, stateColor, stateLabel } from '#lib/format.js';
@@ -43,6 +43,12 @@
 			else if (!session.user && here !== '/login') goto(loginPath(here + location.search), { replace: true });
 			else if (session.user && here === '/login') goto(afterSignIn(page.url.searchParams.get('next')), { replace: true });
 		})();
+		// The sidebar opens folded or not, as it was left.
+		try {
+			rail = localStorage.getItem('rsm.rail') === '1';
+		} catch {
+			/* storage may be unavailable */
+		}
 	});
 
 	// Poll the server list while signed in. A boolean, so a session refresh that
@@ -73,10 +79,6 @@
 	let rail = $state(false);
 	const folded = $derived(rail && desktop.current);
 	let navigated = false;
-	afterNavigate(() => {
-		drawer = false;
-		navigated = true;
-	});
 
 	// The open drawer holds the focus; closed, it hands it back to the menu
 	// button, unless a link in it was followed and the new page has it.
@@ -96,16 +98,12 @@
 	// A page that crashes shows why, in place, rather than leaving a blank
 	// area; going to another page tries again.
 	let retryPage: (() => void) | null = null;
+	// Going to another page also closes the drawer, and leaves the focus to that page.
 	afterNavigate(() => {
+		drawer = false;
+		navigated = true;
 		retryPage?.();
 		retryPage = null;
-	});
-	onMount(() => {
-		try {
-			rail = localStorage.getItem('rsm.rail') === '1';
-		} catch {
-			/* storage may be unavailable */
-		}
 	});
 	function toggleRail() {
 		rail = !rail;
@@ -116,12 +114,17 @@
 		}
 	}
 
-	let confirmUpdate = $state(false);
 	let installing = $state(false);
 	let restarting = $state('');
 
-	async function installUpdate() {
-		confirmUpdate = false;
+	async function installUpdate(version: string) {
+		const go = await ask({
+			title: `Update the manager to ${version}?`,
+			body: `The manager downloads ${version}, checks it, and restarts into it. Every server stops for the restart, so players are dropped; the servers running now start again afterwards. This page reconnects by itself.`,
+			action: 'Update and restart',
+			danger: false
+		});
+		if (!go) return;
 		installing = true;
 		const r = await attempt(() => api.post<{ version: string }>('/manager/update'));
 		installing = false;
@@ -130,7 +133,7 @@
 		// The manager is down for a few seconds; reload once the new one answers.
 		const until = Date.now() + 120_000;
 		while (Date.now() < until) {
-			await new Promise((ok) => setTimeout(ok, 2000));
+			await sleep(2000);
 			try {
 				if ((await api.get<{ version: string }>('/auth/me')).version === r.version) return location.reload();
 			} catch {
@@ -212,7 +215,7 @@
 					{:else}
 						Manager {up.version} is out.
 						<div class="mt-1 flex gap-3">
-							<button class="font-bold underline-offset-2 hover:underline" disabled={installing} onclick={() => (confirmUpdate = true)}
+							<button class="font-bold underline-offset-2 hover:underline" disabled={installing} onclick={() => installUpdate(up.version)}
 								>{installing ? 'Installing…' : 'Install'}</button
 							>
 							<a href={httpUrl(up.url)} target="_blank" rel="noreferrer" class="underline-offset-2 hover:underline">What's new</a>
@@ -222,19 +225,20 @@
 				<button
 					class="btn mx-auto mt-3 hidden size-9 bg-warn px-0 text-ink hover:bg-warn/85 rail:inline-flex"
 					disabled={installing || !!restarting}
-					onclick={() => (confirmUpdate = true)}
+					onclick={() => installUpdate(up.version)}
 					title={restarting ? `Restarting into manager ${restarting}…` : `Manager ${up.version} is out`}
 					aria-label="Install manager {up.version}"><Icon name="download" size={16} /></button
 				>
 			{/if}
 			<nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3 text-sm">
-				<a href="/" class="nav-link {path === '/' ? 'nav-link-active' : ''}" title={folded ? 'Dashboard' : undefined}>
-					<Icon name="home" /> <span class="rail:hidden">Dashboard</span>
-				</a>
-				{#if session.can('host.view')}
-					<a href="/host" class="nav-link {path === '/host' ? 'nav-link-active' : ''}" title={folded ? 'Host' : undefined}>
-						<Icon name="cpu" /> <span class="rail:hidden">Host</span>
+				{#snippet navLink(href: string, icon: IconName, label: string)}
+					<a {href} class="nav-link {path === href ? 'nav-link-active' : ''}" title={folded ? label : undefined}>
+						<Icon name={icon} /> <span class="rail:hidden">{label}</span>
 					</a>
+				{/snippet}
+				{@render navLink('/', 'home', 'Dashboard')}
+				{#if session.can('host.view')}
+					{@render navLink('/host', 'cpu', 'Host')}
 				{/if}
 				<div class="nav-heading">Servers</div>
 				{#each instances.list as inst (inst.id)}
@@ -262,30 +266,20 @@
 					{/if}
 				{/each}
 				{#if session.canAny('settings.view')}
-					<a href="/shared-mods" class="nav-link {path === '/shared-mods' ? 'nav-link-active' : ''}" title={folded ? 'Shared mods' : undefined}>
-						<Icon name="package" /> <span class="rail:hidden">Shared mods</span>
-					</a>
-					<a href="/browse" class="nav-link {path === '/browse' ? 'nav-link-active' : ''}" title={folded ? 'Browse mods' : undefined}>
-						<Icon name="search" /> <span class="rail:hidden">Browse mods</span>
-					</a>
+					{@render navLink('/shared-mods', 'package', 'Shared mods')}
+					{@render navLink('/browse', 'search', 'Browse mods')}
 				{/if}
 				{#if session.can('panel.users.manage') || session.can('audit.view')}
 					<div class="nav-heading">Panel</div>
 				{/if}
 				{#if session.can('panel.users.manage')}
-					<a href="/users" class="nav-link {path === '/users' ? 'nav-link-active' : ''}" title={folded ? 'Users & roles' : undefined}>
-						<Icon name="users" /> <span class="rail:hidden">Users &amp; roles</span>
-					</a>
+					{@render navLink('/users', 'users', 'Users & roles')}
 				{/if}
 				{#if session.can('audit.view')}
-					<a href="/audit" class="nav-link {path === '/audit' ? 'nav-link-active' : ''}" title={folded ? 'Audit log' : undefined}>
-						<Icon name="list" /> <span class="rail:hidden">Audit log</span>
-					</a>
+					{@render navLink('/audit', 'list', 'Audit log')}
 				{/if}
 				{#if session.user.owner}
-					<a href="/manager" class="nav-link {path === '/manager' ? 'nav-link-active' : ''}" title={folded ? 'Manager' : undefined}>
-						<Icon name="settings" /> <span class="rail:hidden">Manager</span>
-					</a>
+					{@render navLink('/manager', 'settings', 'Manager')}
 				{/if}
 			</nav>
 			<div class="flex items-center gap-1 border-t-2 border-line p-3 rail:flex-col">
@@ -345,18 +339,6 @@
 			</main>
 		</div>
 	</div>
-	{#if up}
-		<Modal bind:open={confirmUpdate} title="Update the manager to {up.version}?">
-			<p class="text-sm text-muted">
-				The manager downloads {up.version}, checks it, and restarts into it. Every server stops for the restart, so players are dropped;
-				the servers running now start again afterwards. This page reconnects by itself.
-			</p>
-			{#snippet actions()}
-				<button class="btn" onclick={() => (confirmUpdate = false)}>Cancel</button>
-				<button class="btn btn-primary" onclick={installUpdate}>Update and restart</button>
-			{/snippet}
-		</Modal>
-	{/if}
 {:else}
 	<div class="grid h-dvh place-items-center p-6 text-center">
 		<div>

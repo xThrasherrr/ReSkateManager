@@ -7,11 +7,11 @@
 	import { session } from '#lib/session.svelte.js';
 	import { attempt, toast } from '#lib/toast.svelte.js';
 	import { sendChunks } from '#lib/uploads.svelte.js';
-	import { duration, stateColor } from '#lib/format.js';
+	import { duration, moving, stateColor } from '#lib/format.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import StateBadge from '#lib/components/StateBadge.svelte';
 	import Modal from '#lib/components/Modal.svelte';
-	import { ask } from '#lib/ask.svelte.js';
+	import { dropPlayers, lifecycle } from '#lib/lifecycle.js';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
 	import { serverNameProblem } from '#lib/text.js';
 	import Progress from '#lib/components/Progress.svelte';
@@ -20,6 +20,11 @@
 	let name = $state('');
 	// A fresh install, a folder already on the host (owners only), or an export from another manager.
 	let mode = $state<'install' | 'folder' | 'export'>('install');
+	const modes: { value: typeof mode; label: string; help: string; owner?: boolean }[] = [
+		{ value: 'install', label: 'Install fresh', help: 'Download the latest release into a new folder.' },
+		{ value: 'folder', label: 'Existing folder', help: 'Manage a server you already set up.', owner: true },
+		{ value: 'export', label: 'From an export', help: 'A server exported from another manager.' }
+	];
 	let dir = $state('');
 	let busy = $state(false);
 
@@ -99,15 +104,12 @@
 
 	// The server whose start or stop is on its way, so its button waits for it.
 	let asking = $state('');
-	async function lifecycle(inst: InstanceView, action: 'start' | 'stop') {
+	async function act(inst: InstanceView, action: 'start' | 'stop') {
 		if (asking) return;
-		const n = inst.state === 'running' ? inst.players : 0;
-		if (action === 'stop' && n > 0 && !(await ask({ title: `Stop ${inst.name}?`, body: `${`${n} player${n === 1 ? ' is' : 's are'} on`}. They are dropped.`, action: 'Stop' })))
-			return;
+		if (action === 'stop' && !(await dropPlayers(inst.name, action, inst.state === 'running' ? inst.players : 0))) return;
 		asking = inst.id;
-		await attempt(() => api.post(`/instances/${inst.id}/${action}`));
+		await lifecycle(inst.id, action);
 		asking = '';
-		instances.refresh();
 	}
 
 	let now = $state(Date.now());
@@ -168,9 +170,8 @@
 	<div class="grid gap-4 sm:gap-5 md:grid-cols-2 xl:grid-cols-3">
 		{#each instances.list as inst (inst.id)}
 			{@const canLife = inst.permissions?.includes('server.lifecycle')}
-			{@const moving = inst.state === 'starting' || inst.state === 'stopping' || inst.state === 'updating'}
 			<div class="card flex flex-col overflow-hidden transition-[translate,box-shadow] hover:-translate-y-0.5 hover:shadow-sticker-lg">
-				<div class="h-2.5 border-b-2 border-ink {stateColor[inst.state]} {moving ? 'tape-stripes animate-tape' : ''}"></div>
+				<div class="h-2.5 border-b-2 border-ink {stateColor[inst.state]} {moving(inst.state) ? 'tape-stripes animate-tape' : ''}"></div>
 				<a href="/s/{inst.id}" class="block flex-1 p-4">
 					<div class="mb-4 flex items-start justify-between gap-2">
 						<div class="min-w-0">
@@ -203,9 +204,9 @@
 				{#if canLife}
 					<div class="flex gap-2 border-t-2 border-line bg-sunken/40 p-3">
 						{#if inst.state === 'running' || inst.state === 'starting'}
-							<button class="btn btn-sm" disabled={asking === inst.id} onclick={() => lifecycle(inst, 'stop')}><Icon name="stop" size={14} /> Stop</button>
+							<button class="btn btn-sm" disabled={asking === inst.id} onclick={() => act(inst, 'stop')}><Icon name="stop" size={14} /> Stop</button>
 						{:else}
-							<button class="btn btn-sm" disabled={asking === inst.id || !inst.installed || inst.state === 'stopping' || inst.state === 'updating'} onclick={() => lifecycle(inst, 'start')}
+							<button class="btn btn-sm" disabled={asking === inst.id || !inst.installed || inst.state === 'stopping' || inst.state === 'updating'} onclick={() => act(inst, 'start')}
 								><Icon name="play" size={14} /> Start</button
 							>
 						{/if}
@@ -231,20 +232,14 @@
 		<fieldset>
 			<legend class="label">Where it comes from</legend>
 			<div class="grid gap-2 text-sm {session.perms?.owner ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}">
-				<label class="flex cursor-pointer items-start gap-2 rounded-xl border-2 p-3 transition-colors {mode === 'install' ? 'border-accent bg-accent/10' : 'border-line-strong hover:border-muted'}">
-					<input type="radio" bind:group={mode} value="install" class="mt-0.5" disabled={busy} />
-					<span><span class="font-medium">Install fresh</span><br /><span class="text-xs text-muted">Download the latest release into a new folder.</span></span>
-				</label>
-				{#if session.perms?.owner}
-					<label class="flex cursor-pointer items-start gap-2 rounded-xl border-2 p-3 transition-colors {mode === 'folder' ? 'border-accent bg-accent/10' : 'border-line-strong hover:border-muted'}">
-						<input type="radio" bind:group={mode} value="folder" class="mt-0.5" disabled={busy} />
-						<span><span class="font-medium">Existing folder</span><br /><span class="text-xs text-muted">Manage a server you already set up.</span></span>
-					</label>
-				{/if}
-				<label class="flex cursor-pointer items-start gap-2 rounded-xl border-2 p-3 transition-colors {mode === 'export' ? 'border-accent bg-accent/10' : 'border-line-strong hover:border-muted'}">
-					<input type="radio" bind:group={mode} value="export" class="mt-0.5" disabled={busy} />
-					<span><span class="font-medium">From an export</span><br /><span class="text-xs text-muted">A server exported from another manager.</span></span>
-				</label>
+				{#each modes as m (m.value)}
+					{#if !m.owner || session.perms?.owner}
+						<label class="flex cursor-pointer items-start gap-2 rounded-xl border-2 p-3 transition-colors {mode === m.value ? 'border-accent bg-accent/10' : 'border-line-strong hover:border-muted'}">
+							<input type="radio" bind:group={mode} value={m.value} class="mt-0.5" disabled={busy} />
+							<span><span class="font-medium">{m.label}</span><br /><span class="text-xs text-muted">{m.help}</span></span>
+						</label>
+					{/if}
+				{/each}
 			</div>
 		</fieldset>
 		{#if mode === 'export'}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import { uploads, type Upload } from '#lib/uploads.svelte.js';
-	import { bytes } from '#lib/format.js';
+	import { running, uploads, working, type Upload } from '#lib/uploads.svelte.js';
+	import { bytes, plural } from '#lib/format.js';
 	import Icon from './Icon.svelte';
 	import Progress from './Progress.svelte';
 
@@ -12,7 +12,7 @@
 	const total = $derived(uploads.list.length);
 	const done = $derived(uploads.list.filter((u) => u.status === 'done').length);
 	const failed = $derived(uploads.list.filter((u) => u.status === 'failed').length);
-	const current = $derived(uploads.list.find((u) => u.status === 'uploading' || u.status === 'downloading' || u.status === 'installing'));
+	const current = $derived(uploads.list.find(working));
 	const overall = $derived(total ? (done + failed + (current?.progress ?? 0)) / total : 0);
 
 	const title = $derived(
@@ -20,7 +20,7 @@
 			? `Installing mods · ${done + failed + 1} of ${total}`
 			: failed
 				? `${done} installed, ${failed} failed`
-				: `${done} mod${done === 1 ? '' : 's'} installed`
+				: `${plural(done, 'mod')} installed`
 	);
 
 	function status(u: Upload) {
@@ -76,7 +76,6 @@
 		{:else}
 			<ul class="max-h-[min(20rem,40vh)] divide-y divide-line/60 overflow-y-auto border-t-2 border-line">
 				{#each uploads.list as u (u.id)}
-					{@const busy = u.status === 'uploading' || u.status === 'downloading' || u.status === 'installing'}
 					<li class="space-y-1.5 px-3 py-2">
 						<div class="flex items-center gap-2">
 							<div class="min-w-0 flex-1">
@@ -102,7 +101,7 @@
 								>
 							{/if}
 						</div>
-						{#if u.status === 'queued' || busy}
+						{#if running(u)}
 							<Progress value={u.status === 'installing' ? null : u.status === 'queued' ? 0 : u.progress} label="{u.name}: {status(u)}" />
 						{:else if u.status === 'failed' && open.has(u.id)}
 							<div class="rounded-lg border-2 border-bad/40 bg-bad/5 px-2.5 py-2 text-xs">

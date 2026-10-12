@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { api, ApiError, mapChoices, message, type Field, type ModList } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { session } from '#lib/session.svelte.js';
@@ -17,10 +17,11 @@
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
-	import { control, utf8Length } from '#lib/text.js';
-	import { maxVotes, voteProblems, type CustomVote } from '#lib/votes.js';
-	import { commandProblems, maxCommands } from '#lib/commands.js';
-	import { maxParkMods, parkModProblems } from '#lib/parkmods.js';
+	import { control, hexColour, utf8Length } from '#lib/text.js';
+	import { plural } from '#lib/format.js';
+	import { voteProblems, type CustomVote } from '#lib/votes.js';
+	import { commandProblems } from '#lib/commands.js';
+	import { parkModProblems } from '#lib/parkmods.js';
 
 	interface Result {
 		command: string;
@@ -64,14 +65,15 @@
 			error = message(e);
 		}
 	}
-	$effect(() => {
-		ctx.id;
-		untrack(load);
-	});
-	// Which settings the server's build knows is only told once it runs.
+	onMount(load);
+	// Which settings the server's build knows is only told once it runs: ask
+	// again as it comes up. Up already on opening, load() has asked.
 	const beginUnknown = newest();
+	let was = ctx.live.state?.state;
 	$effect(() => {
-		if (status !== 'running') return;
+		const up = status === 'running' && was !== 'running';
+		was = status;
+		if (!up) return;
 		const current = beginUnknown();
 		untrack(() => api.get<{ unknown?: string[]; gone?: string[] }>(`/instances/${ctx.id}/settings`)).then(
 			(r) => {
@@ -97,12 +99,13 @@
 	const maps = $derived(modList ? mapChoices(modList) : null);
 	// What a park mod can name: the folders in the server's Mods, and its maps.
 	const modFolders = $derived((modList?.mods ?? []).filter((m) => !m.disabled).map((m) => m.folder));
-	const mapNames = $derived(maps ? [...maps.retail, ...maps.mods.flatMap((m) => m.maps.map((x) => x.name))] : []);
+	const modMaps = $derived(maps ? maps.mods.flatMap((m) => m.maps.map((x) => x.name)) : []);
+	const mapNames = $derived(maps ? [...maps.retail, ...modMaps] : []);
 	// A saved map the list doesn't have (a level path, or a mod since removed) stays selectable.
 	const unlisted = $derived.by(() => {
 		const v = values.map as string | undefined;
 		if (!maps || !v) return '';
-		const all = [...maps.retail, ...maps.removed, ...maps.mods.flatMap((m) => m.maps.map((x) => x.name))];
+		const all = [...maps.retail, ...maps.removed, ...modMaps];
 		return all.includes(v) ? '' : v;
 	});
 
@@ -153,6 +156,13 @@
 
 	guardUnsaved(() => canEdit && dirty.length > 0);
 
+	// The settings that are lists of things, each with its own checks.
+	const lists: Partial<Record<Field['type'], { noun: string; problems: (list: any[]) => string[] }>> = {
+		votes: { noun: 'votes', problems: voteProblems },
+		commands: { noun: 'commands', problems: commandProblems },
+		parkmods: { noun: 'park mods', problems: parkModProblems }
+	};
+
 	// What is wrong with a changed value by the rules every setting shares, as
 	// the manager checks them: rules of one setting alone it says on saving.
 	function problem(f: Field, v: unknown): string {
@@ -167,31 +177,23 @@
 			if (control.test(v)) return "It can't hold control characters.";
 			if (f.maxLen && utf8Length(v) > f.maxLen) return `At most ${f.maxLen} bytes.`;
 		}
-		if (f.type === 'color' && !colour.test(String(v ?? ''))) return 'Enter a colour like #8E5CFF.';
+		if (f.type === 'color' && !hexColour.test(String(v ?? ''))) return 'Enter a colour like #8E5CFF.';
 		if (f.type === 'lines' && Array.isArray(v)) {
 			if (f.max && v.length > f.max) return `At most ${f.max}.`;
 			if (v.some((l) => control.test(l))) return "They can't hold control characters.";
 			if (f.maxLen && v.some((l) => utf8Length(l) > f.maxLen!)) return `Each is at most ${f.maxLen} bytes.`;
 		}
-		if (f.type === 'votes' && Array.isArray(v)) {
-			if (v.length > maxVotes) return `At most ${maxVotes} votes.`;
-			if (voteProblems(v).some(Boolean)) return 'Fix the votes marked in red.';
-		}
-		if (f.type === 'commands' && Array.isArray(v)) {
-			if (v.length > maxCommands) return `At most ${maxCommands} commands.`;
-			if (commandProblems(v).some(Boolean)) return 'Fix the commands marked in red.';
-		}
-		if (f.type === 'parkmods' && Array.isArray(v)) {
-			if (v.length > maxParkMods) return `At most ${maxParkMods} park mods.`;
-			if (parkModProblems(v).some(Boolean)) return 'Fix the park mods marked in red.';
+		const list = lists[f.type];
+		if (list && Array.isArray(v)) {
+			if (f.max && v.length > f.max) return `At most ${f.max} ${list.noun}.`;
+			if (list.problems(v).some(Boolean)) return `Fix the ${list.noun} marked in red.`;
 		}
 		return '';
 	}
-	const colour = /^#?[0-9a-f]{6}$/i;
 	// The server's chat colours as players will see them, or the saved ones while one is half typed.
 	const shown = (key: string) => {
 		const v = String(values[key] ?? '');
-		return colour.test(v) ? `#${v.replace('#', '')}` : String(saved[key] ?? '');
+		return hexColour.test(v) ? `#${v.replace('#', '')}` : String(saved[key] ?? '');
 	};
 	const problems = $derived(Object.fromEntries(fields.filter((f) => dirty.includes(f.key)).map((f) => [f.key, problem(f, values[f.key])])));
 	const blocked = $derived(Object.values(problems).some(Boolean));
@@ -285,11 +287,11 @@
 										placeholder={'Join our Discord: discord.gg/…\nBe nice: no griefing.'}
 									/>
 								{:else if f.type === 'votes'}
-									<CustomVotes id={f.key} bind:value={values[f.key]} saved={(saved[f.key] as CustomVote[] | undefined) ?? []} disabled={locked} />
+									<CustomVotes id={f.key} bind:value={values[f.key]} max={f.max} saved={(saved[f.key] as CustomVote[] | undefined) ?? []} disabled={locked} />
 								{:else if f.type === 'commands'}
-									<CustomCommands id={f.key} bind:value={values[f.key]} disabled={locked} />
+									<CustomCommands id={f.key} bind:value={values[f.key]} max={f.max} disabled={locked} />
 								{:else if f.type === 'parkmods'}
-									<ParkMods id={f.key} bind:value={values[f.key]} folders={modFolders} maps={mapNames} disabled={locked} />
+									<ParkMods id={f.key} bind:value={values[f.key]} max={f.max} folders={modFolders} maps={mapNames} disabled={locked} />
 								{:else if f.type === 'list'}
 									<textarea
 										id={f.key}
@@ -351,7 +353,7 @@
 									<a class="mt-1 inline-block text-xs text-accent hover:underline" href="/s/{ctx.id}/mods">View map mods</a>
 								{:else if f.long}
 									<!-- The server takes it as one chat line, so line breaks become spaces. Its limit is in bytes. -->
-									{@const used = new TextEncoder().encode(String(values[f.key] ?? '')).length}
+									{@const used = utf8Length(String(values[f.key] ?? ''))}
 									<textarea
 										id={f.key}
 										class="input h-auto min-h-16 resize-y py-1.5 leading-snug"
@@ -396,7 +398,7 @@
 
 		{#if canEdit && dirty.length}
 			<div class="sticky bottom-4 z-40 flex animate-pop items-center gap-2 rounded-xl border-2 border-ink bg-warn px-3 py-2.5 text-ink shadow-sticker-lg sm:bottom-6 sm:gap-3 sm:px-4 sm:py-3">
-				<span class="font-display text-base leading-tight sm:text-lg">{dirty.length} unsaved change{dirty.length === 1 ? '' : 's'}</span>
+				<span class="font-display text-base leading-tight sm:text-lg">{plural(dirty.length, 'unsaved change')}</span>
 				<button class="btn ml-auto" onclick={() => (values = structuredClone(saved))}>Discard</button>
 				<button class="btn btn-primary" disabled={busy || blocked} title={blocked ? 'Fix the settings marked in red first' : undefined} onclick={() => save(false)}>{busy ? 'Saving…' : 'Save'}</button>
 			</div>

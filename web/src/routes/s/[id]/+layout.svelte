@@ -2,21 +2,20 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, type Perm } from '#lib/api.js';
+	import type { Perm } from '#lib/api.js';
 	import { Live } from '#lib/live.svelte.js';
 	import { setLive } from '#lib/context.js';
 	import { session } from '#lib/session.svelte.js';
 	import { instances } from '#lib/instances.svelte.js';
-	import { attempt } from '#lib/toast.svelte.js';
 	import { copy } from '#lib/clipboard.js';
-	import { duration, stateColor } from '#lib/format.js';
+	import { duration, moving, stateColor } from '#lib/format.js';
 	import Icon, { type IconName } from '#lib/components/Icon.svelte';
 	import StateBadge from '#lib/components/StateBadge.svelte';
-	import Modal from '#lib/components/Modal.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import type { LayoutProps } from './$types';
 	import { ask } from '#lib/ask.svelte.js';
+	import { dropPlayers, lifecycle } from '#lib/lifecycle.js';
 
 	let { children }: LayoutProps = $props();
 
@@ -60,25 +59,23 @@
 		untrack(() => instances.patch({ ...s, players }));
 	});
 	const running = $derived(st?.state === 'running' || st?.state === 'starting');
-	const moving = $derived(st?.state === 'starting' || st?.state === 'stopping' || st?.state === 'updating');
 
 	let busy = $state('');
 	async function act(action: 'start' | 'stop' | 'restart' | 'kill') {
-		const n = live?.count ?? 0;
-		if ((action === 'stop' || action === 'restart') && n > 0 && st) {
-			const go = await ask({
-				title: `${action === 'stop' ? 'Stop' : 'Restart'} ${st.name}?`,
-				body: `${`${n} player${n === 1 ? ' is' : 's are'} on`}. They are dropped${action === 'restart' ? ' and can rejoin once it is back up' : ''}.`,
-				action: action === 'stop' ? 'Stop' : 'Restart'
-			});
-			if (!go) return;
-		}
+		if ((action === 'stop' || action === 'restart') && st && !(await dropPlayers(st.name, action, live?.count ?? 0))) return;
+		if (
+			action === 'kill' &&
+			!(await ask({
+				title: 'Kill the server process?',
+				body: 'The server is not answering the stop request. Killing it skips the Steam logoff and players are dropped without a message.',
+				action: 'Kill'
+			}))
+		)
+			return;
 		busy = action;
-		await attempt(() => api.post(`/instances/${id}/${action}`));
+		await lifecycle(id, action);
 		busy = '';
-		instances.refresh();
 	}
-	let confirmKill = $state(false);
 
 	let now = $state(Date.now());
 	$effect(() => {
@@ -132,7 +129,7 @@
 {:else if st && live}
 	<div class="flex h-full flex-col">
 		<header class="border-b-2 border-ink bg-panel">
-			<div class="h-1.5 {stateColor[st.state]} {moving ? 'tape-stripes animate-tape' : ''}"></div>
+			<div class="h-1.5 {stateColor[st.state]} {moving(st.state) ? 'tape-stripes animate-tape' : ''}"></div>
 			<div class="flex flex-wrap items-start gap-x-4 gap-y-3 px-4 pt-3 sm:px-6 sm:pt-4">
 				<div class="min-w-0 flex-1">
 					<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -141,13 +138,14 @@
 						{#if !live.connected}<span class="font-marker text-xs text-warn">{live.state ? 'reconnecting…' : 'connecting…'}</span>{/if}
 					</div>
 					<div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted">
+						{#snippet chip(label: string, value: string | undefined, nums = true)}
+							<span class="rounded-md bg-raised px-2 py-1"><span class="text-faint">{label}</span> <span class="font-semibold text-fg {nums ? 'tabular-nums' : ''}">{value}</span></span>
+						{/snippet}
 						{#if st.state === 'running'}
-							<span class="rounded-md bg-raised px-2 py-1"><span class="text-faint">Players</span> <span class="font-semibold text-fg tabular-nums">{live.state ? live.count : st.players}/{st.info.maxPlayers ?? '?'}</span></span>
-							<span class="rounded-md bg-raised px-2 py-1"><span class="text-faint">Map</span> <span class="font-semibold text-fg">{st.info.map}</span></span>
-							<span class="rounded-md bg-raised px-2 py-1"><span class="text-faint">Up</span> <span class="font-semibold text-fg tabular-nums">{duration(st.readyAt, now)}</span></span>
-							{#if listed?.serverVersion}
-								<span class="rounded-md bg-raised px-2 py-1"><span class="text-faint">ReSkate</span> <span class="font-semibold text-fg tabular-nums">{listed.serverVersion}</span></span>
-							{/if}
+							{@render chip('Players', `${live.state ? live.count : st.players}/${st.info.maxPlayers ?? '?'}`)}
+							{@render chip('Map', st.info.map, false)}
+							{@render chip('Up', duration(st.readyAt, now))}
+							{#if listed?.serverVersion}{@render chip('ReSkate', listed.serverVersion)}{/if}
 							{#if st.info.joinCode}
 								<button class="inline-flex items-center gap-1.5 rounded-md border-2 border-dashed border-accent/60 px-2 py-0.5 transition-colors hover:border-accent hover:bg-accent/10 hover:text-fg" onclick={() => copy(st.info.joinCode!)} title="Copy join code">
 									<span class="text-faint">Join code</span> <span class="font-mono font-semibold text-accent">{st.info.joinCode}</span> <Icon name="copy" size={12} />
@@ -168,7 +166,7 @@
 							<button class="btn" disabled={!!busy || st.state === 'starting'} onclick={() => act('restart')}><Icon name="restart" size={14} /> Restart</button>
 							<button class="btn btn-danger" disabled={!!busy} onclick={() => act('stop')}><Icon name="stop" size={14} /> {busy === 'stop' ? 'Stopping…' : 'Stop'}</button>
 						{:else if st.state === 'stopping'}
-							<button class="btn btn-danger" disabled={!!busy} onclick={() => (confirmKill = true)}><Icon name="power" size={14} /> Kill</button>
+							<button class="btn btn-danger" disabled={!!busy} onclick={() => act('kill')}><Icon name="power" size={14} /> Kill</button>
 						{:else}
 							<button class="btn btn-primary" disabled={!!busy || !st.installed || st.state === 'updating'} onclick={() => act('start')}
 								><Icon name="play" size={14} /> Start</button
@@ -209,17 +207,3 @@
 		{/if}
 	</div>
 {/if}
-
-<Modal bind:open={confirmKill} title="Kill the server process?">
-	<p class="text-sm text-muted">The server is not answering the stop request. Killing it skips the Steam logoff and players are dropped without a message.</p>
-	{#snippet actions()}
-		<button class="btn" onclick={() => (confirmKill = false)}>Cancel</button>
-		<button
-			class="btn btn-danger"
-			onclick={() => {
-				confirmKill = false;
-				act('kill');
-			}}>Kill</button
-		>
-	{/snippet}
-</Modal>

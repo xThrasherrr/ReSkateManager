@@ -1,15 +1,16 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, message, type Player } from '#lib/api.js';
+	import { onMount, untrack } from 'svelte';
+	import { api, message, type Player, type RoleList } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { attempt } from '#lib/toast.svelte.js';
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
-	import { ago, dateTime, steamProfile } from '#lib/format.js';
+	import { ago, dateTime } from '#lib/format.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
+	import SteamId from '#lib/components/SteamId.svelte';
 	import { ask } from '#lib/ask.svelte.js';
 
 	interface Seen {
@@ -40,11 +41,8 @@
 			if (current()) historyError = message(e);
 		}
 	}
-	// untrack: the search runs on Enter, not on every keystroke in q.
-	$effect(() => {
-		ctx.id;
-		untrack(loadHistory);
-	});
+	// The search runs on Enter, not on every keystroke in q.
+	onMount(loadHistory);
 
 	let banTarget = $state.raw<{ id: string; name: string } | null>(null);
 	let banOpen = $state(false);
@@ -68,22 +66,16 @@
 	let adminOpen = $state(false);
 
 	// A server with roles (ReSkate 2.0.6) gives any of them here, not only admin.
-	interface RoleList {
-		roles: { name: string; players: { id: string; panel?: string }[] }[];
-		default: string;
-		hasRoles: boolean;
-	}
 	let roles = $state.raw<RoleList | null>(null);
 	let pick = $state('');
 	const beginRoles = newest();
-	$effect(() => {
-		ctx.id;
-		if (!ctx.can('ingame.admins.manage')) return;
+	async function loadRoles() {
 		const current = beginRoles();
-		untrack(() => api.get<RoleList>(`/instances/${ctx.id}/roles`)).then(
-			(r) => current() && (roles = r),
-			() => current() && (roles = null)
-		);
+		const r = await api.get<RoleList>(`/instances/${ctx.id}/roles`).catch(() => roles);
+		if (current()) roles = r;
+	}
+	$effect(() => {
+		if (ctx.can('ingame.admins.manage')) untrack(loadRoles);
 	});
 	const panelAdmin = (p: Player) => roles?.roles.some((r) => r.players.some((x) => x.id === p.id && x.panel)) ?? false;
 
@@ -99,7 +91,7 @@
 		const done = pick
 			? await attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/roles/players`, { id: t.id, role: pick }), (r) => r.reply)
 			: await attempt(() => api.del<{ reply: string }>(`/instances/${ctx.id}/roles/players/${t.id}`), (r) => r.reply);
-		if (done && roles) roles = await api.get<RoleList>(`/instances/${ctx.id}/roles`).catch(() => roles);
+		if (done && roles) loadRoles();
 	}
 	async function makeAdmin() {
 		if (!adminTarget) return;
@@ -127,9 +119,9 @@
 								<td>
 									<span class="font-medium">{p.name}</span>
 									{#if p.admin}<span class="sticker sticker-warn ml-2">Admin</span>{:else if p.role}<span class="sticker sticker-info ml-2">{p.role}</span>{/if}
-									<a class="block font-mono text-[11px] text-faint hover:text-fg md:hidden" href={steamProfile(p.id)} target="_blank" rel="noreferrer">{p.id}</a>
+									<SteamId id={p.id} small class="md:hidden" />
 								</td>
-								<td class="hidden md:table-cell"><a class="font-mono text-xs text-muted hover:text-fg" href={steamProfile(p.id)} target="_blank" rel="noreferrer">{p.id}</a></td>
+								<td class="hidden md:table-cell"><SteamId id={p.id} /></td>
 								<td class="hidden whitespace-nowrap text-muted sm:table-cell">{ago(p.joinedAt)}</td>
 								<td>
 									<div class="flex justify-end gap-1">
@@ -190,9 +182,9 @@
 							<tr>
 								<td class="font-medium">
 									{h.name}
-									<a class="block font-mono text-[11px] font-normal text-faint hover:text-fg md:hidden" href={steamProfile(h.id)} target="_blank" rel="noreferrer">{h.id}</a>
+									<SteamId id={h.id} small class="font-normal md:hidden" />
 								</td>
-								<td class="hidden md:table-cell"><a class="font-mono text-xs text-muted hover:text-fg" href={steamProfile(h.id)} target="_blank" rel="noreferrer">{h.id}</a></td>
+								<td class="hidden md:table-cell"><SteamId id={h.id} /></td>
 								<td class="hidden text-muted lg:table-cell">{dateTime(h.firstSeen)}</td>
 								<td class="hidden text-muted sm:table-cell">{dateTime(h.lastSeen)}</td>
 								<td class="tabular-nums">{h.sessions}</td>

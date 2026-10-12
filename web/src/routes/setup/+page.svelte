@@ -5,6 +5,7 @@
 	import { session } from '#lib/session.svelte.js';
 	import AuthShell from '#lib/components/AuthShell.svelte';
 	import AccessSettings from '#lib/components/AccessSettings.svelte';
+	import { usernamePattern } from '#lib/text.js';
 
 	let pin = $state('');
 	let filled = $state(false);
@@ -43,9 +44,6 @@
 			busy = false;
 		}
 	}
-
-	// For pattern attributes, where Svelte would read the braces as its own.
-	const usernamePattern = String.raw`[A-Za-z0-9_.\-]{3,32}`;
 </script>
 
 {#if step === 'owner'}

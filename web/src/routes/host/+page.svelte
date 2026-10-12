@@ -3,9 +3,9 @@
 	import { instances } from '#lib/instances.svelte.js';
 	import { session } from '#lib/session.svelte.js';
 	import { Samples } from '#lib/samples.svelte.js';
-	import { memory, memoryTop, niceTop, percent } from '#lib/format.js';
-	import StackChart, { type Series } from '#lib/components/StackChart.svelte';
-	import ChartCard from '#lib/components/ChartCard.svelte';
+	import { avg, count, memory, memoryTop, niceTop, percent, plural } from '#lib/format.js';
+	import type { Series } from '#lib/components/StackChart.svelte';
+	import SampleChart from '#lib/components/SampleChart.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
 	import RangePicker from '#lib/components/RangePicker.svelte';
 	import StatTile from '#lib/components/StatTile.svelte';
@@ -50,7 +50,6 @@
 
 	// The tiles' headline is the newest sample, while it is recent.
 	const fresh = $derived(data?.latest && data.latest.at >= samples.until - 3 * data.interval ? data.latest : null);
-	const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 	const stats = $derived({
 		cpuAvg: avg(points.map((p) => p.cpu)),
 		cpuPeak: Math.max(0, ...points.map((p) => p.cpuMax)),
@@ -81,7 +80,7 @@
 			label: 'Servers running',
 			now: fresh ? String(fresh.running) : '—',
 			of: fresh ? String(fresh.servers) : undefined,
-			sub: [points.length ? join(fresh && `${fresh.players} ${fresh.players === 1 ? 'player' : 'players'} online`, `peak ${stats.playersPeak}`) : none]
+			sub: [points.length ? join(fresh && `${plural(fresh.players, 'player')} online`,`peak ${stats.playersPeak}`) : none]
 		},
 		{
 			label: 'Manager',
@@ -121,7 +120,7 @@
 			layers: [],
 			ceil: (v: number) => niceTop(v, 4),
 			top: undefined,
-			format: (v: number) => String(Math.round(v))
+			format: count
 		}
 	]);
 </script>
@@ -148,23 +147,7 @@
 			{samples.range === '1h' ? 'no samples yet. the first lands about 30 seconds after the manager starts.' : 'no samples in this range.'}
 		</p>
 	{:else}
-		{#each charts as c (c.title)}
-			<ChartCard title={c.title} info={c.info}>
-				<StackChart
-					lines={c.lines}
-					layers={c.layers}
-					since={samples.since}
-					until={samples.until}
-					bucket={samples.bucket}
-					ticks={samples.ticks}
-					ceil={c.ceil}
-					top={c.top}
-					format={c.format}
-					bind:hover
-					label="{c.title}, last {samples.rangeName}"
-				/>
-			</ChartCard>
-		{/each}
+		{#each charts as c (c.title)}<SampleChart {samples} {...c} bind:hover />{/each}
 	{/if}
 
 	<section class="card">

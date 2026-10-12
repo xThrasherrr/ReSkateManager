@@ -1,43 +1,23 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { api, message } from '#lib/api.js';
+	import { onMount, untrack } from 'svelte';
+	import { api, message, type Admin, type RoleList, type ServerRole } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
-	import { attempt } from '#lib/toast.svelte.js';
+	import { attempt, toast } from '#lib/toast.svelte.js';
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
 	import { dateTime, steamProfile } from '#lib/format.js';
+	import { isSteamId } from '#lib/text.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
+	import SteamId from '#lib/components/SteamId.svelte';
 	import { ask } from '#lib/ask.svelte.js';
 	import { instances } from '#lib/instances.svelte.js';
-	import { toast } from '#lib/toast.svelte.js';
 
 	interface Ban {
 		id: string;
 		name: string;
 		added: number;
-	}
-	interface Admin {
-		id: string;
-		name?: string;
-		panel?: string; // kept in step for this panel user
-	}
-	// One of the server's roles (ReSkate 2.0.6, data/roles.json) and who was given it.
-	interface ServerRole {
-		name: string;
-		tag?: string;
-		color?: string;
-		rank: number;
-		commands: string[]; // "*" is every command but role and reserved
-		permissions: string[];
-		inherit: boolean; // also has what the default role has
-		players: Admin[];
-	}
-	interface RoleList {
-		roles: ServerRole[];
-		default: string;
-		hasRoles: boolean;
 	}
 
 	const ctx = useLive();
@@ -60,9 +40,11 @@
 	async function load() {
 		const current = begin();
 		try {
-			const b = await api.get<Ban[]>(`/instances/${ctx.id}/bans`);
-			const a = ctx.can('ingame.admins.manage') ? await api.get<Admin[]>(`/instances/${ctx.id}/admins`) : [];
-			const r = ctx.can('ingame.admins.manage') ? await api.get<RoleList>(`/instances/${ctx.id}/roles`) : null;
+			const [b, a, r] = await Promise.all([
+				api.get<Ban[]>(`/instances/${ctx.id}/bans`),
+				ctx.can('ingame.admins.manage') ? api.get<Admin[]>(`/instances/${ctx.id}/admins`) : [],
+				ctx.can('ingame.admins.manage') ? api.get<RoleList>(`/instances/${ctx.id}/roles`) : null
+			]);
 			const h = r?.hasRoles && ctx.can('players.view') ? await api.get<{ id: string; name: string }[]>(`/instances/${ctx.id}/history`) : [];
 			if (!current()) return;
 			bans = b;
@@ -75,10 +57,7 @@
 			if (current()) error = message(e);
 		}
 	}
-	$effect(() => {
-		ctx.id;
-		untrack(load);
-	});
+	onMount(load);
 	// Changes made in game or from the console land in the file too; refresh when the server reports one.
 	// Lines come in batches (a ban's leave line right behind it), so look at every new one.
 	const changed = /was (un)?banned|is (no longer )?an admin|^\S.* (is now [a-z0-9_-]+|is [a-z0-9_-]+ again|no longer has a role)\.$/;
@@ -97,7 +76,7 @@
 		if (hit) untrack(load);
 	});
 
-	const steamOk = (s: string) => /^7656119\d{10}$/.test(s.trim());
+	const busy = new Busy();
 
 	// A role's tag as the game draws it: its own colour, with text that reads on it.
 	function tagText(color = '') {
@@ -142,7 +121,6 @@
 		if (await busy.run(`role:${pl.id}`, () => attempt(() => api.del<{ reply: string }>(`/instances/${ctx.id}/roles/players/${pl.id}`), (r) => r.reply))) load();
 	}
 
-	const busy = new Busy();
 	async function addBan(e: SubmitEvent) {
 		e.preventDefault();
 		const body = { id: banId.trim(), name: banName.trim() };
@@ -182,7 +160,7 @@
 			<form onsubmit={addBan} class="flex flex-col gap-2 border-b-2 border-line bg-sunken/40 px-4 py-3 sm:flex-row">
 				<input class="input font-mono" placeholder="SteamID64" aria-label="SteamID64 to ban" bind:value={banId} required />
 				<input class="input" placeholder="Name (optional)" aria-label="Their name (optional)" bind:value={banName} maxlength="64" />
-				<button class="btn btn-danger shrink-0" disabled={!steamOk(banId) || busy.is()}><Icon name="ban" size={14} /> {busy.is('ban') ? 'Banning…' : 'Ban'}</button>
+				<button class="btn btn-danger shrink-0" disabled={!isSteamId(banId) || busy.is()}><Icon name="ban" size={14} /> {busy.is('ban') ? 'Banning…' : 'Ban'}</button>
 			</form>
 		{/if}
 		{#if bans.length}
@@ -191,8 +169,8 @@
 				<tbody>
 					{#each bans as b, i (i)}
 						<tr>
-							<td class="font-medium">{b.name || '—'}<a class="block font-mono text-[11px] font-normal text-faint hover:text-fg sm:hidden" href={steamProfile(b.id)} target="_blank" rel="noreferrer">{b.id}</a></td>
-							<td class="hidden sm:table-cell"><a class="font-mono text-xs text-muted hover:text-fg" href={steamProfile(b.id)} target="_blank" rel="noreferrer">{b.id}</a></td>
+							<td class="font-medium">{b.name || '—'}<SteamId id={b.id} small class="font-normal sm:hidden" /></td>
+							<td class="hidden sm:table-cell"><SteamId id={b.id} /></td>
 							<td class="hidden text-muted md:table-cell">{dateTime(b.added)}</td>
 							<td class="text-right">{#if ctx.can('players.ban')}<button class="btn btn-sm" disabled={busy.is()} onclick={() => unban(b)}>{busy.is(`unban:${b.id}`) ? 'Unbanning…' : 'Unban'}</button>{/if}</td>
 						</tr>
@@ -217,7 +195,7 @@
 			</div>
 			<form onsubmit={addAdmin} class="flex flex-col gap-2 border-b-2 border-line bg-sunken/40 px-4 py-3 sm:flex-row">
 				<input class="input font-mono" placeholder="SteamID64" aria-label="SteamID64 to make an admin" bind:value={adminId} required />
-				<button class="btn shrink-0" disabled={!steamOk(adminId) || busy.is()}><Icon name="plus" size={14} /> {busy.is('admin') ? 'Adding…' : 'Add admin'}</button>
+				<button class="btn shrink-0" disabled={!isSteamId(adminId) || busy.is()}><Icon name="plus" size={14} /> {busy.is('admin') ? 'Adding…' : 'Add admin'}</button>
 			</form>
 			{#if admins.length}
 				<table class="table">
@@ -230,9 +208,9 @@
 									{#if a.panel}<span class="ml-2 rounded bg-raised px-1.5 py-0.5 text-[10px] font-normal text-muted" title="Kept in step with this panel user's roles"
 											>panel · {a.panel}</span
 										>{/if}
-									<a class="block font-mono text-[11px] font-normal text-faint hover:text-fg sm:hidden" href={steamProfile(a.id)} target="_blank" rel="noreferrer">{a.id}</a>
+									<SteamId id={a.id} small class="font-normal sm:hidden" />
 								</td>
-								<td class="hidden sm:table-cell"><a class="font-mono text-xs text-muted hover:text-fg" href={steamProfile(a.id)} target="_blank" rel="noreferrer">{a.id}</a></td>
+								<td class="hidden sm:table-cell"><SteamId id={a.id} /></td>
 								<td class="text-right">{#if !a.panel}<button class="btn btn-sm" disabled={busy.is()} onclick={() => removeAdmin(a)}>{busy.is(`unadmin:${a.id}`) ? 'Removing…' : 'Remove'}</button>{/if}</td>
 							</tr>
 						{/each}
@@ -268,7 +246,7 @@
 							<span class="text-sm text-muted">Every server</span>
 						</label>
 					{/if}
-					<button class="btn shrink-0" disabled={!steamOk(roleId) || !roleName || busy.is()}><Icon name="plus" size={14} /> {busy.is('role') ? 'Giving…' : 'Give role'}</button>
+					<button class="btn shrink-0" disabled={!isSteamId(roleId) || !roleName || busy.is()}><Icon name="plus" size={14} /> {busy.is('role') ? 'Giving…' : 'Give role'}</button>
 				</form>
 				<table class="table">
 					<thead><tr><th>Role</th><th class="hidden md:table-cell">Rank</th><th class="hidden sm:table-cell">Can use</th><th>Players</th></tr></thead>

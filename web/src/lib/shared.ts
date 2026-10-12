@@ -1,4 +1,5 @@
 import type { SharedUse } from './api';
+import { plural } from './format';
 
 /** The choices for how a server uses the shared mods, in display order. */
 export const sharedUses: { use: SharedUse; label: string; help: string }[] = [
@@ -18,7 +19,7 @@ export const relinks = (from: SharedUse, to: SharedUse) => (from === 'off') !== 
 
 /** The toast after a server's use changed; swapped counts its copies that became links. */
 export function sharedDone(name: string, use: SharedUse, swapped: number) {
-	const copies = swapped ? `; ${swapped} matching cop${swapped === 1 ? 'y' : 'ies'} became links` : '';
+	const copies = swapped ? `; ${plural(swapped, 'matching copy', 'matching copies')} became links` : '';
 	if (use === 'off') return `${name} no longer uses the shared mods`;
 	return use === 'all' ? `${name} loads every shared mod${copies}` : `${name} loads only the shared mods picked for it${copies}`;
 }

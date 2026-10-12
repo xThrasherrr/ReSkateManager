@@ -1,14 +1,5 @@
-<script lang="ts">
-	import { tick, type Snippet } from 'svelte';
+<script lang="ts" module>
 	import type { Entry } from '#lib/api.js';
-
-	let {
-		entries,
-		filter = 'all',
-		search = '',
-		empty = 'No output yet.',
-		top
-	}: { entries: Entry[]; filter?: string; search?: string; empty?: string; top?: Snippet } = $props();
 
 	const all = () => true;
 	const groups: Partial<Record<string, (e: Entry) => boolean>> = {
@@ -19,6 +10,28 @@
 		anticheat: (e) => e.tag === 'anticheat',
 		manager: (e) => e.kind === 'manager'
 	};
+
+	/** The filters a page offers over the lines, as [group, button label]. */
+	export const filters: [string, string][] = [
+		['all', 'All'],
+		['chat', 'Chat'],
+		['players', 'Joins'],
+		['admin', 'Admin'],
+		['anticheat', 'Anti-cheat'],
+		['manager', 'Manager']
+	];
+</script>
+
+<script lang="ts">
+	import { tick, type Snippet } from 'svelte';
+
+	let {
+		entries,
+		filter = 'all',
+		search = '',
+		empty = 'No output yet.',
+		top
+	}: { entries: Entry[]; filter?: string; search?: string; empty?: string; top?: Snippet } = $props();
 
 	const shown = $derived.by(() => {
 		const f = groups[filter] ?? all;

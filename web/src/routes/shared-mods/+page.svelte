@@ -244,6 +244,13 @@
 	{/if}
 {/snippet}
 
+{#snippet mapWarning(s: SharedModsServer)}
+	<p class="flex items-start gap-1.5 text-warn">
+		<Icon name="alert" size={14} class="mt-0.5" />
+		<span>{s.name}'s map, {s.map}, comes from this mod. Pick another under <a class="underline" href="/s/{s.id}/settings">its Settings</a> before it next starts.</span>
+	</p>
+{/snippet}
+
 <Modal bind:open={confirmOpen} title="Delete {confirmMod?.title}?">
 	{#if confirmMod}
 		{@const mod = confirmMod}
@@ -254,10 +261,7 @@
 				server only, turn it off for that server instead.
 			</p>
 			{#each maps as s (s.id)}
-				<p class="flex items-start gap-1.5 text-warn">
-					<Icon name="alert" size={14} class="mt-0.5" />
-					<span>{s.name}'s map, {s.map}, comes from this mod. Pick another under <a class="underline" href="/s/{s.id}/settings">its Settings</a> before it next starts.</span>
-				</p>
+				{@render mapWarning(s)}
 			{/each}
 			{#each poolFrom(mod) as s (s.id)}
 				{@render poolWarning(s, mod)}
@@ -274,14 +278,7 @@
 	{#if offConfirm}
 		<div class="space-y-3 text-sm">
 			{#if mapIn(offConfirm.s, offConfirm.mod)}
-				<p class="flex items-start gap-1.5 text-warn">
-					<Icon name="alert" size={14} class="mt-0.5" />
-					<span
-						>{offConfirm.s.name}'s map, {offConfirm.s.map}, comes from this mod. Pick another under <a class="underline" href="/s/{offConfirm.s.id}/settings"
-							>its Settings</a
-						> before it next starts.</span
-					>
-				</p>
+				{@render mapWarning(offConfirm.s)}
 			{/if}
 			{@render poolWarning(offConfirm.s, offConfirm.mod)}
 		</div>

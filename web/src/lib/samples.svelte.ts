@@ -1,5 +1,5 @@
 import { untrack } from 'svelte';
-import { api, message } from './api';
+import { api, message, type Sampled } from './api';
 
 /** The time ranges the performance pages show, with the step between their axis labels in seconds. */
 export const ranges = [
@@ -10,13 +10,6 @@ export const ranges = [
 ] as const;
 
 export type Range = (typeof ranges)[number][0];
-
-/** What every answer of the manager's sample endpoints has. */
-interface Sampled {
-	since: number; // unix seconds
-	bucket: number; // seconds each point sums up
-	interval: number; // seconds between samples
-}
 
 /**
  * Samples over a time range from one of the manager's endpoints, asked again

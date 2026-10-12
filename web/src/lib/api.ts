@@ -46,6 +46,18 @@ const notTheManager = 'Something other than the manager answered, such as a prox
 /** Whether a 401 from path means the session has gone, rather than a wrong password or the like. */
 const sessionPath = (path: string) => !path.startsWith('/auth/') && !path.startsWith('/setup');
 
+/** What the manager's answer to path says: its body, or the failure it stands for, thrown. */
+function settle<T>(path: string, status: number, text: string): T {
+	const data = parse(text);
+	if (status < 200 || status >= 300) {
+		if (status === 401 && sessionPath(path)) signedOut();
+		throw failure(status, data);
+	}
+	if (text && data === undefined) throw new ApiError(502, notTheManager);
+	// An empty answer is a success too; {} keeps it one for attempt().
+	return (text ? data : {}) as T;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
 	let res: Response;
 	let text: string;
@@ -61,14 +73,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 	} catch {
 		throw new ApiError(0, unreachable);
 	}
-	const data = parse(text);
-	if (!res.ok) {
-		if (res.status === 401 && sessionPath(path)) signedOut();
-		throw failure(res.status, data);
-	}
-	if (text && data === undefined) throw new ApiError(502, notTheManager);
-	// An empty answer is a success too; {} keeps it one for attempt().
-	return (text ? data : {}) as T;
+	return settle<T>(path, res.status, text);
 }
 
 let leaving = false;
@@ -136,23 +141,31 @@ export interface Job<T = unknown> {
 	result?: T;
 }
 
-/** Follows the job a request started until it ends, and returns its result.
- * Aborting signal stops following it; the job itself carries on. */
-export async function followJob<T>(id: string, onProgress?: (j: Job<T>) => void, signal?: AbortSignal): Promise<T> {
+/** Asks after the job at path every so often, the first time after first ms,
+ * until it is done, when it returns it, or failed, when it throws why (failMsg
+ * when the manager doesn't say). onEach hears every answer. A manager briefly
+ * out of reach is asked again. */
+export async function pollJob<J extends { phase: string; error?: string }>(path: string, onEach: ((j: J) => void) | undefined, failMsg: string, first = 500): Promise<J> {
 	for (let misses = 0; ; ) {
-		await sleep(misses ? 2000 : 500, signal);
-		let j: Job<T>;
+		await sleep(misses ? 2000 : first);
+		let j: J;
 		try {
-			j = await api.get<Job<T>>(`/jobs/${id}`);
+			j = await api.get<J>(path);
 			misses = 0;
 		} catch (e) {
 			if (flaky(e) && ++misses <= 5) continue;
 			throw e;
 		}
-		onProgress?.(j);
-		if (j.phase === 'done') return j.result as T;
-		if (j.phase === 'failed') throw new Error(j.error || "The manager couldn't finish that.");
+		onEach?.(j);
+		if (j.phase === 'done') return j;
+		if (j.phase === 'failed') throw new Error(j.error || failMsg);
 	}
+}
+
+/** Follows the job a request started until it ends, and returns its result. */
+export async function followJob<T>(id: string, onProgress?: (j: Job<T>) => void): Promise<T> {
+	const j = await pollJob<Job<T>>(`/jobs/${id}`, onProgress, "The manager couldn't finish that.");
+	return j.result as T;
 }
 
 // upload sends a file or a slice of one as the request body, reporting how
@@ -170,14 +183,11 @@ export function upload<T>(method: string, path: string, body: Blob, onProgress?:
 			onProgress?.(e.loaded);
 		};
 		xhr.onload = () => {
-			const text = xhr.responseText;
-			const data = parse(text);
-			if (xhr.status >= 200 && xhr.status < 300) {
-				if (text && data === undefined) return reject(new ApiError(502, notTheManager));
-				return resolve((text ? data : {}) as T);
+			try {
+				resolve(settle<T>(path, xhr.status, xhr.responseText));
+			} catch (e) {
+				reject(e);
 			}
-			if (xhr.status === 401 && sessionPath(path)) signedOut();
-			reject(failure(xhr.status, data));
 		};
 		xhr.onerror = () => reject(new ApiError(0, 'The upload was cut off. Try again.'));
 		xhr.send(body);
@@ -254,6 +264,31 @@ export interface Player {
 	role?: string; // the one they were given (ReSkate 2.0.6), not the default
 	admin: boolean;
 	joinedAt?: number;
+}
+
+// An in-game admin, or a player given one of the server's roles.
+export interface Admin {
+	id: string;
+	name?: string;
+	panel?: string; // kept in step for this panel user
+}
+
+// One of the server's roles (ReSkate 2.0.6, data/roles.json) and who was given it.
+export interface ServerRole {
+	name: string;
+	tag?: string;
+	color?: string;
+	rank: number;
+	commands: string[]; // "*" is every command but role and reserved
+	permissions: string[];
+	inherit: boolean; // also has what the default role has
+	players: Admin[];
+}
+
+export interface RoleList {
+	roles: ServerRole[];
+	default: string;
+	hasRoles: boolean;
 }
 
 export interface Announcement {
@@ -343,7 +378,6 @@ export interface Field {
 }
 
 export interface Meta {
-	version: string;
 	permissions: PermInfo[];
 	settings: Field[];
 	groupInfo?: Record<string, string>; // settings group -> info hover
@@ -418,17 +452,8 @@ export interface BackupInfo {
 }
 
 // A backup that holds one server, as its Server page lists them.
-export interface ServerBackup {
-	name: string;
-	kind: BackupKind;
-	created: number;
-	version: string;
-	by?: string;
-	size: number;
-	files: string[];
-	mods: BackupMod[];
-	modFiles: boolean;
-}
+export type ServerBackup = Pick<BackupInfo, 'name' | 'kind' | 'created' | 'version' | 'by' | 'size'> &
+	Pick<BackupInfo['servers'][number], 'files' | 'mods' | 'modFiles'>;
 
 export interface Release {
 	tag: string;
@@ -627,10 +652,14 @@ export interface PerfRun {
 	players: number;
 }
 
-export interface Perf {
-	since: number;
-	bucket: number; // seconds each point covers
+/** What every answer of the manager's sample endpoints has. */
+export interface Sampled {
+	since: number; // unix seconds
+	bucket: number; // seconds each point sums up
 	interval: number; // seconds between samples
+}
+
+export interface Perf extends Sampled {
 	points: PerfPoint[];
 	runs: PerfRun[];
 	latest: { at: number; run: number; cpu: number; mem: number; players: number } | null; // the newest sample
@@ -692,10 +721,7 @@ export interface HostServer {
 	points: { at: number; cpu: number; mem: number }[]; // its share of each bucket, stacking up to serversCpu and serversMem
 }
 
-export interface HostPerf {
-	since: number;
-	bucket: number;
-	interval: number;
+export interface HostPerf extends Sampled {
 	points: HostPoint[];
 	servers: HostServer[];
 	latest: HostSample | null;

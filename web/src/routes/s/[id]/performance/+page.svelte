@@ -2,9 +2,9 @@
 	import type { NetPoint, Perf } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { Samples } from '#lib/samples.svelte.js';
-	import { dateTime, duration, memory, memoryTop, niceTop, percent } from '#lib/format.js';
-	import StackChart, { type Series } from '#lib/components/StackChart.svelte';
-	import ChartCard from '#lib/components/ChartCard.svelte';
+	import { avg, count, dateTime, duration, memory, memoryTop, niceTop, percent } from '#lib/format.js';
+	import type { Series } from '#lib/components/StackChart.svelte';
+	import SampleChart from '#lib/components/SampleChart.svelte';
 	import InfoTip from '#lib/components/InfoTip.svelte';
 	import RangePicker from '#lib/components/RangePicker.svelte';
 	import StatTile from '#lib/components/StatTile.svelte';
@@ -28,7 +28,6 @@
 	const current = (run: number) => running && live.state?.startedAt != null && Math.floor(live.state.startedAt / 1000) === run;
 	// The tiles' headline is the newest sample, while it belongs to the run that is up now.
 	const fresh = $derived(data?.latest && current(data.latest.run) && data.latest.at >= samples.until - 3 * data.interval ? data.latest : null);
-	const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 	const none = $derived(data ? 'no samples in this range' : '');
 	const tiles = $derived(
 		points.length
@@ -64,7 +63,7 @@
 			info: 'The most players online at once within each point.',
 			lines: line('Players', 'var(--color-pink)', (p) => ({ v: p.players })),
 			ceil: (v: number) => niceTop(v, 4),
-			format: (v: number) => String(Math.round(v))
+			format: count
 		}
 	]);
 
@@ -111,7 +110,7 @@
 							{ label: 'Skipped', color: 'var(--color-muted)', points: along((p) => p.skipped) }
 						],
 						ceil: (v: number) => niceTop(v, 4),
-						format: (v: number) => String(Math.round(v))
+						format: count
 					}
 				]
 			: []),
@@ -148,21 +147,7 @@
 			{running ? 'first sample lands in about 30 seconds.' : 'no samples in this range. start the server to record some.'}
 		</p>
 	{:else}
-		{#each charts as c (c.title)}
-			<ChartCard title={c.title} info={c.info}>
-				<StackChart
-					lines={c.lines}
-					since={samples.since}
-					until={samples.until}
-					bucket={samples.bucket}
-					ticks={samples.ticks}
-					ceil={c.ceil}
-					format={c.format}
-					bind:hover
-					label="{c.title}, last {samples.rangeName}"
-				/>
-			</ChartCard>
-		{/each}
+		{#each charts as c (c.title)}<SampleChart {samples} {...c} bind:hover />{/each}
 	{/if}
 
 	{#if data}
@@ -179,21 +164,7 @@
 				<a class="text-accent hover:underline" href="/s/{ctx.id}/settings">Settings</a>.
 			</p>
 		{:else}
-			{#each netCharts as c (c.title)}
-				<ChartCard title={c.title} info={c.info}>
-					<StackChart
-						lines={c.lines}
-						since={samples.since}
-						until={samples.until}
-						bucket={samples.bucket}
-						ticks={samples.ticks}
-						ceil={c.ceil}
-						format={c.format}
-						bind:hover
-						label="{c.title}, last {samples.rangeName}"
-					/>
-				</ChartCard>
-			{/each}
+			{#each netCharts as c (c.title)}<SampleChart {samples} {...c} bind:hover />{/each}
 		{/if}
 	{/if}
 

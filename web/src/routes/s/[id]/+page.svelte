@@ -2,10 +2,11 @@
 	import { api } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { toast } from '#lib/toast.svelte.js';
-	import ConsoleView from '#lib/components/ConsoleView.svelte';
+	import ConsoleView, { filters } from '#lib/components/ConsoleView.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import { utf8Length } from '#lib/text.js';
+	import { plural } from '#lib/format.js';
 
 	const ctx = useLive();
 	const live = $derived(ctx.live);
@@ -17,18 +18,20 @@
 	let sending = $state(false);
 	let view: ConsoleView | undefined = $state();
 
+	// What this browser kept under key, read with read; none when storage is unavailable or it won't read.
+	function stored<T>(key: string, read: (s: string | null) => T, none: T): T {
+		try {
+			return read(localStorage.getItem(key));
+		} catch {
+			return none;
+		}
+	}
+
 	// Clear hides the lines so far in this browser, and only here: the server
 	// keeps them, and the Logs tab has them. Kept across reloads by time, since
 	// line numbers start again when the manager restarts.
-	const clearKey = $derived(`rsm.cleared.${ctx.id}`);
-	let clearedAt = $state(0);
-	$effect(() => {
-		try {
-			clearedAt = Number(localStorage.getItem(clearKey)) || 0;
-		} catch {
-			clearedAt = 0;
-		}
-	});
+	const clearKey = `rsm.cleared.${ctx.id}`;
+	let clearedAt = $state(stored(clearKey, (s) => Number(s) || 0, 0));
 	const entries = $derived(clearedAt ? live.console.filter((e) => e.at > clearedAt) : live.console);
 	const hidden = $derived(live.console.length - entries.length);
 	function remember(at: number) {
@@ -56,16 +59,9 @@
 		'announce-throwdowns', 'parties', 'party-size', 'afk-kick', 'speed-check', 'score-check', 'score-allow', 'reserved', 'admin', 'admins', 'help'
 	];
 
-	const historyKey = $derived(`rsm.history.${ctx.id}`);
-	let history: string[] = [];
+	const historyKey = `rsm.history.${ctx.id}`;
+	let history: string[] = stored(historyKey, (s) => JSON.parse(s ?? '[]'), []);
 	let cursor = -1;
-	$effect(() => {
-		try {
-			history = JSON.parse(localStorage.getItem(historyKey) ?? '[]');
-		} catch {
-			history = [];
-		}
-	});
 
 	async function send(e?: SubmitEvent) {
 		e?.preventDefault();
@@ -118,14 +114,6 @@
 		return p;
 	}
 
-	const filters: [string, string][] = [
-		['all', 'All'],
-		['chat', 'Chat'],
-		['players', 'Joins'],
-		['admin', 'Admin'],
-		['anticheat', 'Anti-cheat'],
-		['manager', 'Manager']
-	];
 	const canExec = $derived(ctx.can('console.exec'));
 	const canChat = $derived(ctx.can('players.chat'));
 	// Chat mode when chat is all they may send; the mode button overrides it.
@@ -161,7 +149,7 @@
 				{#snippet top()}
 					<div class="mb-2 flex flex-wrap gap-x-3 font-sans text-xs text-faint">
 						{#if hidden}
-							<span>{hidden} earlier line{hidden === 1 ? '' : 's'} cleared.</span>
+							<span>{plural(hidden, 'earlier line')} cleared.</span>
 							<button class="text-accent hover:underline" onclick={() => remember(0)}>Show them</button>
 						{:else if live.console.length >= 300}
 							<span>Only the newest lines load here.</span>

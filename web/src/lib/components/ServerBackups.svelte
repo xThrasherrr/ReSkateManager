@@ -1,9 +1,10 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { api, followJob, message, type InstanceView, type ServerBackup } from '#lib/api.js';
 	import { instances } from '#lib/instances.svelte.js';
 	import { session } from '#lib/session.svelte.js';
 	import { attempt } from '#lib/toast.svelte.js';
-	import { backupLabel, bytes, dateTime } from '#lib/format.js';
+	import { backupLabel, bytes, dateTime, plural } from '#lib/format.js';
 	import Icon from './Icon.svelte';
 	import Modal from './Modal.svelte';
 	import Loading from './Loading.svelte';
@@ -14,18 +15,15 @@
 
 	let list = $state.raw<ServerBackup[] | null>(null);
 	let error = $state('');
-	async function load(id: string) {
+	async function load() {
 		try {
-			list = await api.get<ServerBackup[]>(`/instances/${id}/backups`);
+			list = await api.get<ServerBackup[]>(`/instances/${st.id}/backups`);
 			error = '';
 		} catch (e) {
 			error = message(e);
 		}
 	}
-	const id = $derived(st.id);
-	$effect(() => {
-		load(id);
-	});
+	onMount(load);
 
 	const stopped = $derived(st.state === 'stopped' || st.state === 'crashed');
 	const canInstall = $derived(session.can('server.update', st.id));
@@ -53,8 +51,8 @@
 			},
 			(r) => {
 				const parts = [r.files.length ? r.files.join(' and ') : 'nothing in the config'];
-				if (r.mods !== undefined) parts.push(`${r.mods} mod${r.mods === 1 ? '' : 's'}`);
-				if (r.shared?.length) parts.push(`${r.shared.length} missing shared mod${r.shared.length === 1 ? '' : 's'}`);
+				if (r.mods !== undefined) parts.push(plural(r.mods, 'mod'));
+				if (r.shared?.length) parts.push(plural(r.shared.length, 'missing shared mod'));
 				return `Restored ${parts.join(', ')}`;
 			}
 		);
@@ -78,7 +76,7 @@
 		<Progress value={job.total ? job.done / job.total : null} label="Restoring the backup" />
 	{/if}
 	{#if error}
-		<LoadError {error} onretry={() => load(id)} />
+		<LoadError {error} onretry={load} />
 	{/if}
 	{#if !list}
 		{#if !error}<Loading />{/if}
@@ -96,7 +94,7 @@
 						</div>
 						<div class="flex flex-wrap items-center gap-x-2 text-xs text-faint">
 							<span>{b.files.length ? b.files.join(', ') : 'No config'}</span>
-							<span>· {b.mods.length} mod{b.mods.length === 1 ? '' : 's'}{b.modFiles ? '' : ', listed only'}</span>
+							<span>· {plural(b.mods.length, 'mod')}{b.modFiles ? '' : ', listed only'}</span>
 							{#if b.modFiles}<span class="rounded bg-accent/15 px-1.5 text-accent">with mods</span>{/if}
 							<span class="tabular-nums">{bytes(b.size)}</span>
 						</div>

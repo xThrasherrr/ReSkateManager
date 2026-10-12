@@ -8,9 +8,10 @@
 	import { uploads, SHARED } from '#lib/uploads.svelte.js';
 	import { session } from '#lib/session.svelte.js';
 	import { instances } from '#lib/instances.svelte.js';
-	import { ago, bytes, httpUrl } from '#lib/format.js';
+	import { ago, bytes, httpUrl, plural } from '#lib/format.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Modal from '#lib/components/Modal.svelte';
+	import Loading from '#lib/components/Loading.svelte';
 
 	const PAGE = 30;
 
@@ -172,12 +173,12 @@
 	const title = (mod: StoreMod) => ({ fullName: mod.fullName, title: modName(mod) });
 
 	/**
-	 * Queues the version for every place ticked. The shared mods go first: the
-	 * queue runs in order, so a server that uses them then links the new copy
-	 * rather than downloading one of its own.
+	 * Queues the picked version for every place ticked. The shared mods go
+	 * first: the queue runs in order, so a server that uses them then links the
+	 * new copy rather than downloading one of its own.
 	 */
-	function install(mod: StoreMod, version: string) {
-		const ps = chosen(places(mod, version));
+	function install(mod: StoreMod) {
+		const ps = chosen(detailPlaces);
 		for (const p of ps.toSorted((a, b) => Number(b.shared) - Number(a.shared))) uploads.install(p.id, p.name, title(mod), version);
 		try {
 			localStorage.setItem('rsm.browse.places', JSON.stringify({ shared: toShared, servers: toServers }));
@@ -267,6 +268,8 @@
 	let version = $state('');
 	// The version the details show: the one picked, or the newest.
 	const shownVersion = $derived(detail ? (detail.versions.find((x) => x.version === version) ?? detail.versions[0]) : undefined);
+	// Where the picked version can go.
+	const detailPlaces = $derived(detail ? places(detail, version) : []);
 	function openDetail(mod: StoreMod) {
 		detail = mod;
 		version = mod.versions[0]?.version ?? '';
@@ -397,10 +400,10 @@
 			<button class="btn btn-sm" onclick={() => thunderstore.load(true)}><Icon name="restart" size={12} /> Try again</button>
 		</div>
 	{:else if !thunderstore.mods}
-		<p class="card p-4 font-marker text-sm text-faint">fetching Thunderstore…</p>
+		<Loading text="fetching Thunderstore…" class="card p-4" />
 	{:else}
 		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
-			<span>{listed.length} {listed.length === 1 ? 'mod' : 'mods'}{filtered ? ` of ${visible.length}` : ''}</span>
+			<span>{plural(listed.length, 'mod')}{filtered ? ` of ${visible.length}` : ''}</span>
 			{#if looking}
 				<span class="flex items-center gap-1.5 text-xs text-faint">
 					<span class="size-2 animate-pulse rounded-full bg-accent"></span> Looking inside {looking} more for maps…
@@ -544,7 +547,7 @@
 				<div>
 					<div class="label">Install v{v.version} on</div>
 					<ul class="divide-y divide-line/60 rounded-lg border-2 border-line">
-						{#each places(mod, v.version) as p (p.id)}
+						{#each detailPlaces as p (p.id)}
 							<li class="flex items-center gap-3 px-3 py-2">
 								<input id="place-{p.id}" type="checkbox" class="shrink-0" checked={p.checked} disabled={p.disabled} onchange={(e) => tick(p, e.currentTarget.checked)} />
 								<label for="place-{p.id}" class="min-w-0 flex-1 {p.disabled ? '' : 'cursor-pointer'}">
@@ -570,8 +573,8 @@
 	{#snippet actions()}
 		<button class="btn" onclick={() => (detailOpen = false)}>Close</button>
 		{#if detail && canInstall}
-			{@const n = chosen(places(detail, version)).length}
-			<button class="btn btn-primary" disabled={!n} onclick={() => detail && install(detail, version)}>
+			{@const n = chosen(detailPlaces).length}
+			<button class="btn btn-primary" disabled={!n} onclick={() => detail && install(detail)}>
 				<Icon name="download" size={14} />
 				{n ? `Install v${version}${n > 1 ? ` in ${n} places` : ''}` : 'Tick where to install it'}
 			</button>

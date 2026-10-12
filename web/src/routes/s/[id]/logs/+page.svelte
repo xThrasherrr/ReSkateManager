@@ -2,8 +2,9 @@
 	import { api, type LogResult } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { attempt } from '#lib/toast.svelte.js';
+	import { newest } from '#lib/newest.js';
 	import { bytes } from '#lib/format.js';
-	import ConsoleView from '#lib/components/ConsoleView.svelte';
+	import ConsoleView, { filters } from '#lib/components/ConsoleView.svelte';
 	import Icon from '#lib/components/Icon.svelte';
 
 	const ctx = useLive();
@@ -25,14 +26,6 @@
 		{ value: '7d', label: '7 days', hours: 168 },
 		{ value: 'all', label: 'All' },
 		{ value: 'custom', label: 'Custom' }
-	];
-	const filters: [string, string][] = [
-		['all', 'All'],
-		['chat', 'Chat'],
-		['players', 'Joins'],
-		['admin', 'Admin'],
-		['anticheat', 'Anti-cheat'],
-		['manager', 'Manager']
 	];
 
 	let source = $state<Source>('server');
@@ -59,12 +52,12 @@
 
 	let result = $state.raw<LogResult | null>(null);
 	let loading = $state(false);
-	let asked = 0;
+	const begin = newest();
 	async function load(q: string) {
-		const mine = ++asked;
+		const current = begin();
 		loading = true;
 		const r = await attempt(() => api.get<LogResult>(`/instances/${ctx.id}/logs?${q}`));
-		if (mine !== asked) return; // a newer query is on its way
+		if (!current()) return; // a newer query is on its way
 		loading = false;
 		if (r) result = r;
 	}

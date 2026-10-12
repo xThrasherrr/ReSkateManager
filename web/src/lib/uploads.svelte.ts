@@ -1,4 +1,5 @@
-import { api, flaky, followJob, message, sleep, upload, type ModJob, type UpdateJob } from './api';
+import { api, flaky, followJob, message, pollJob, sleep, upload, type ModJob, type UpdateJob } from './api';
+import { plural } from './format';
 
 export interface Upload {
 	id: number;
@@ -27,15 +28,19 @@ export const modsPath = (instance: string) => (instance === SHARED ? '/shared-mo
 /** What updating every mod says once the manager has queued them. */
 export const updatedAll = ({ started, running }: { started: number; running: number }) =>
 	started
-		? `Updating ${started} mod${started === 1 ? '' : 's'}, one at a time; they carry on if you close the panel`
+		? `Updating ${plural(started, 'mod')}, one at a time; they carry on if you close the panel`
 		: running
-			? `${running} update${running === 1 ? ' is' : 's are'} already under way`
+			? `${plural(running, 'update is', 'updates are')} already under way`
 			: 'Everything is already up to date';
 
 /** Whether it can be sent again: anything from Thunderstore, or a zip. */
 const sendable = (u: Upload) => u.kind !== 'upload' || !!u.file?.name.toLowerCase().endsWith('.zip');
 
-const running = (u: Upload) => u.status === 'queued' || u.status === 'uploading' || u.status === 'downloading' || u.status === 'installing';
+/** Whether it is on its way: sending, downloading or installing. */
+export const working = (u: Upload) => u.status === 'uploading' || u.status === 'downloading' || u.status === 'installing';
+
+/** Whether it is waiting to start or on its way. */
+export const running = (u: Upload) => u.status === 'queued' || working(u);
 
 /**
  * Sends file in chunks to the uploads at base, since a proxy in front of the
@@ -102,21 +107,15 @@ async function fetchMod(u: Upload): Promise<Pick<ModJob, 'folder' | 'version'>> 
 			);
 	u.version = start.version;
 	if (!start.id) return { folder: start.folder, version: start.version };
-	for (let misses = 0; ; ) {
-		await sleep(misses ? 2000 : 700);
-		let job: ModJob;
-		try {
-			job = await api.get<ModJob>(`${base}/installs/${start.id}`);
-			misses = 0;
-		} catch (e) {
-			if (flaky(e) && ++misses <= 5) continue;
-			throw e;
-		}
-		u.status = job.phase === 'queued' ? 'queued' : job.phase === 'downloading' ? 'downloading' : 'installing';
-		u.progress = job.total ? job.done / job.total : 0;
-		if (job.phase === 'done') return job;
-		if (job.phase === 'failed') throw new Error(job.error || "The manager couldn't install the mod.");
-	}
+	return pollJob<ModJob>(
+		`${base}/installs/${start.id}`,
+		(job) => {
+			u.status = job.phase === 'queued' ? 'queued' : job.phase === 'downloading' ? 'downloading' : 'installing';
+			u.progress = job.total ? job.done / job.total : 0;
+		},
+		"The manager couldn't install the mod.",
+		700
+	);
 }
 
 /**

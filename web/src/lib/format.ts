@@ -1,7 +1,7 @@
 import type { BackupKind, State } from './api';
 
 /** What made a backup, as the backup lists name it. */
-export const backupKind: Record<BackupKind, string> = {
+const backupKind: Record<BackupKind, string> = {
 	manual: 'Made by hand',
 	scheduled: 'Scheduled',
 	'server-update': 'Before a server update',
@@ -16,6 +16,9 @@ export function backupLabel(kind: BackupKind, by?: string): string {
 	const label = backupKind[kind] ?? kind;
 	return by ? `${label}, by ${by}` : label;
 }
+
+/** n and the word for that many: "1 mod", "2 mods". */
+export const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
 export function ago(ms?: number): string {
 	if (!ms) return '—';
@@ -73,6 +76,9 @@ export const stateColor: Record<State, string> = {
 	updating: 'bg-info'
 };
 
+/** Whether the server is on its way to another state, which the panel shows moving. */
+export const moving = (s: State) => s === 'starting' || s === 'stopping' || s === 'updating';
+
 export function steamProfile(id: string) {
 	return `https://steamcommunity.com/profiles/${id}`;
 }
@@ -91,6 +97,12 @@ export function niceTop(v: number, floor: number) {
 	const p = 10 ** Math.floor(Math.log10(v));
 	return [1, 2, 4, 6, 8, 10].map((m) => m * p).find((c) => c >= v - 1e-9) ?? 10 * p;
 }
+
+/** The mean of xs, 0 for none. */
+export const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+
+/** A count, such as players, whole. */
+export const count = (v: number) => String(Math.round(v));
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;

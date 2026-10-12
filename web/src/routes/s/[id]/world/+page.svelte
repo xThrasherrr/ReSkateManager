@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount } from 'svelte';
 	import { api, message } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { attempt } from '#lib/toast.svelte.js';
@@ -48,10 +48,7 @@
 			if (current()) error = message(e);
 		}
 	}
-	$effect(() => {
-		ctx.id;
-		untrack(load);
-	});
+	onMount(load);
 
 	// world-layers.json names maps by their level folder.
 	const mapNames: Record<string, string> = {
