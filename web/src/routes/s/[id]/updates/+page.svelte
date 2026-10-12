@@ -53,7 +53,7 @@
 	}
 
 	const running = $derived(ctx.live.state?.state === 'running');
-	const players = $derived(ctx.live.players.length);
+	const players = $derived(ctx.live.count); // the roster comes only with players.view
 	const pct = $derived(st?.job?.total ? Math.round(((st.job.done ?? 0) / st.job.total) * 100) : 0);
 </script>
 
