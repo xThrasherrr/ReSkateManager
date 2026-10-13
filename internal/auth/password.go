@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"strings"
+	"sync/atomic"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -24,7 +26,19 @@ const (
 // and a flood of sign-ins must not take the servers' memory with it.
 var hashSlots = make(chan struct{}, max(1, min(4, runtime.NumCPU())))
 
+// hashing counts hashes running or waiting for a slot.
+var hashing atomic.Int32
+
 func idKey(pw, salt []byte, t, m uint32, p uint8, n uint32) []byte {
+	// Each hash leaves argonMemory of garbage, and the runtime would hold it
+	// for minutes, more than doubled when a GC lands mid-hash. Once the last
+	// hash is done, hand it back.
+	hashing.Add(1)
+	defer func() {
+		if hashing.Add(-1) == 0 {
+			debug.FreeOSMemory()
+		}
+	}()
 	hashSlots <- struct{}{}
 	defer func() { <-hashSlots }()
 	return argon2.IDKey(pw, salt, t, m, p, n)
@@ -36,10 +50,15 @@ func HashPassword(pw string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := idKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	return phc(salt, idKey([]byte(pw), salt, argonTime, argonMemory, argonThreads, argonKeyLen)), nil
+}
+
+// phc writes a salt and a key made with the current parameters in the PHC
+// string format.
+func phc(salt, key []byte) string {
 	b64 := base64.RawStdEncoding
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, argonMemory, argonTime, argonThreads,
-		b64.EncodeToString(salt), b64.EncodeToString(key)), nil
+		b64.EncodeToString(salt), b64.EncodeToString(key))
 }
 
 // CheckPassword reports whether pw matches a hash from HashPassword. The
@@ -79,5 +98,7 @@ func ValidatePassword(pw string) error {
 	return nil
 }
 
-// dummyHash makes a failed lookup cost as much as a wrong password.
-var dummyHash, _ = HashPassword("not a real password")
+// dummyHash makes a failed lookup cost as much as a wrong password. It is
+// written, not hashed: hashing at start would hold argonMemory for minutes,
+// and no password hashes to an all-zero key.
+var dummyHash = phc(make([]byte, 16), make([]byte, argonKeyLen))

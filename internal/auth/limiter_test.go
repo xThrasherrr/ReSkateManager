@@ -65,6 +65,12 @@ func TestCheckPasswordBounds(t *testing.T) {
 		t.Fatal("a real hash doesn't check out")
 	}
 	parts := strings.Split(good, "$")
+	// A sign-in as nobody checks dummyHash, so it must pass the bounds below
+	// and cost what a real hash does.
+	if d := strings.Split(dummyHash, "$"); len(d) != len(parts) || strings.Join(d[:4], "$") != strings.Join(parts[:4], "$") ||
+		len(d[4]) != len(parts[4]) || len(d[5]) != len(parts[5]) {
+		t.Errorf("dummyHash %q isn't shaped like a real hash %q", dummyHash, good)
+	}
 	with := func(i int, v string) string {
 		p := append([]string(nil), parts...)
 		p[i] = v
