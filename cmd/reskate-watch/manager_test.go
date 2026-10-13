@@ -22,11 +22,13 @@ func TestRegexRuns(t *testing.T) {
 }
 
 func TestSendsForm(t *testing.T) {
-	u := &usage{words: map[string]bool{"votes polls ": true, "votes ": true}}
+	u := &usage{words: map[string]bool{"votes polls ": true, "votes ": true, "maps reload": true}}
 	for form, want := range map[string]bool{
-		"votes polls off|admins|everyone": true,
-		"votes poll-seconds <n>":          false,
-		"votes [<vote> on|off|<percent>]": false, // only "votes" is fixed, which every form has
+		"votes polls off|admins|everyone":       true,
+		"votes poll-seconds <n>":                false,
+		"votes [<vote> on|off|<percent>]":       false, // only "votes" is fixed, which every form has
+		"maps [reload]":                         true,  // a word that may be left out
+		"rotation [<minutes>|off | vote on|off": false,
 	} {
 		if got := u.sendsForm(form); got != want {
 			t.Errorf("sendsForm(%q) = %v", form, got)

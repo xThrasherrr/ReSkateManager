@@ -97,8 +97,20 @@ func TestTitle(t *testing.T) {
 	if got := r.title(); got != "ReSkate v2.0.0: 1 breaking, 2 new" {
 		t.Errorf("title = %q", got)
 	}
-	if !strings.HasPrefix(r.markdown(), "<!-- reskate-watch v2.0.0 -->\n") {
-		t.Errorf("markdown doesn't start with the release's marker")
+	if md := r.markdown(); !strings.HasPrefix(md, "<!-- reskate-watch v2.0.0 -->\n") || strings.Contains(md, "reskate-watch-built") {
+		t.Errorf("markdown doesn't start with the release's marker alone:\n%s", md)
+	}
+	// Files uploaded again after the release was checked: the same marker,
+	// what the source was compared as, which the workflow's next check of
+	// them compares from, and a title of its own.
+	r.rebuilt, r.From, r.fromRef, r.toRef = true, "v2.0.0", "v2.0.0", "d2b8e180973b1c997a4329afda3e0cef8300fdb2"
+	if got := r.title(); got != "ReSkate v2.0.0, rebuilt: 1 breaking, 2 new" {
+		t.Errorf("title = %q", got)
+	}
+	if md := r.markdown(); !strings.HasPrefix(md, "<!-- reskate-watch v2.0.0 -->\n<!-- reskate-watch-built d2b8e180973b1c997a4329afda3e0cef8300fdb2 -->\n") ||
+		!strings.Contains(md, "built from d2b8e18 after the tag") ||
+		!strings.Contains(md, "/compare/v2.0.0...d2b8e180973b1c997a4329afda3e0cef8300fdb2") {
+		t.Errorf("markdown:\n%s", md)
 	}
 }
 

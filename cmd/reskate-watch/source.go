@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/xThrasherrr/ReSkateManager/internal/api"
 	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 )
 
 // upstream is the dedicated server's source at one release: every string
@@ -22,19 +24,22 @@ type upstream struct {
 	all      string              // every literal, NUL between them, for substring searches
 	help     string              // the `help` reply, which lists the commands
 	cmds     map[string][]string // each command's forms in the help, by verb; just the verb when it has none
+	unlisted map[string]bool     // the verbs Host::command tests for that the help doesn't list
+	reserved map[string][]string // the names the server's checks refuse, by the function that does
 	lines    map[string]bool     // how the lines the server logs start: the first literal it logs
 	tagLines map[string]string   // of those, the ones that add to a tag's bracket, each with a line it writes
 	selfRuns map[string]string   // where the server logs the answer to a command it runs itself, by file
 	readme   string
 }
 
-func (r *report) loadSource(src string) error {
+func (r *report) loadSource(ctx context.Context, src, was string) error {
 	r.srcDir = src
+	r.resolve(ctx, was)
 	var err error
-	if r.old, err = readUpstream(src, r.From); err != nil {
+	if r.old, err = readUpstream(src, r.fromRef); err != nil {
 		return err
 	}
-	r.cur, err = readUpstream(src, r.To)
+	r.cur, err = readUpstream(src, r.toRef)
 	return err
 }
 
@@ -51,7 +56,8 @@ func readUpstream(src, tag string) (*upstream, error) {
 	if err != nil {
 		return nil, err
 	}
-	u := &upstream{strings: map[string]bool{}, written: map[string]bool{}, lines: map[string]bool{}, tagLines: map[string]string{}, selfRuns: map[string]string{}}
+	u := &upstream{strings: map[string]bool{}, written: map[string]bool{}, lines: map[string]bool{}, tagLines: map[string]string{}, selfRuns: map[string]string{},
+		unlisted: map[string]bool{}, reserved: map[string][]string{}}
 	verbs := map[string]bool{}
 	for name := range strings.FieldsSeq(list) {
 		// Not the tests, nor the server's window (2.0.6, Windows), which the
@@ -76,6 +82,7 @@ func readUpstream(src, tag string) (*upstream, error) {
 		for _, m := range verbRe.FindAllStringSubmatch(hostCommand(text), -1) {
 			verbs[m[1]] = true
 		}
+		maps.Copy(u.reserved, reservedNames(text))
 		for _, s := range logStarts(text) {
 			u.lines[s] = true
 		}
@@ -91,6 +98,7 @@ func readUpstream(src, tag string) (*upstream, error) {
 	for v := range verbs {
 		if u.cmds[v] == nil {
 			u.cmds[v] = []string{v}
+			u.unlisted[v] = true
 		}
 	}
 	u.all = strings.Join(slices.Sorted(maps.Keys(u.strings)), "\x00")
@@ -103,7 +111,8 @@ func readUpstream(src, tag string) (*upstream, error) {
 func (r *report) checkSource(use *usage) {
 	r.checkLost(use)
 
-	r.Checked = append(r.Checked, fmt.Sprintf("%d strings in the manager's code, against the server's source at %s and %s.", len(use.frags), r.From, r.To))
+	r.Checked = append(r.Checked, fmt.Sprintf("%d strings in the manager's code, against the server's source at %s and %s.", len(use.frags),
+		sourceName(r.From, r.fromRef), sourceName(r.To, r.toRef)))
 	oldCmds, newCmds := r.old.cmds, r.cur.cmds
 	if len(newCmds) == 0 {
 		r.Notes = append(r.Notes, "The server's commands weren't found in its source, so new ones weren't looked for.")
@@ -119,15 +128,26 @@ func (r *report) checkSource(use *usage) {
 			}
 			continue
 		}
-		var added []string
+		var added, open []string
 		for _, f := range forms {
 			// A command the help didn't list before is known only by its verb.
-			if f != verb && !slices.Contains(was, f) && !slices.Contains(was, verb) && !use.sendsForm(f) && !narrowed(f, was) {
+			if f == verb || slices.Contains(was, f) || r.old.unlisted[verb] || use.sendsForm(f) || narrowed(f, was) {
+				continue
+			}
+			// One the panel takes for a read-only command, which anyone who
+			// may use its console runs: 2.0.7's maps reload, of maps.
+			if api.ConsolePerm(formLine(f)) == "" {
+				open = append(open, f)
+			} else {
 				added = append(added, f)
 			}
 		}
 		if len(added) > 0 {
 			r.Adds = append(r.Adds, fmt.Sprintf("New form of command %s: %s", code(verb), codes(added)))
+		}
+		if len(open) > 0 {
+			r.Adds = append(r.Adds, fmt.Sprintf("New form of command %s: %s, which the panel's console lets anyone who may run commands use, as it does %s: decide its permission (internal/api/console.go)",
+				code(verb), codes(open), code(verb)))
 		}
 	}
 	var gone []string
@@ -184,8 +204,45 @@ func (r *report) checkSource(use *usage) {
 				inline(fn), inline(r.cur.selfRuns[run]), inline(call)))
 		}
 	}
+	r.checkReserved()
 
 	r.sourceDetails()
+}
+
+// reservedLists are the manager's copies of the names the server's checks
+// refuse, by the function that does. A name the server refuses and the
+// manager allows is a config the server won't start with.
+var reservedLists = map[string]struct {
+	what, where string
+	names       []string
+}{
+	"custom_vote_name_free":    {"a custom vote", "serverconfig.ReservedVoteNames, web/src/lib/votes.ts", serverconfig.ReservedVoteNames},
+	"custom_command_name_free": {"a chat command", "serverconfig.ReservedCommandNames, web/src/lib/commands.ts", serverconfig.ReservedCommandNames},
+	"roles_error":              {"a role's tag", "serverconfig.GameTags", serverconfig.GameTags},
+}
+
+// checkReserved compares the names the server refuses at To with the
+// manager's lists, and lists a name check it has no list for.
+func (r *report) checkReserved() {
+	for _, fn := range slices.Sorted(maps.Keys(r.cur.reserved)) {
+		mine, ok := reservedLists[fn]
+		if !ok {
+			if _, was := r.old.reserved[fn]; !was {
+				r.Adds = append(r.Adds, fmt.Sprintf("New name check %s, refusing %s: the manager may allow a name the server won't start with", inline(fn), codes(r.cur.reserved[fn])))
+			}
+			continue
+		}
+		var missing []string
+		for _, n := range r.cur.reserved[fn] {
+			if !slices.Contains(mine.names, n) {
+				missing = append(missing, n)
+			}
+		}
+		if len(missing) > 0 {
+			r.Breaking = append(r.Breaking, fmt.Sprintf("The server refuses %s named %s (%s), which the manager allows (%s): a config with one won't start",
+				mine.what, codes(missing), inline(fn), mine.where))
+		}
+	}
 }
 
 // checkLost reports the text the manager uses that the source had at From
@@ -210,6 +267,48 @@ func (r *report) checkLost(use *usage) {
 		}
 		r.Breaking = append(r.Breaking, fmt.Sprintf("The server's source no longer has %s, which the manager uses at %s", code(frag), strings.Join(links, ", ")))
 	}
+	for _, frag := range slices.Sorted(maps.Keys(use.frags)) {
+		if !use.runs[frag] {
+			continue
+		}
+		if end, longer := r.endMoved(frag); end != "" {
+			r.Breaking = append(r.Breaking, fmt.Sprintf("The server's source has %s only with more after it now (%s), so the manager's regular expression matching %s at %s may no longer match",
+				code(end), codes(longer), code(frag), managerLink(use.frags[frag][0])))
+		}
+	}
+}
+
+// endMoved checks a regular expression's run against where the server's
+// literals end. A run often spans two of them, joined as the line is built:
+// votePassedRe's " needed)." is " needed" and ")." at 2.0.6. When the longest
+// start of the run that ended a literal at From ends none at To, but is still
+// there with more after it, the text the run wants after it may not come
+// next: 2.0.7's " needed of ", which votePassedRe stopped matching. A run
+// that ends where a literal ended is followed by a group or a class, which
+// may take what comes now, and isn't judged. It returns that start, and up to
+// three literals that have it at To.
+func (r *report) endMoved(run string) (string, []string) {
+	ends := func(u *upstream, s string) bool { return strings.Contains(u.all+"\x00", s+"\x00") }
+	if ends(r.old, run) {
+		return "", nil
+	}
+	for n := len(run) - 1; n >= 4; n-- {
+		start := run[:n]
+		if !meaningful(start) || !ends(r.old, start) {
+			continue
+		}
+		if ends(r.cur, start) || !strings.Contains(r.cur.all, start) {
+			return "", nil // still ends one, or gone, which checkLost says when it was whole
+		}
+		var longer []string
+		for _, s := range slices.Sorted(maps.Keys(r.cur.strings)) {
+			if strings.Contains(s, start) && len(longer) < 3 {
+				longer = append(longer, s)
+			}
+		}
+		return start, longer
+	}
+	return "", nil
 }
 
 var (
@@ -307,16 +406,55 @@ func selfRuns(text string) []string {
 }
 
 // hostCommand is the body of Host::command, which runs the console's
-// commands, in a source file, or "" when the file doesn't define it. Braces
-// in literals, comments and numbers (1'000) don't count.
+// commands, in a source file, or "" when the file doesn't define it.
 func hostCommand(src string) string {
 	m := hostCommandRe.FindStringIndex(src)
 	if m == nil {
 		return ""
 	}
-	at := m[0]
+	return body(src, m[0])
+}
+
+// takenRe is a list of names a check refuses, as server_config.cpp writes
+// them: for (const std::string_view taken : {"map", "kick", ...}).
+var takenRe = regexp.MustCompile(`for \([^;)]*\btaken :\s*\{`)
+
+// definedRe is where a function is defined or declared: its name and
+// parameters at the start of a line.
+var definedRe = regexp.MustCompile(`(?m)^[A-Za-z_][^;/\n(]*\b(\w+)\(`)
+
+// reservedNames finds the names the file's checks refuse, by the function
+// that refuses them: custom_vote_name_free, custom_command_name_free, and
+// roles_error's tags the game uses itself (server_config.cpp).
+func reservedNames(src string) map[string][]string {
+	out := map[string][]string{}
+	defs := definedRe.FindAllStringSubmatchIndex(src, -1)
+	for _, m := range takenRe.FindAllStringIndex(src, -1) {
+		fn := ""
+		for _, d := range defs {
+			if d[0] > m[0] {
+				break
+			}
+			// The function the list is in, not one that ended before it.
+			if b := body(src, d[0]); b != "" && d[0]+strings.IndexByte(src[d[0]:], '{')+len(b) > m[0] {
+				fn = src[d[2]:d[3]]
+			}
+		}
+		if fn == "" {
+			continue
+		}
+		for _, l := range cppLiterals(body(src, m[1]-1)) {
+			out[fn] = append(out[fn], l.text)
+		}
+	}
+	return out
+}
+
+// body is the body of the function whose definition starts at at, or "" for
+// a declaration. Braces in literals, comments and numbers (1'000) don't count.
+func body(src string, at int) string {
 	open := strings.IndexByte(src[at:], '{')
-	if open < 0 {
+	if open < 0 || strings.IndexByte(src[at:at+open], ';') >= 0 {
 		return ""
 	}
 	start, depth := at+open, 0
@@ -467,11 +605,11 @@ func tags(lits map[string]bool) map[string]bool {
 // sourceDetails adds the background: the server's commits, its README's
 // changes, and the strings that came and went.
 func (r *report) sourceDetails() {
-	if log, err := git(r.srcDir, "log", "--no-merges", "--format=%h %s", r.From+".."+r.To, "--", "Server/"); err == nil && log != "" {
+	if log, err := git(r.srcDir, "log", "--no-merges", "--format=%h %s", r.fromRef+".."+r.toRef, "--", "Server/"); err == nil && log != "" {
 		n := strings.Count(log, "\n")
 		r.Details = append(r.Details, detail{fmt.Sprintf("Server commits (%d)", n), fence("text", log)})
 	}
-	if diff, err := git(r.srcDir, "diff", "--no-color", "-U1", r.From, r.To, "--", "Server/README.txt"); err == nil && diff != "" {
+	if diff, err := git(r.srcDir, "diff", "--no-color", "-U1", r.fromRef, r.toRef, "--", "Server/README.txt"); err == nil && diff != "" {
 		r.Details = append(r.Details, detail{"Server/README.txt changes", fence("diff", diff)})
 	}
 	changed := func(a, b *upstream) []string {

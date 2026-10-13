@@ -71,17 +71,29 @@ func (u *usage) sends(verb string) bool {
 
 // sendsForm reports whether the manager has text for one form of a command:
 // its words up to the first that varies, so "votes polls" of "votes polls
-// off|admins|everyone". A form that varies from its second word can't be told
-// from the command's others.
+// off|admins|everyone", and "maps reload" of "maps [reload]". A form that
+// varies from its second word can't be told from the command's others.
 func (u *usage) sendsForm(form string) bool {
+	line := formLine(form)
+	return strings.Contains(line, " ") && u.sends(line)
+}
+
+// formLine is the words of a command's form up to the first that varies, a
+// word that may be left out ("[reload]") among them.
+func formLine(form string) string {
 	var fixed []string
 	for w := range strings.FieldsSeq(form) {
-		if strings.ContainsAny(w, "<[|") {
+		if opt, ok := strings.CutPrefix(w, "["); ok {
+			if opt, ok = strings.CutSuffix(opt, "]"); ok && opt != "" && !strings.ContainsAny(opt, "<[|]") {
+				w = opt
+			}
+		}
+		if strings.ContainsAny(w, "<[|]") {
 			break
 		}
 		fixed = append(fixed, w)
 	}
-	return len(fixed) > 1 && u.sends(strings.Join(fixed, " "))
+	return strings.Join(fixed, " ")
 }
 
 // knowsTag reports whether the manager knows the console tag t: from a

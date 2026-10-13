@@ -105,6 +105,104 @@ func TestCheckLost(t *testing.T) {
 	}
 }
 
+// A run spanning two literals, " needed" and ")." at 2.0.6: 2.0.7 wrote
+// " needed of " instead, and votePassedRe's " needed)." stopped matching.
+func TestEndMoved(t *testing.T) {
+	src := func(lits ...string) *upstream {
+		u := &upstream{strings: map[string]bool{}, all: strings.Join(lits, "\x00")}
+		for _, l := range lits {
+			u.strings[l] = true
+		}
+		return u
+	}
+	r := &report{old: src(" yes, ", " no, ", " needed", ")."), cur: src(" yes, ", " no, ", " needed of ", " vote", ").")}
+	if start, longer := r.endMoved(" needed)."); start != " needed" || !slices.Equal(longer, []string{" needed of "}) {
+		t.Errorf("endMoved = %q, %q", start, longer)
+	}
+	// A run that ends where a literal did is followed by a group, which may
+	// take what comes now: votePassedRe's " needed(?: of ...)?".
+	for _, run := range []string{" needed", " yes, ", ")."} {
+		if start, _ := r.endMoved(run); start != "" {
+			t.Errorf("endMoved(%q) = %q", run, start)
+		}
+	}
+	r.checkLost(&usage{frags: map[string][]string{" needed).": {"internal/instance/instance.go:1"}}, runs: map[string]bool{" needed).": true}})
+	if len(r.Breaking) != 1 || !strings.Contains(r.Breaking[0], `" needed of "`) {
+		t.Errorf("breaking %q", r.Breaking)
+	}
+}
+
+// The names the server refuses for custom votes, chat commands and role tags,
+// by the function that checks them, not its declaration nor one before it.
+func TestReservedNames(t *testing.T) {
+	if got := reservedNames("bool custom_vote_name_free(std::string_view name) noexcept;\nstruct X { int a{}; };"); len(got) != 0 {
+		t.Errorf("a declaration gave %q", got)
+	}
+	src := `bool custom_vote_name_free(std::string_view name) noexcept {
+    for (const std::string_view taken : {"map", "kick", "extend"})
+        if (name == taken) return false;
+    return !std::all_of(name.begin(), name.end(), [](char c) { return c >= '0' && c <= '9'; });
+}`
+	if got := reservedNames(src); !slices.Equal(got["custom_vote_name_free"], []string{"map", "kick", "extend"}) {
+		t.Errorf("reservedNames = %q", got)
+	}
+	// ReSkate's main after 2.0.7, where the list is a loop in a loop.
+	src = `static bool valid_role_tag(std::string_view tag) { return tag.size() <= 16; }
+std::string roles_error(const Roles &roles) {
+    const auto plain = [](std::string_view text) {
+        std::string out;
+        return out;
+    };
+    for (std::size_t i = 0; i < roles.list.size(); ++i) {
+        // What the game itself calls the server, a lobby's host, friends and the ReSkate team.
+        for (const std::string_view taken : {"server", "reskate", "reskateadmin"})
+            if (plain(role.tag) == taken) return where + "the tag \"" + role.tag + "\" is one the game uses itself.";
+    }
+    return {};
+}`
+	got := reservedNames(src)
+	if !slices.Equal(got["roles_error"], []string{"server", "reskate", "reskateadmin"}) || len(got) != 1 {
+		t.Errorf("reservedNames = %q", got)
+	}
+}
+
+// A name the server refuses and the manager allows is a config the server
+// won't start with: 2.0.7's extend, for custom votes.
+func TestCheckReserved(t *testing.T) {
+	r := &report{old: &upstream{}, cur: &upstream{reserved: map[string][]string{
+		"custom_vote_name_free": {"map", "extend", "skip"}, "custom_command_name_free": {"help"}, "park_name_free": {"x"},
+		"roles_error": {"server", "reskateadmin"}}}}
+	r.checkReserved()
+	if len(r.Breaking) != 1 || !strings.Contains(r.Breaking[0], `"skip"`) || strings.Contains(r.Breaking[0], `"extend"`) {
+		t.Errorf("breaking %q, want skip alone", r.Breaking)
+	}
+	if len(r.Adds) != 1 || !strings.Contains(r.Adds[0], "park_name_free") {
+		t.Errorf("adds %q, want the new name check", r.Adds)
+	}
+}
+
+// A bare verb the help listed gains forms, which matter when the panel takes
+// the verb for a read-only one: 2.0.7's maps reload. One the help never
+// listed is known by its verb alone.
+func TestNewForms(t *testing.T) {
+	r := &report{From: "v2.0.6", To: "v2.0.7",
+		old: &upstream{cmds: map[string][]string{"maps": {"maps"}, "status": {"status"}, "frob": {"frob"}}, unlisted: map[string]bool{"frob": true}, lines: map[string]bool{}},
+		cur: &upstream{cmds: map[string][]string{"maps": {"maps [reload]"}, "status": {"status [verbose]"}, "frob": {"frob <n>"}}, lines: map[string]bool{}}}
+	r.srcDir = t.TempDir()
+	r.checkSource(&usage{frags: map[string][]string{}, words: map[string]bool{}})
+	want := []string{"New form of command `\"maps\"`: `\"maps [reload]\"`",
+		"New form of command `\"status\"`: `\"status [verbose]\"`, which the panel's console lets anyone who may run commands use, as it does `\"status\"`: decide its permission (internal/api/console.go)"}
+	if !slices.Equal(r.Adds, want) {
+		t.Errorf("adds\n got %q\nwant %q", r.Adds, want)
+	}
+	// The manager sending it is taking it up.
+	r.Adds = nil
+	r.checkSource(&usage{frags: map[string][]string{}, words: map[string]bool{"maps reload": true, "status verbose": true}})
+	if len(r.Adds) != 0 {
+		t.Errorf("adds %q, want none", r.Adds)
+	}
+}
+
 func TestCommands(t *testing.T) {
 	got := commands("status | net [player] | say <text>\nlisted on|off | votes [map|kick]\npoll <question> | <answer> | <answer>... | poll end\n" +
 		"score-allow [<fingerprint>|remove <fingerprint>] | words [reload | global on|off]\nreserved [slots <n> | add|remove <SteamID64>] | roles [reload]")

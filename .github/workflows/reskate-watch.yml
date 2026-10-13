@@ -3,7 +3,10 @@ name: ReSkate watch
 # Every hour, looks for a new ReSkate release and checks what it changes for
 # the manager (cmd/reskate-watch). A release that needs work is filed as an
 # issue labelled reskate; every report is kept as an artifact named after its
-# release, which is how a run knows the release was checked already.
+# release, which is how a run knows the release was checked already. A
+# release whose files were uploaded again since (2.0.7's were, built from a
+# hotfix after its tag) is checked again for what that build changed, from
+# what its report says its source was compared as.
 on:
   schedule:
     - cron: '17 * * * *'
@@ -35,6 +38,7 @@ jobs:
     outputs:
       from: ${{ steps.find.outputs.from }}
       to: ${{ steps.find.outputs.to }}
+      was: ${{ steps.find.outputs.was }}
     steps:
       - id: find
         env:
@@ -44,12 +48,24 @@ jobs:
         run: |
           latest=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
           artifacts="repos/$GITHUB_REPOSITORY/actions/artifacts"
-          checked=$(gh api "$artifacts?name=reskate-watch-$latest" --jq .total_count)
+          # When the release was last checked, and when its files were last uploaded.
+          checked=$(gh api "$artifacts?name=reskate-watch-$latest" --jq '[.artifacts[].created_at] | max // ""')
+          uploaded=$(gh api "repos/$UPSTREAM/releases/tags/$latest" --jq '[.assets[].updated_at] | max // ""')
           reported=$(gh issue list --label reskate --state all --limit 1 --json body --jq '.[0].body // ""' |
             sed -n 's/^<!-- reskate-watch \(.*\) -->$/\1/p')
+          was=
           if [ -n "$FROM" ]; then
             from=$FROM
-          elif [ "$checked" != 0 ] || [ "$reported" = "$latest" ]; then
+          elif [ -n "$checked" ] && [[ "$uploaded" > "$checked" ]]; then
+            echo "ReSkate $latest's files were uploaded again ($uploaded) since it was checked ($checked)."
+            from=$latest
+            # Its report's built line; a report from before it has none, and compared the tag.
+            id=$(gh api "$artifacts?name=reskate-watch-$latest" --jq '.artifacts | max_by(.created_at) | .id')
+            if gh api "$artifacts/$id/zip" > "$RUNNER_TEMP/checked.zip"; then
+              was=$(unzip -p "$RUNNER_TEMP/checked.zip" report.md | sed -n 's/^<!-- reskate-watch-built \(.*\) -->$/\1/p')
+            fi
+            was=${was:-$latest}
+          elif [ -n "$checked" ] || [ "$reported" = "$latest" ]; then
             echo "ReSkate $latest was checked already."
             exit 0
           else
@@ -63,6 +79,7 @@ jobs:
           echo "Checking ReSkate $latest, compared with $from."
           echo "from=$from" >> "$GITHUB_OUTPUT"
           echo "to=$latest" >> "$GITHUB_OUTPUT"
+          echo "was=$was" >> "$GITHUB_OUTPUT"
 
   # The Windows server, run as the manager runs it there: what a run on Linux
   # can't see (2.0.6 made it a window app, and its console its own). What it
@@ -116,9 +133,10 @@ jobs:
         env:
           FROM: ${{ needs.find.outputs.from }}
           TO: ${{ needs.find.outputs.to }}
+          WAS: ${{ needs.find.outputs.was }}
         run: |
           git clone --quiet --no-checkout "https://github.com/$UPSTREAM.git" "$RUNNER_TEMP/reskate"
-          go run ./cmd/reskate-watch -repo "$UPSTREAM" -src "$RUNNER_TEMP/reskate" -from "$FROM" -to "$TO" \
+          go run ./cmd/reskate-watch -repo "$UPSTREAM" -src "$RUNNER_TEMP/reskate" -from "$FROM" -to "$TO" ${WAS:+-was "$WAS"} \
             -with "$RUNNER_TEMP/windows/windows.json" -out "$RUNNER_TEMP/report.md" -summary "$RUNNER_TEMP/summary.json"
           cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
           eof=$(openssl rand -hex 16)

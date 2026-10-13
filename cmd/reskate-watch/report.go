@@ -21,8 +21,10 @@ type report struct {
 	Checked  []string // what was looked at, so a clean report shows it looked
 	Details  []detail
 
-	srcDir   string
-	old, cur *upstream // the source at From and To, when -src is given
+	srcDir         string
+	old, cur       *upstream // the source at From and To, when -src is given
+	fromRef, toRef string    // the commits From and To were built from: their tags, or later ones
+	rebuilt        bool      // To's files were uploaded again after it was checked, and From is To as checked then (fromRef)
 
 	serverTag string          // the release whose server was run
 	written   map[string]bool // the settings its config holds: where (dotted) and the manager's keys for them
@@ -70,8 +72,12 @@ const detailCap = 12000
 func (r *report) needsWork() bool { return len(r.Breaking)+len(r.Adds)+len(r.Notes) > 0 }
 
 func (r *report) title() string {
+	name := "ReSkate " + r.To
+	if r.rebuilt {
+		name += ", rebuilt"
+	}
 	if !r.needsWork() {
-		return "ReSkate " + r.To + ": nothing to apply"
+		return name + ": nothing to apply"
 	}
 	var parts []string
 	for _, c := range []struct {
@@ -82,20 +88,34 @@ func (r *report) title() string {
 			parts = append(parts, fmt.Sprintf("%d %s", c.n, c.what))
 		}
 	}
-	return "ReSkate " + r.To + ": " + strings.Join(parts, ", ")
+	return name + ": " + strings.Join(parts, ", ")
 }
 
 // markdown is the issue body. Its first line marks the release reported, for
-// the workflow to find the last one. Text from upstream (commit subjects,
-// strings, the README) only goes in code, where it can't mention anyone or
-// break the layout.
+// the workflow to find the last one, and the next what its source was
+// compared as, for a check of its files uploaded again (-was). Text from
+// upstream (commit subjects, strings, the README) only goes in code, where it
+// can't mention anyone or break the layout.
 func (r *report) markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- reskate-watch %s -->\n", r.To)
+	if r.toRef != "" {
+		fmt.Fprintf(&b, "<!-- reskate-watch-built %s -->\n", r.toRef)
+	}
 	gh := "https://github.com/" + r.Repo
 	fmt.Fprintf(&b, "[ReSkate %s](%s/releases/tag/%s)", r.To, gh, r.To)
-	if r.From != "" {
-		fmt.Fprintf(&b, ", compared with %s ([changes](%s/compare/%s...%s))", r.From, gh, r.From, r.To)
+	if r.toRef != "" && r.toRef != r.To {
+		fmt.Fprintf(&b, ", its files built from %s after the tag", short(r.toRef))
+	}
+	from, to := r.From, r.To
+	if r.fromRef != "" {
+		from, to = r.fromRef, r.toRef
+	}
+	switch {
+	case r.rebuilt:
+		fmt.Fprintf(&b, " and uploaded again since it was checked, compared with %s as checked then ([changes](%s/compare/%s...%s))", short(from), gh, from, to)
+	case r.From != "":
+		fmt.Fprintf(&b, ", compared with %s ([changes](%s/compare/%s...%s))", sourceName(r.From, r.fromRef), gh, from, to)
 	}
 	b.WriteString(".\n")
 	if !r.needsWork() {

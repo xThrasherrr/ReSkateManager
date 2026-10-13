@@ -9,6 +9,9 @@
 // shrinks as the manager catches up.
 //
 //	go run ./cmd/reskate-watch -src ../ReSkate -from v1.1.8 -to v2.0.0
+//
+// The source of each release is compared as its files were built, which can
+// be a commit after its tag (built.go).
 package main
 
 import (
@@ -31,6 +34,7 @@ func main() {
 	summary := flag.String("summary", "", "write the issue's title and whether it needs work here, as JSON")
 	findings := flag.String("findings", "", "write what was found here, as JSON, for another run's -with")
 	with := flag.String("with", "", "add what another run found (its -findings): the Windows server's, run on Windows")
+	was := flag.String("was", "", "what -to's source was compared as when it was checked before (its report's built line): its files were uploaded again since, so check what that build changed (-from is -to)")
 	flag.Parse()
 	if *src != "" && (*from == "" || *to == "") {
 		fatal("-src needs -from and -to")
@@ -38,12 +42,15 @@ func main() {
 	if *src == "" && !*server {
 		fatal("nothing to check: give -src, or leave -server on")
 	}
+	if *was != "" && (*src == "" || *from != *to) {
+		fatal("-was needs -src, and -from the same as -to")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	r := &report{Repo: *repo, From: *from, To: *to}
+	r := &report{Repo: *repo, From: *from, To: *to, rebuilt: *was != ""}
 	if *src != "" {
-		if err := r.loadSource(*src); err != nil {
+		if err := r.loadSource(ctx, *src, *was); err != nil {
 			fatal(err.Error())
 		}
 	}
