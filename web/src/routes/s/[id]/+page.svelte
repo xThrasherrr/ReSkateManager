@@ -51,7 +51,7 @@
 
 	// Server commands from the server's help text (Server/server_commands.cpp), for Tab completion.
 	const commands = [
-		'status', 'net', 'players', 'say', 'msg', 'msg-party', 'msg-admins', 'kick', 'ban', 'unban', 'bans', 'map', 'maps', 'name',
+		'status', 'net', 'players', 'say', 'msg', 'msg-party', 'msg-admins', 'kick', 'kick-time', 'ban', 'unban', 'bans', 'map', 'maps', 'name',
 		'password', 'welcome', 'chat-color', 'listed',
 		'voice', 'voice-range', 'distances', 'crowd', 'rate', 'bone-scale', 'bone-reach', 'placement', 'objects', 'object-scaling', 'effects',
 		'clear-objects', 'noclip', 'nobail', 'boosts', 'tuning', 'tpall', 'tphere', 'votes', 'vote-cancel', 'vote', 'poll', 'poll-run',

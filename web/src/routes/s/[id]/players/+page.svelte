@@ -2,6 +2,8 @@
 	import { onMount, untrack } from 'svelte';
 	import { api, message, type Player, type RoleList } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
+	import { instances } from '#lib/instances.svelte.js';
+	import { newerVersion } from '#lib/thunderstore.svelte.js';
 	import { attempt } from '#lib/toast.svelte.js';
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
@@ -16,7 +18,6 @@
 	import RolePick from '#lib/components/RolePick.svelte';
 	import ServerRoles from '#lib/components/ServerRoles.svelte';
 	import SteamId from '#lib/components/SteamId.svelte';
-	import { ask } from '#lib/ask.svelte.js';
 
 	interface Seen {
 		id: string;
@@ -74,10 +75,37 @@
 	let banTarget = $state.raw<{ id: string; name: string } | null>(null);
 	let banOpen = $state(false);
 
+	// From ReSkate 2.0.8 a kick can keep a player out for a while instead of
+	// until the server restarts: not offered where the server is known to be
+	// older (a build the manager doesn't know may have it).
+	const serverVersion = $derived(instances.byId(ctx.id)?.serverVersion);
+	const timedKicks = $derived(!(serverVersion && newerVersion('2.0.8', serverVersion)));
+	const kickTimes = [
+		{ value: '', label: "The server's kick time" },
+		{ value: '5', label: '5 minutes' },
+		{ value: '15', label: '15 minutes' },
+		{ value: '30', label: '30 minutes' },
+		{ value: '60', label: '1 hour' },
+		{ value: '360', label: '6 hours' },
+		{ value: '1440', label: '24 hours' },
+		{ value: '0', label: 'Until the server restarts' }
+	];
+	let kickTarget = $state.raw<Player | null>(null);
+	let kickOpen = $state(false);
+	let kickFor = $state('');
+	function askKick(p: Player) {
+		kickTarget = p;
+		kickFor = '';
+		kickOpen = true;
+	}
+
 	const busy = new Busy();
-	async function kick(p: Player) {
-		if (!(await ask({ title: `Kick ${p.name}?`, body: 'They are taken off the server now, and can join again.', action: 'Kick' }))) return;
-		return busy.run(`kick:${p.id}`, () => attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/players/${p.id}/kick`), (r) => r.reply));
+	async function kick() {
+		if (!kickTarget) return;
+		const p = kickTarget;
+		kickOpen = false;
+		const body = timedKicks && kickFor ? { minutes: Number(kickFor) } : {};
+		return busy.run(`kick:${p.id}`, () => attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/players/${p.id}/kick`, body), (r) => r.reply));
 	}
 	function askBan(id: string, name: string) {
 		banTarget = { id, name };
@@ -144,7 +172,7 @@
 											<button class="btn btn-sm btn-ghost" onclick={() => askAdmin(p)} title="Make in-game admin" aria-label="Make {p.name} an in-game admin"><Icon name="shield" size={14} /></button>
 										{/if}
 										{#if ctx.can('players.kick')}
-											<button class="btn btn-sm" disabled={busy.is()} onclick={() => kick(p)} aria-label="Kick {p.name}"><Icon name="kick" size={14} /> <span class="hidden sm:inline">Kick</span></button>
+											<button class="btn btn-sm" disabled={busy.is()} onclick={() => askKick(p)} aria-label="Kick {p.name}"><Icon name="kick" size={14} /> <span class="hidden sm:inline">Kick</span></button>
 										{/if}
 										{#if ctx.can('players.ban')}
 											<button class="btn btn-sm btn-danger" onclick={() => askBan(p.id, p.name)} aria-label="Ban {p.name}"><Icon name="ban" size={14} /> <span class="hidden sm:inline">Ban</span></button>
@@ -219,6 +247,25 @@
 		{/if}
 	</section>
 </div>
+
+<Modal bind:open={kickOpen} title="Kick {kickTarget?.name || kickTarget?.id}?">
+	{#if timedKicks}
+		<p class="text-sm text-muted">They are taken off the server now, and told how long until they can join again.</p>
+		<label class="mt-3 block">
+			<span class="label">Keep them out for</span>
+			<select class="input" bind:value={kickFor}>
+				{#each kickTimes as t (t.value)}<option value={t.value}>{t.label}</option>{/each}
+			</select>
+		</label>
+		<p class="mt-1 text-xs text-faint">The server's kick time is under Settings &gt; Gameplay (ReSkate 2.0.8). A ban keeps them out for good.</p>
+	{:else}
+		<p class="text-sm text-muted">They are taken off the server now, and can't join again until it restarts.</p>
+	{/if}
+	{#snippet actions()}
+		<button class="btn" onclick={() => (kickOpen = false)}>Cancel</button>
+		<button class="btn btn-danger" onclick={kick}><Icon name="kick" size={14} /> Kick</button>
+	{/snippet}
+</Modal>
 
 <Modal bind:open={banOpen} title="Ban {banTarget?.name || banTarget?.id}?">
 	<p class="text-sm text-muted">

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// A config as ReSkate 2.0.7 writes it (layout in Server/server_config.cpp), in
+// A config as ReSkate 2.0.8 writes it (layout in Server/server_config.cpp), in
 // the sections of 1.1.7 and later, with the admins an older one listed: the
 // server moves them into data/roles.json when it starts.
 const sectionedConfig = `{
@@ -26,7 +26,8 @@ const sectionedConfig = `{
     "layers": {"grom_tod_1_night": "on"}, "park_mods": [], "park_limits": {"parks": 3, "objects": 512}},
   "players": {"allow_boosts": false, "allow_no_bail": true, "allow_noclip": false, "allow_parties": true, "party_size": 4,
     "afk_kick_minutes": 5, "allow_voice_chat": true, "voice_range": 30, "object_placement": "admins", "object_limit": 10,
-    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false, "word_warnings": 3, "use_global_word_filter": true},
+    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false, "kick_minutes": 0, "word_warnings": 3,
+    "use_global_word_filter": true},
   "anti_cheat": {"speed_hack": "kick", "pinned_board": "warn", "modified_scoring": "off", "allowed_scoring_mods": ["00000000deadbeef"],
     "enforce_tuning": true, "bone_scale_limit": 2, "bone_reach_limit": 1.0},
   "network": {"use_steam_relay": true, "send_rate": 48, "crowd_budget": 0, "pack_ms": 10, "threads": 0, "finger_distance": 25,
@@ -35,7 +36,7 @@ const sectionedConfig = `{
     "kick": {"enabled": false, "percent": 70, "seconds": 20, "cooldown_seconds": 600, "min_players": 4},
     "time_of_day": {"enabled": true, "percent": 50, "seconds": 0, "cooldown_seconds": 0, "min_players": 1},
     "extend_map": {"enabled": true, "percent": 50, "seconds": 0, "cooldown_seconds": 0, "min_players": 1},
-    "seconds": 30, "cooldown_seconds": 120, "starter_votes_yes": true, "polls": "admins", "poll_seconds": 60,
+    "seconds": 30, "cooldown_seconds": 120, "kick_minutes": 5, "starter_votes_yes": true, "polls": "admins", "poll_seconds": 60,
     "custom": [{"name": "restart", "description": "Reload the current map", "command": "map {map}", "choices": [],
       "enabled": true, "percent": 60, "seconds": 0, "cooldown_seconds": 0, "min_players": 1}]},
   "announcements": {"messages": ["Join our Discord", "Be nice"], "interval_minutes": 10},
@@ -308,6 +309,38 @@ func TestRotationSettings(t *testing.T) {
 	}
 }
 
+// 2.0.8's kick times change live, and 0, until the server restarts, is said
+// as such.
+func TestKickTimes(t *testing.T) {
+	f, _ := readSectioned(t)
+	if v := f.Values(); v["kick_minutes"] != 0.0 || v["votes.kick_minutes"] != 5.0 {
+		t.Errorf("read %v %v", v["kick_minutes"], v["votes.kick_minutes"])
+	}
+	p, err := Diff(f, map[string]any{"kick_minutes": 30.0, "votes.kick_minutes": 0.0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"kick-time 30", "votes kick-minutes restart"}; !slices.Equal(p.Commands, want) || len(p.Restart) != 0 {
+		t.Fatalf("planned %+v, want %q", p, want)
+	}
+	f.ApplyOffline(p.Changed)
+	for path, want := range map[string]string{"players.kick_minutes": `30`, "votes.kick_minutes": `0`} {
+		got, ok := f.at(path)
+		if b, _ := json.Marshal(got); !ok || string(b) != want {
+			t.Errorf("%s = %s, want %s", path, b, want)
+		}
+	}
+	want := []string{"kick-time restart", "votes kick-minutes 1440"}
+	if p, err = Diff(f, map[string]any{"kick_minutes": 0.0, "votes.kick_minutes": 1440.0}, nil); err != nil || !slices.Equal(p.Commands, want) {
+		t.Errorf("planned %+v (%v), want %q", p, err, want)
+	}
+	for _, bad := range []map[string]any{{"kick_minutes": 1441.0}, {"votes.kick_minutes": 1441.0}, {"votes.kick_minutes": -1.0}} {
+		if _, err := Diff(f, bad, nil); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+}
+
 // 2.0.2's announcements change live: the server only adds one at the end,
 // removes one by its place, or clears them.
 func TestAnnouncements(t *testing.T) {
@@ -569,9 +602,10 @@ func TestCustomCommands(t *testing.T) {
 	for _, bad := range []any{
 		many,
 		[]any{"discord"},
-		[]any{cmd(map[string]any{"name": "help"})}, // the chat's own
-		[]any{cmd(map[string]any{"name": "kick"})}, // admins' /kick
-		[]any{cmd(map[string]any{"name": "42"})},   // a number answers a poll
+		[]any{cmd(map[string]any{"name": "help"})},      // the chat's own
+		[]any{cmd(map[string]any{"name": "kick"})},      // admins' /kick
+		[]any{cmd(map[string]any{"name": "kick-time"})}, // 2.0.8
+		[]any{cmd(map[string]any{"name": "42"})},        // a number answers a poll
 		[]any{cmd(map[string]any{"name": "dis cord"})},
 		[]any{cmd(nil), cmd(nil)},
 		[]any{cmd(map[string]any{"reply": ""})}, // neither a reply nor a command

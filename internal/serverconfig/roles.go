@@ -184,8 +184,8 @@ var roleNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,24}$`)
 
 // GameTags are the tags the game uses itself, for the server, a lobby's host,
 // friends and the ReSkate team, which no role may wear (roles_error): lower
-// case and without spaces, as it compares them. ReSkate's main branch after
-// 2.0.7 refuses its admins' tag too, ReSkate Admin.
+// case and without spaces, as it compares them. From ReSkate 2.0.8 it refuses
+// its admins' tag too, ReSkate Admin.
 var GameTags = []string{"server", "reskate", "reskateadmin", "dev", "developer", "contentcreator", "centrix", "staff", "homie", "host", "friend"}
 
 // RoleLook is what the panel sets of a role: its name when it's new, and the

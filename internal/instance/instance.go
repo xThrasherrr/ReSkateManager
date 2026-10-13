@@ -119,7 +119,7 @@ var fatalPrefixes = []string{"Config problem:", "Cannot read ", "Cannot load "}
 // lostConsole is why a server whose output closed while it ran was ended
 // (supervisor.Process.Lost). Restarting it would only do the same again.
 const lostConsole = "The server closed its console while running, so the manager could neither read nor stop it, and ended it. " +
-	"ReSkate's Windows server does this from 2.0.6 on; until a release fixes it, put 2.0.5's server files in its folder by hand and turn off its auto-update."
+	"ReSkate's Windows server did this in 2.0.6 and 2.0.7; 2.0.8 fixed it, so update the server on its Updates tab."
 
 type waiter struct {
 	ch       chan logparse.Entry

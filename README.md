@@ -53,7 +53,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Players and server control
 
-- **Player management:** see who's online and who has played, with each player's role from ReSkate 2.0.6. Kick, ban, unban and manage in-game admins, which from 2.0.6 are the players with the server's `admin` role.
+- **Player management:** see who's online and who has played, with each player's role from ReSkate 2.0.6. Kick (from 2.0.8 for as long as you pick, or the server's own kick time), ban, unban and manage in-game admins, which from 2.0.6 are the players with the server's `admin` role.
 - **Crash recovery:** a crashed server restarts automatically, with backoff, up to five tries in a row.
 - **Scheduled restarts:** restart a server at set times of day, or after so many hours up. Players get a warning in chat 10, 5 and 1 minute before; a server with nobody on restarts straight away.
 
@@ -256,7 +256,7 @@ If the panel says it can't reach the manager, the manager stopped or is restarti
 
 ReSkateServer has no admin API, so the manager works entirely through each server's console.
 
-- **Launch:** servers start with redirected stdin/stdout and `--no-update`, and on Windows `--headless`, without which ReSkate 2.0.6 opens a window of its own. The manager installs updates itself, because the server's self-updater relaunches it under a process the manager can't track. A server that closes its console while it runs (the Windows build does from 2.0.6) is ended and not restarted, since the manager could neither read nor stop it.
+- **Launch:** servers start with redirected stdin/stdout and `--no-update`, and on Windows `--headless`, without which ReSkate 2.0.6 opens a window of its own. The manager installs updates itself, because the server's self-updater relaunches it under a process the manager can't track. A server that closes its console while it runs (the Windows build did in 2.0.6 and 2.0.7) is ended and not restarted, since the manager could neither read nor stop it.
 - **Output:** stdout lines (`[HH:MM:SS] text`, or the time as Windows shows it from 2.0.6) are parsed into typed events: joins, leaves, chat, admin commands, anti-cheat, votes and readiness. The formats come from `Server/server_host.cpp`. A line over 1 MiB is cut there, so it can't stall the reader or the server.
 - **Commands:** commands go to the server one at a time, and each reply is matched to the command that produced it. Lines the server prints on its own are never taken as replies.
 - **Config file:** the server rewrites `ReSkateServer.json` after every setting command, so the manager never writes that file while the server is running. Before a start, the manager fixes a server name the server would refuse (letters, numbers, spaces and `- _ / [ ] ( )` only) by dropping the other characters, and says so in the console.

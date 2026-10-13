@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
+	"github.com/xThrasherrr/ReSkateManager/internal/updater"
 )
 
 // Removing a server keeps its files unless asked to purge them, and a purge
@@ -266,6 +268,7 @@ func TestConsolePermissions(t *testing.T) {
 		"vote kick bob":       403,
 		"vote map grom":       403,
 		"bone-reach 2":        403,
+		"kick-time 30":        403, // 2.0.8: a setting
 		"maps reload":         403, // 2.0.7: reads Mods again
 		"maps latest on":      403, // a setting
 		"MAPS update":         403,
@@ -303,6 +306,55 @@ func TestConsolePermissions(t *testing.T) {
 		if code, b := p.do("POST", "/api/instances/a/command", string(body)); code != want {
 			t.Errorf("%q: %d %s, want %d", line, code, b, want)
 		}
+	}
+}
+
+// A kick's own time (ReSkate 2.0.8) is checked before it goes to the server,
+// and refused for a server known to be older, which would take the time as
+// part of the player's name.
+func TestKickMinutes(t *testing.T) {
+	servers, builds := t.TempDir(), &updater.Builds{}
+	p := newPanel(t, func(a *API) {
+		a.Reg = instance.NewRegistry(a.Log)
+		a.ServersDir = servers
+		a.Builds = builds
+	})
+	p.post("/api/auth/login", `{"username":"owner","password":"`+testPassword+`"}`)
+	if code, b := p.do("POST", "/api/instances", `{"name":"a"}`); code != 201 {
+		t.Fatalf("create: %d %s", code, b)
+	}
+	exe := instance.Def{Dir: filepath.Join(servers, "a")}.Exe()
+	writeFile(t, exe, "a server")
+	sum, err := updater.FileSHA256(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kick := func(body string) (int, string) {
+		code, b := p.do("POST", "/api/instances/a/players/76561198000000001/kick", body)
+		return code, string(b)
+	}
+	for _, body := range []string{"", `{}`, `{"minutes":30}`, `{"minutes":0}`} {
+		// A server the manager doesn't know the release of may have it.
+		if code, b := kick(body); code != 400 || !strings.Contains(b, "not running") {
+			t.Errorf("%q: %d %s, want 400 for the stopped server", body, code, b)
+		}
+	}
+	for _, body := range []string{`{"minutes":-1}`, `{"minutes":1441}`, `{"minutes":"5"}`} {
+		if code, b := kick(body); code != 400 || strings.Contains(b, "not running") {
+			t.Errorf("%q: %d %s, want 400 for the time", body, code, b)
+		}
+	}
+
+	builds.Learn(&updater.Release{Version: "2.0.7", ExeSHA256: sum})
+	if code, b := kick(`{"minutes":30}`); code != http.StatusConflict {
+		t.Errorf("a timed kick on 2.0.7: %d %s, want 409", code, b)
+	}
+	if code, b := kick(`{}`); code != 400 || !strings.Contains(b, "not running") {
+		t.Errorf("a kick on 2.0.7: %d %s, want it sent", code, b)
+	}
+	builds.Learn(&updater.Release{Version: "2.0.8", ExeSHA256: sum})
+	if code, b := kick(`{"minutes":30}`); code != 400 || !strings.Contains(b, "not running") {
+		t.Errorf("a timed kick on 2.0.8: %d %s, want it sent", code, b)
 	}
 }
 

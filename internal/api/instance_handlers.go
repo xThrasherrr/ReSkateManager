@@ -476,14 +476,43 @@ func running(in *instance.Instance) bool {
 	return s == instance.Running || s == instance.Starting
 }
 
+// maxKickMinutes is the longest a kick can keep a player out (ReSkate 2.0.8).
+const maxKickMinutes = 1440
+
+// kick takes a player off the server. Minutes, from ReSkate 2.0.8, is how long
+// they're kept out, 0 until the server restarts; without it, the server's
+// kick_minutes says.
 func (a *API) kick(w http.ResponseWriter, r *http.Request) {
 	in := inst(r)
 	id, ok := steamParam(w, r)
 	if !ok {
 		return
 	}
-	reply, err := in.Command(r.Context(), "kick "+id, from(r).user.Username)
-	a.auditOutcome(r, in.ID(), "player.kick", id, err)
+	var req struct {
+		Minutes *int `json:"minutes"`
+	}
+	if r.ContentLength != 0 && !readJSON(w, r, &req) {
+		return
+	}
+	line := "kick " + id
+	if m := req.Minutes; m != nil {
+		if *m < 0 || *m > maxKickMinutes {
+			writeErr(w, 400, fmt.Sprintf("a kick lasts 1 to %d minutes, or 0 for until the server restarts", maxKickMinutes))
+			return
+		}
+		// An older server would take the time as part of the player's name.
+		if v := a.Builds.Version(in.Def().Exe()); serverconfig.NewerVersion("2.0.8", v) {
+			writeErr(w, http.StatusConflict, "this server's kicks last until it restarts; ReSkate 2.0.8 gives them a time")
+			return
+		}
+		if *m == 0 {
+			line += " restart"
+		} else {
+			line += " " + strconv.Itoa(*m)
+		}
+	}
+	reply, err := in.Command(r.Context(), line, from(r).user.Username)
+	a.auditOutcome(r, in.ID(), "player.kick", strings.TrimPrefix(line, "kick "), err)
 	a.answerReply(w, r, reply, err)
 }
 

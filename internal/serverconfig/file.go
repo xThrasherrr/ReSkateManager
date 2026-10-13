@@ -194,7 +194,7 @@ var sections = map[string]string{
 	"voice_range": "players.voice_range", "object_placement": "players.object_placement",
 	"object_limit": "players.object_limit", "announce_throwdowns": "players.announce_throwdowns",
 	"afk_kick_minutes": "players.afk_kick_minutes", "allow_object_scaling": "players.allow_object_scaling", "sync_effects": "players.sync_effects",
-	"word_warnings": "players.word_warnings", "use_global_word_filter": "players.use_global_word_filter",
+	"word_warnings": "players.word_warnings", "use_global_word_filter": "players.use_global_word_filter", "kick_minutes": "players.kick_minutes",
 
 	"speed_check": "anti_cheat.speed_hack", "score_check": "anti_cheat.modified_scoring",
 	"score_allow": "anti_cheat.allowed_scoring_mods", "enforce_tuning": "anti_cheat.enforce_tuning",
@@ -994,7 +994,8 @@ var ReservedCommandNames = []string{"help", "party", "p", "w", "whisper", "tell"
 	"players", "rate", "reserved", "rotation", "say", "score-allow", "score-check", "speed-check", "status", "tod",
 	"tpall", "tphere", "tps", "tuning", "tuning-enforce", "unban", "voice", "voice-allow", "voice-range",
 	"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update",
-	"role", "roles", "board-check", "park-mod", "teleport"} // 2.0.6
+	"role", "roles", "board-check", "park-mod", "teleport", // 2.0.6
+	"kick-time"} // 2.0.8
 
 // commandNameFree is custom_command_name_free: not one of the chat's own
 // commands, nor a server command admins type as /<command>, and not a
@@ -1383,7 +1384,7 @@ var commandVerbs = map[string]string{
 	"object_placement": "placement", "object_limit": "objects", "allow_object_scaling": "object-scaling",
 	"bone_scale_limit": "bone-scale", "bone_reach_limit": "bone-reach", "sync_effects": "effects",
 	"noclip": "noclip", "no_bail": "nobail", "boosts": "boosts", "enforce_tuning": "tuning",
-	"parties": "parties", "party_size": "party-size", "afk_kick_minutes": "afk-kick",
+	"parties": "parties", "party_size": "party-size", "afk_kick_minutes": "afk-kick", "kick_minutes": "kick-time",
 	"announce_throwdowns": "announce-throwdowns", "activity_log": "activity-log",
 	"parks.construction": "park construction", "parks.historic": "park historic", "parks.financial": "park financial",
 	"announcements.interval_minutes": "announcements interval", "announcements.card": "announcements card",
@@ -1391,7 +1392,7 @@ var commandVerbs = map[string]string{
 	"votes.map.enabled": "votes map", "votes.map.percent": "votes map", "votes.map.seconds": "votes map seconds",
 	"votes.map.cooldown_seconds": "votes map cooldown", "votes.map.min_players": "votes map min-players",
 	"votes.kick.enabled": "votes kick", "votes.kick.percent": "votes kick", "votes.kick.seconds": "votes kick seconds",
-	"votes.kick.cooldown_seconds": "votes kick cooldown", "votes.kick.min_players": "votes kick min-players",
+	"votes.kick.cooldown_seconds": "votes kick cooldown", "votes.kick.min_players": "votes kick min-players", "votes.kick_minutes": "votes kick-minutes",
 	"votes.time_of_day.enabled": "votes tod", "votes.time_of_day.percent": "votes tod", "votes.time_of_day.seconds": "votes tod seconds",
 	"votes.time_of_day.cooldown_seconds": "votes tod cooldown", "votes.time_of_day.min_players": "votes tod min-players",
 	"votes.extend_map.enabled": "votes extend", "votes.extend_map.percent": "votes extend", "votes.extend_map.seconds": "votes extend seconds",
@@ -1405,6 +1406,10 @@ var commandVerbs = map[string]string{
 var offAtZero = []string{"map_rotation_minutes", "rotation_extend_minutes", "crowd_budget", "object_limit", "bone_scale_limit", "bone_reach_limit",
 	"afk_kick_minutes", "announcements.interval_minutes"}
 
+// restartAtZero are the kick times whose 0, until the server restarts, the
+// server takes as "<verb> restart" (2.0.8).
+var restartAtZero = []string{"kick_minutes", "votes.kick_minutes"}
+
 // settingCommand is the command that sets fd to v, when commandVerbs has one.
 func settingCommand(fd Field, v any) (string, bool) {
 	verb, ok := commandVerbs[fd.Key]
@@ -1417,6 +1422,9 @@ func settingCommand(fd Field, v any) (string, bool) {
 	case TypeInt, TypeNumber:
 		if v.(float64) == 0 && slices.Contains(offAtZero, fd.Key) {
 			return verb + " off", true
+		}
+		if v.(float64) == 0 && slices.Contains(restartAtZero, fd.Key) {
+			return verb + " restart", true
 		}
 		return verb + " " + num(v), true
 	}

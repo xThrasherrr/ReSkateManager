@@ -184,6 +184,7 @@ var Fields = []Field{
 	{Key: "parties", Label: "Parties", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "party_size", Label: "Party size", Group: "Gameplay", Type: TypeInt, Min: 2, Max: 8, Default: 8.0},
 	{Key: "afk_kick_minutes", Label: "Remove players away for (min)", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1440, Help: "They're warned a minute before. 0 is never. Admins are never removed.", Default: 0.0},
+	{Key: "kick_minutes", Label: "Kicked players stay out for (min)", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1440, Help: "0 is until the server restarts. One kick can be given its own time.", Default: 0.0},
 	{Key: "announce_throwdowns", Label: "Announce throwdowns in chat", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "activity_log", Label: "Log player activity", Group: "Gameplay", Type: TypeBool, Default: true},
 
@@ -214,6 +215,7 @@ var Fields = []Field{
 	{Key: "votes.kick.seconds", Label: "Kick vote length (s)", Group: "Kick votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},
 	{Key: "votes.kick.cooldown_seconds", Label: "Cooldown after a kick vote (s)", Group: "Kick votes", Type: TypeInt, Min: 0, Max: 3600, Help: votesOwnCooldown, Default: 0.0},
 	{Key: "votes.kick.min_players", Label: "Players on to start a kick vote", Group: "Kick votes", Type: TypeInt, Min: 1, Max: maxVotePlayers, Default: 1.0},
+	{Key: "votes.kick_minutes", Label: "Vote-kicked players stay out for (min)", Group: "Kick votes", Type: TypeInt, Min: 0, Max: 1440, Help: "0 is until the server restarts.", Default: 5.0},
 	{Key: "votes.time_of_day.enabled", Label: "Time of day votes", Group: "Time of day votes", Type: TypeBool, Help: "Needs world layer sync.", Default: false},
 	{Key: "votes.time_of_day.percent", Label: "Time of day vote % to pass", Group: "Time of day votes", Type: TypeInt, Min: 1, Max: 100, Default: 50.0},
 	{Key: "votes.time_of_day.seconds", Label: "Time of day vote length (s)", Group: "Time of day votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},

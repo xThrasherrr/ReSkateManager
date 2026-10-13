@@ -28,7 +28,7 @@ var GroupInfo = map[string]string{
 	"Extend votes": "Players start /vote extend to give the map in play more time: the minutes under Staying adds in the map pool. It runs only while the map rotation is on and staying is above 0. The console's rotation extend [minutes] adds time at once. Needs ReSkate 2.0.7.",
 	"Votes": "Players start a vote in chat:\n" +
 		"• /vote map <map>: change the map (only maps in the map pool).\n" +
-		"• /vote kick <player>: kick a player until the server restarts.\n" +
+		"• /vote kick <player>: kick a player, from ReSkate 2.0.8 for the time under Kick votes, before it until the server restarts.\n" +
 		"• /vote tod <time>: set the time of day.\n" +
 		"• /vote extend: give the map in play more time, from ReSkate 2.0.7 (see Extend votes).\n" +
 		"• /vote <name>: one of the custom votes (/vote list shows them).\n" +
@@ -115,12 +115,14 @@ var fieldInfo = map[string]string{
 	"parties":              "Players invite each other from the game's Social menu, a player card or chat (/party invite <player>). Party members join each other's coop challenges, see each other on the map and talk with /p <message>.",
 	"party_size":           "The most players in one party, 2 to 8.",
 	"afk_kick_minutes":     "Removes a player who hasn't moved, spoken, typed in chat or changed their objects for this many minutes, 1 to 1440. They're warned in chat a minute before, and can join again straight away. Admins are never removed, and nor is anyone still loading the map. 0 never removes anyone. Needs ReSkate 2.0.0.",
+	"kick_minutes":         "How long a player kicked by an admin (from the console, the Players page or in the game) is kept out, 1 to 1440 minutes. They're told how long when they're kicked and when they try to join. A kick keeps the time it was given, so a change is for later kicks. The Players page and the console's kick <player> <minutes> can give one kick its own time. 0 keeps them out until the server restarts, as every kick did before 2.0.8. A ban is still for good, and kick votes have their own time. Needs ReSkate 2.0.8.",
 	"announce_throwdowns":  "Tells everyone in chat when a throwdown drop is placed.",
 	"activity_log":         "Writes console lines for throwdowns (drops placed, joins, starts, turns and results), objects placed or removed, and how long players take to load.",
 
 	"votes.map.enabled":         "Lets players start /vote map <map>. They can pick from the map pool only, or from all the server's maps while the pool is empty.",
 	"votes.map.percent":         "The share of yes votes that passes a map vote, rounded up: from ReSkate 2.0.7 of the votes cast (with 5 of 10 players voting at 60%, 3 must vote yes), before it of everyone connected (6 of the 10).",
-	"votes.kick.enabled":        "Lets players start /vote kick <player>. A passed kick lasts until the server restarts. Admins can't be vote-kicked.",
+	"votes.kick.enabled":        "Lets players start /vote kick <player>. A passed kick keeps the player out for the time below, or before ReSkate 2.0.8 until the server restarts. Admins can't be vote-kicked.",
+	"votes.kick_minutes":        "How long a player kicked by a vote is kept out, 1 to 1440 minutes, apart from the time admins' kicks last. 0 keeps them out until the server restarts, as vote kicks did before 2.0.8. Needs ReSkate 2.0.8.",
 	"votes.kick.percent":        "The share of yes votes that passes a kick vote, rounded up: from ReSkate 2.0.7 of the votes cast, before it of everyone connected. The player being kicked doesn't count or vote, and a kick always needs at least two yes votes.",
 	"votes.time_of_day.enabled": "Lets players start /vote tod <time>: morning, noon, afternoon, evening, night, weatherday, weathernight or default. Only works while World layer sync is on.",
 	"votes.time_of_day.percent": "The share of yes votes that passes a time of day vote, rounded up: from ReSkate 2.0.7 of the votes cast, before it of everyone connected.",
