@@ -86,6 +86,48 @@ func TestDescribe(t *testing.T) {
 	if got := r.describe("players.unknown"); got != "" {
 		t.Errorf("describe(unknown) = %q", got)
 	}
+
+	// Under its section's heading, and in another setting's text: 2.0.8's
+	// votes.kick_minutes was given players.kick_minutes' words. Without a
+	// heading, the first of its name; a vote's own is among the others' words.
+	r.cur.readme = "\"players\" - What players may do.\n" +
+		"kick_minutes       How long a player kicked by an admin\n" +
+		"                   is kept out.\n" +
+		"\n" +
+		"\"votes\" - What players may vote on.\n" +
+		"votes              Player votes:\n" +
+		"                   needs two. \"kick_minutes\" (default 5) is how long a\n" +
+		"                   player kicked by a vote is kept out.\n" +
+		"                   Each vote may also have its own \"seconds\".\n" +
+		"seconds            How long a vote runs.\n"
+	for place, want := range map[string]string{
+		"players.kick_minutes":  ": `\"How long a player kicked by an admin is kept out.\"`",
+		"votes.kick_minutes":    ": `\"\\\"kick_minutes\\\" (default 5) is how long a player kicked by a vote is kept out.\"`",
+		"votes.seconds":         ": `\"How long a vote runs.\"`",
+		"votes.map.seconds":     "",
+		"network.kick_minutes":  ": `\"How long a player kicked by an admin is kept out.\"`",
+		"players.allow_seconds": "",
+	} {
+		if got := r.describe(place); got != want {
+			t.Errorf("describe(%s) = %s, want %s", place, got, want)
+		}
+	}
+}
+
+// The Windows run, which has no source, finds the same new settings without
+// the README's words: each is listed once, with them.
+func TestIncludeSaysMore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "windows.json")
+	data, _ := json.Marshal(findings{Adds: []string{"New setting `\"players.kick_minutes\"`, default `0`", "New command `\"kick-time\"`"}})
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := &report{Adds: []string{"New setting `\"players.kick_minutes\"`, default `0`: `\"How long.\"`", "New command `\"kick\"`"}}
+	r.include(path)
+	want := []string{"New setting `\"players.kick_minutes\"`, default `0`: `\"How long.\"`", "New command `\"kick\"`", "New command `\"kick-time\"`"}
+	if !slices.Equal(r.Adds, want) {
+		t.Errorf("adds\n got %q\nwant %q", r.Adds, want)
+	}
 }
 
 func TestTitle(t *testing.T) {

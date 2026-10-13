@@ -239,14 +239,45 @@ func (r *report) compareConfig(f *serverconfig.File) (int, int) {
 	return added, len(leaves)
 }
 
-// describe finds a setting in the server's README.txt, which lists each as
-// its name, then what it does on that line and the indented ones after.
+// describe finds a setting in the server's README.txt, which lists each
+// under its section's heading ("players" - What players may do.) as its
+// name, then what it does on that line and the indented ones after. One
+// inside another's object is told of in that one's text, to the end of its
+// sentence: votes.kick_minutes as "kick_minutes" (default 5) is how long...
+// Without a heading for its section, it's the first setting of its name. One
+// deeper in (votes.extend_map.enabled) is told of among its siblings' words,
+// so it goes without.
 func (r *report) describe(place string) string {
 	if r.cur == nil {
 		return ""
 	}
-	name := place[strings.LastIndexByte(place, '.')+1:]
+	parts := strings.Split(place, ".")
+	name := parts[len(parts)-1]
 	lines := strings.Split(r.cur.readme, "\n")
+	switch {
+	case len(parts) == 1:
+		return listed(lines, name)
+	case len(parts) > 2:
+		return ""
+	}
+	head := func(l string) bool { return strings.HasPrefix(l, `"`) && strings.Contains(l, `" - `) }
+	start := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, `"`+parts[0]+`" - `) })
+	if start < 0 {
+		return listed(lines, name)
+	}
+	section := lines[start+1:]
+	if end := slices.IndexFunc(section, head); end >= 0 {
+		section = section[:end]
+	}
+	if s := listed(section, name); s != "" {
+		return s
+	}
+	return mentioned(section, name)
+}
+
+// listed is what README.txt lines say of the setting listed as name: on its
+// line, and the indented ones after.
+func listed(lines []string, name string) string {
 	for i, l := range lines {
 		rest, ok := strings.CutPrefix(l, name+" ")
 		if !ok {
@@ -259,13 +290,37 @@ func (r *report) describe(place string) string {
 			}
 			text = append(text, strings.Fields(more)...)
 		}
-		s := strings.Join(text, " ")
-		if len(s) > 400 {
-			s = s[:400] + "..."
-		}
-		return ": " + code(s)
+		return described(text)
 	}
 	return ""
+}
+
+// mentioned is what README.txt lines say of "name" in another setting's text,
+// from there to a line that ends a sentence.
+func mentioned(lines []string, name string) string {
+	for i, l := range lines {
+		at := strings.Index(l, `"`+name+`"`)
+		if at < 0 || !strings.HasPrefix(l, "    ") {
+			continue
+		}
+		text := strings.Fields(l[at:])
+		for _, more := range lines[i+1:] {
+			if strings.HasSuffix(text[len(text)-1], ".") || !strings.HasPrefix(more, "    ") {
+				break
+			}
+			text = append(text, strings.Fields(more)...)
+		}
+		return described(text)
+	}
+	return ""
+}
+
+func described(words []string) string {
+	s := strings.Join(words, " ")
+	if len(s) > 400 {
+		s = s[:400] + "..."
+	}
+	return ": " + code(s)
 }
 
 // cantManage reports a server run the manager couldn't run a server like:

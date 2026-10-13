@@ -52,10 +52,16 @@ func (r *report) include(path string) {
 		r.Notes = append(r.Notes, "What the run on another system found couldn't be read: "+code(err.Error()))
 		return
 	}
+	// Of two that say the same, one can say more: the Windows run has no
+	// source, so a new setting it finds comes without the README's words.
 	add := func(to *[]string, items []string) {
 		for _, it := range items {
-			if !slices.Contains(*to, it) {
+			i := slices.IndexFunc(*to, func(have string) bool { return strings.HasPrefix(have, it) || strings.HasPrefix(it, have) })
+			switch {
+			case i < 0:
 				*to = append(*to, it)
+			case len(it) > len((*to)[i]):
+				(*to)[i] = it
 			}
 		}
 	}
