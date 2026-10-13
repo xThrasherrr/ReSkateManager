@@ -126,6 +126,7 @@ var routePerms = map[string]string{
 	"POST /api/instances/{id}/mods/{folder}/share":       "settings.edit",
 	"POST /api/instances/{id}/mods/{folder}/update":      "settings.edit",
 	"POST /api/instances/{id}/mods/installs":             "settings.edit",
+	"POST /api/instances/{id}/mods/reload":               "settings.edit",
 	"POST /api/instances/{id}/mods/updates":              "settings.edit",
 	"POST /api/instances/{id}/mods/uploads":              "settings.edit",
 	"POST /api/instances/{id}/players/{steamId}/kick":    "players.kick",

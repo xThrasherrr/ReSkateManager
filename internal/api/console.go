@@ -46,7 +46,8 @@ func (a *API) command(w http.ResponseWriter, r *http.Request) {
 const maxCommand = 1024
 
 // consoleOnly are the console commands console.exec alone may run: they only
-// read, or act on players in a way no finer permission covers.
+// read, or act on players in a way no finer permission covers. Of maps, only
+// the list (see consolePerm).
 var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "teleport", "vote-cancel", "clear-objects"}
 
 // consolePerms are the console commands that do what a finer permission
@@ -78,6 +79,11 @@ var ownerCommands = []string{"poll-run"}
 func consolePerm(line string) string {
 	fields := strings.Fields(strings.ToLower(line))
 	verb := fields[0]
+	// "maps" lists the maps, but 2.0.7's maps reload reads Mods again, and
+	// maps update and maps latest change the mods' versions and a setting.
+	if verb == "maps" && len(fields) > 1 {
+		return auth.SettingsEdit
+	}
 	if slices.Contains(consoleOnly, verb) {
 		return ""
 	}
@@ -90,6 +96,11 @@ func consolePerm(line string) string {
 	return auth.SettingsEdit
 }
 
+// ConsolePerm is the permission the panel's console needs for a line besides
+// console.exec, "" for none, so cmd/reskate-watch can tell a new form of a
+// read-only command the panel would let anyone with the console run.
+func ConsolePerm(line string) string { return consolePerm(line) }
+
 // ConsoleVerbs are the console commands the panel has decided on: those
 // console.exec alone may run, those that need a finer permission too, and
 // the owners'. One a newer server adds needs settings.edit until it's here,
@@ -100,7 +111,7 @@ func ConsoleVerbs() []string {
 		out = append(out, verb)
 	}
 	slices.Sort(out)
-	return out
+	return slices.Compact(out) // maps is in both
 }
 
 // permLabel names a permission as the Users page does.

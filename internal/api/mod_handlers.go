@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 )
 
@@ -70,8 +71,23 @@ func (a *API) modErr(w http.ResponseWriter, r *http.Request, err error) {
 // errShared turns away a change to a shared mod made from one server.
 var errShared = errors.New("this mod comes from the shared mods; update or delete it there, or disable it on this server")
 
+// reloadMods has the running server read Mods again (maps reload, ReSkate
+// 2.0.7), so the maps of mods added, enabled or taken out since it started
+// can be switched to without a restart. An older server can't: 409.
+func (a *API) reloadMods(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	reply, err := in.ReloadMaps(r.Context(), from(r).user.Username)
+	a.auditOutcome(r, in.ID(), "mods.reload", "", err)
+	if errors.Is(err, instance.ErrNoMapsReload) {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	a.answerReply(w, r, reply, err)
+}
+
 // setModEnabled enables or disables a mod. The server reads Mods only when it
-// starts, so a running one keeps the mod's maps until it restarts.
+// starts, so a running one keeps the mod's maps until it restarts, or until
+// it reads them again (reloadMods).
 func (a *API) setModEnabled(w http.ResponseWriter, r *http.Request) {
 	in := inst(r)
 	folder, ok := modFolder(w, r)

@@ -66,13 +66,13 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 ### Server settings and maps
 
 - **Settings editor:** a form for every `ReSkateServer.json` setting. Most changes apply live through the server's own console commands. A few with no command (`max_players`, ports, `steam_token`, `global_bans`) go through a safe stop → write → start instead. Only owners can see or change a server's `steam_token`, its custom votes or its chat commands (ReSkate 2.0.3's own `/discord`, `/rules` and the like), which run server commands. ReSkate 2.0.6's park mods (parks built in the game's Park Editor, spawned for everyone) are set up live too.
-- **Map pool and rotation:** pick which maps players can vote for and how long the server stays on each. Edits apply live, admin changes included. The manager warns before you disable or delete a mod whose map is in a pool, since the server won't start without it.
+- **Map pool and rotation:** pick which maps players can vote for and how long the server stays on each, and from ReSkate 2.0.7 whether players vote for the next map and can vote to stay longer. Edits apply live, admin changes included. The manager warns before you disable or delete a mod whose map is in a pool, since the server won't start without it.
 - **World controls:** time of day and every world layer per map, applied live or saved for the next start (needs `world-layers.json` next to the server).
 
 ### Mods
 
 - **Mod browser:** search Thunderstore's ReSkate mods, tick any of your servers and the shared mods, and install one on all of them at once. Shows the maps a mod adds before you download it, and can filter to mods that add maps.
-- **Mods:** upload map mods as zips, sent in chunks so large maps clear proxy upload limits such as Cloudflare's. Enable, disable or delete mods, set a mod's map as the server's map, and update one mod or every outdated mod (**Update all**) in the background.
+- **Mods:** upload map mods as zips, sent in chunks so large maps clear proxy upload limits such as Cloudflare's. Enable, disable or delete mods, set a mod's map as the server's map, and update one mod or every outdated mod (**Update all**) in the background. From ReSkate 2.0.7, **Load them now** has a running server pick up changed mods without a restart.
 - **Shared mods:** keep one copy of a mod for several servers. Each server loads all, some, or none of them. Moving a server's mod into the shared pool (or turning shared mods on) swaps duplicate copies for links, reclaiming space.
 
 ### Updates and backups
@@ -256,7 +256,7 @@ If the panel says it can't reach the manager, the manager stopped or is restarti
 
 ReSkateServer has no admin API, so the manager works entirely through each server's console.
 
-- **Launch:** servers start with redirected stdin/stdout and `--no-update`, and on Windows `--headless`, without which ReSkate 2.0.6 opens a window of its own. The manager installs updates itself, because the server's self-updater relaunches it under a process the manager can't track. A server that closes its console while it runs (2.0.6's own Windows build does) is ended and not restarted, since the manager could neither read nor stop it.
+- **Launch:** servers start with redirected stdin/stdout and `--no-update`, and on Windows `--headless`, without which ReSkate 2.0.6 opens a window of its own. The manager installs updates itself, because the server's self-updater relaunches it under a process the manager can't track. A server that closes its console while it runs (the Windows build does from 2.0.6) is ended and not restarted, since the manager could neither read nor stop it.
 - **Output:** stdout lines (`[HH:MM:SS] text`, or the time as Windows shows it from 2.0.6) are parsed into typed events: joins, leaves, chat, admin commands, anti-cheat, votes and readiness. The formats come from `Server/server_host.cpp`. A line over 1 MiB is cut there, so it can't stall the reader or the server.
 - **Commands:** commands go to the server one at a time, and each reply is matched to the command that produced it. Lines the server prints on its own are never taken as replies.
 - **Config file:** the server rewrites `ReSkateServer.json` after every setting command, so the manager never writes that file while the server is running. Before a start, the manager fixes a server name the server would refuse (letters, numbers, spaces and `- _ / [ ] ( )` only) by dropping the other characters, and says so in the console.

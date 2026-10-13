@@ -146,6 +146,13 @@ var Fields = []Field{
 
 	{Key: "map_pool", Label: "Maps in the pool", Group: "Map pool", Type: TypeMaps, Help: "The maps players vote between, in rotation order.", Default: []string{}},
 	{Key: "map_rotation_minutes", Label: "Minutes on each map", Group: "Map pool", Type: TypeInt, Min: 0, Max: 1440, Help: "Then the server moves to the next pool map. 0 is off.", Default: 0.0},
+	{Key: "rotation_vote", Label: "Players vote for the next map", Group: "Map pool", Type: TypeBool, Help: "When a map's time is up: three pool maps, a random one, or staying.", Default: false},
+	{Key: "rotation_vote_seconds", Label: "Next map vote length (s)", Group: "Map pool", Type: TypeInt, Min: 10, Max: 120, Restart: true, Help: "It ends sooner once everyone has voted.", Default: 30.0},
+	{Key: "rotation_extend_minutes", Label: "Staying adds (minutes)", Group: "Map pool", Type: TypeInt, Min: 0, Max: 240, Help: "For the vote's Stay here and an extend vote. 0 offers neither.", Default: 15.0},
+	{Key: "rotation_announce", Label: "Tell players the minutes left", Group: "Map pool", Type: TypeBool, Help: "A card at 10, 5 and 1 minutes left.", Default: true},
+
+	{Key: "latest_versions", Label: "Keep maps at Thunderstore's newest version", Group: "Map versions", Type: TypeBool, Help: "Only mod folders named Owner-Name, without a version. Nothing is downloaded.", Default: false},
+	{Key: "latest_check_minutes", Label: "Ask Thunderstore every (minutes)", Group: "Map versions", Type: TypeInt, Min: 5, Max: 1440, Default: 60.0},
 
 	{Key: "use_steam_relay", Label: "Steam relays only", Group: "Network", Type: TypeBool, Restart: true, Help: "Off lets players connect straight to the game port, which must then be open (UDP).", Default: true},
 	{Key: "send_rate", Label: "Send rate per player (KB/s)", Group: "Network", Type: TypeInt, Min: 128, Max: 16384, Help: "Steam's relays carry about 1100; above that, more is lost.", Default: 900.0},
@@ -212,6 +219,11 @@ var Fields = []Field{
 	{Key: "votes.time_of_day.seconds", Label: "Time of day vote length (s)", Group: "Time of day votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},
 	{Key: "votes.time_of_day.cooldown_seconds", Label: "Cooldown after a time of day vote (s)", Group: "Time of day votes", Type: TypeInt, Min: 0, Max: 3600, Help: votesOwnCooldown, Default: 0.0},
 	{Key: "votes.time_of_day.min_players", Label: "Players on to start a time of day vote", Group: "Time of day votes", Type: TypeInt, Min: 1, Max: maxVotePlayers, Default: 1.0},
+	{Key: "votes.extend_map.enabled", Label: "Extend votes", Group: "Extend votes", Type: TypeBool, Help: "Needs the map rotation on, and staying above 0.", Default: true},
+	{Key: "votes.extend_map.percent", Label: "Extend vote % to pass", Group: "Extend votes", Type: TypeInt, Min: 1, Max: 100, Default: 50.0},
+	{Key: "votes.extend_map.seconds", Label: "Extend vote length (s)", Group: "Extend votes", Type: TypeInt, Min: 0, Max: 300, Help: votesOwnSeconds, Default: 0.0},
+	{Key: "votes.extend_map.cooldown_seconds", Label: "Cooldown after an extend vote (s)", Group: "Extend votes", Type: TypeInt, Min: 0, Max: 3600, Help: votesOwnCooldown, Default: 0.0},
+	{Key: "votes.extend_map.min_players", Label: "Players on to start an extend vote", Group: "Extend votes", Type: TypeInt, Min: 1, Max: maxVotePlayers, Default: 1.0},
 	{Key: "votes.custom", Label: "Custom votes", Group: "Custom votes", Type: TypeVotes, Max: maxCustomVotes, Owner: true, Help: "Votes of your own, each running a server command when it passes. New, removed or edited ones apply on restart.", Default: []CustomVote{}},
 	{Key: "votes.polls", Label: "Who may start polls", Group: "Polls", Type: TypeEnum, Options: []string{"off", "admins", "everyone"}, Default: "admins"},
 	{Key: "votes.poll_seconds", Label: "Poll length (s)", Group: "Polls", Type: TypeInt, Min: 10, Max: 600, Default: 60.0},

@@ -129,7 +129,7 @@ var startupPrefixes = []string{"Signing in to Steam", "Wrote a default ", "Added
 	"Global bans", "The global ban list could not be read", "The ReSkate team's lists (global bans and chat words) could not be read",
 	"Word lists: ", "No steam_token: ", "The server browser now shows only servers with a steam_token",
 	"The server browser shows servers without a steam_token again", "Connection: ", "Steam networking debug output is on",
-	"steam_debug: ", "Threads: ", ChatWords, "The role "}
+	"steam_debug: ", "Threads: ", ChatWords, "The role ", MapVersions}
 
 // ChatWords starts what words answers, which 2.0.6 prints at startup too,
 // straight after it's up.
@@ -312,6 +312,16 @@ func ParsePlayers(text string) ([]RosterLine, bool) {
 	}
 	return out, len(out) == want
 }
+
+// MapVersions starts what 2.0.7's maps.latest_versions finds on Thunderstore,
+// which the server prints on its own: "Map versions: <folder> is now at
+// <version> ...", or why it left a mod as it was. Once one is at a newer
+// version, the server reads Mods again and prints MapsReread.
+const MapVersions = "Map versions: "
+
+// MapsReread starts what `maps reload` answers (ReSkate 2.0.7), which the
+// server also prints by itself after maps.latest_versions moved a mod on.
+const MapsReread = "Maps read again from Mods: "
 
 // MapsHeadRe is the first line of the reply to `maps`.
 var MapsHeadRe = regexp.MustCompile(`^\d+ maps\b`)

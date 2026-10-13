@@ -266,9 +266,13 @@ func TestConsolePermissions(t *testing.T) {
 		"vote kick bob":       403,
 		"vote map grom":       403,
 		"bone-reach 2":        403,
+		"maps reload":         403, // 2.0.7: reads Mods again
+		"maps latest on":      403, // a setting
+		"MAPS update":         403,
 		"frobnicate":          403, // unknown: maybe a newer server's setting
 		"status":              400, // allowed, but the server is not running
 		"players":             400,
+		"maps":                400,
 		"tpall":               400,
 	} {
 		body, _ := json.Marshal(map[string]string{"line": line})

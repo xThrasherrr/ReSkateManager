@@ -29,8 +29,8 @@ export const blankVote = (): CustomVote => ({
 	min_players: 1
 });
 
-// What /vote <word> already means, and numbers, which answer a poll.
-const taken = ['map', 'kick', 'tod', 'time', 'yes', 'y', 'no', 'n', 'poll', 'list'];
+// What /vote <word> already means (extend from ReSkate 2.0.7), and numbers, which answer a poll.
+const taken = ['map', 'kick', 'tod', 'time', 'extend', 'yes', 'y', 'no', 'n', 'poll', 'list'];
 
 /** A vote's numbers, with the range each takes and what is said when one is out of it. */
 export const voteNumbers = [

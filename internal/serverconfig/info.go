@@ -19,14 +19,21 @@ var GroupInfo = map[string]string{
 	"Map pool": "Build a server around a theme, like only Skate 3 maps. An empty pool is every map the server knows.\n" +
 		"• Map votes take only the pool's maps, and players' map suggestions list only those.\n" +
 		"• The rotation goes down the pool from the map the server is on, or from the top when that map isn't in it.\n" +
+		"• From ReSkate 2.0.7, players can vote for the next map when the time is up, and to stay longer (Extend votes).\n" +
 		"Admins can still change to any map. In-game admins can also edit the pool under Multiplayer > Session, or with /map-pool and /rotation in chat; their changes show here.",
+	"Map versions": "From ReSkate 2.0.7 the server can follow Thunderstore for its custom maps: when a newer version of one is out, it writes that version into the mod's manifest.json and reads Mods again. Players are held to the server's version of a map, so they fetch the newest as they join. Nothing is downloaded to the server, which only needs a map's level list and version.\n" +
+		"• Only a mod folder named as a Thunderstore package without its version (Owner-Name) is looked up. The manager names the mods it installs with their version (Owner-Name-1.2.3), so the server leaves those alone: update them on the Mods page instead, which downloads the new files.\n" +
+		"• A folder it moves on shows the new version on the Mods page, which then no longer offers that update. Through a link to the shared mods, it moves the shared copy on for every server that uses it.\n" +
+		"• The map being played waits until nobody is on it. A new version that adds, removes or renames levels needs its reskate-levels.json copied in by hand.",
+	"Extend votes": "Players start /vote extend to give the map in play more time: the minutes under Staying adds in the map pool. It runs only while the map rotation is on and staying is above 0. The console's rotation extend [minutes] adds time at once. Needs ReSkate 2.0.7.",
 	"Votes": "Players start a vote in chat:\n" +
 		"• /vote map <map>: change the map (only maps in the map pool).\n" +
 		"• /vote kick <player>: kick a player until the server restarts.\n" +
 		"• /vote tod <time>: set the time of day.\n" +
+		"• /vote extend: give the map in play more time, from ReSkate 2.0.7 (see Extend votes).\n" +
 		"• /vote <name>: one of the custom votes (/vote list shows them).\n" +
 		"Everyone else answers on the vote card at the right of their screen, or with /yes or /no. Only one vote or poll runs at a time.\n" +
-		"The pass percentage is of everyone connected, not of those who voted. A vote ends early as soon as it passes or can no longer pass.\n" +
+		"From ReSkate 2.0.7 the pass percentage is of the votes cast: players who don't vote count for neither side, and a vote nobody answers fails. It ends early once the players still to vote couldn't change it. Before 2.0.7 it's of everyone connected, and a vote ends as soon as it passes or can no longer pass.\n" +
 		"From ReSkate 2.0.2 each kind of vote can have its own length, cooldown and players needed; left at 0, it takes the length and cooldown here.",
 	"Announcements": "The server's own announcements: it posts these lines one at a time, in order, while players are on, each as a card at the top of every player's screen. Needs ReSkate 2.0.2, which also puts them in chat; from 2.0.3 they're a card only.\n" +
 		"The Announcements tab is the manager's own: each message there has its own timer, and one can go to every server. Those with Card on go out as these do (on 2.0.2, only while the card is on here); with Card off, they go to chat only.\n" +
@@ -45,7 +52,7 @@ var GroupInfo = map[string]string{
 }
 
 var fieldInfo = map[string]string{
-	"map":             "Lists the retail maps and every map in the server's Mods folder. Players need the same custom map mod installed to join. The server reads Mods when it starts, so a map added since needs a restart first. Changing it live moves everyone to the new map.",
+	"map":             "Lists the retail maps and every map in the server's Mods folder. Players need the same custom map mod installed to join. The server reads Mods when it starts, so a map added since needs a restart first, or from ReSkate 2.0.7 Load them now on the Mods page. Changing it live moves everyone to the new map.",
 	"max_players":     "The server itself doesn't take a slot. Changing it means a restart, which disconnects everyone.",
 	"listed":          "Off hides the server from the in-game browser; players then join with its code. The code changes every time the server starts.",
 	"chat_color":      "The server's own lines in chat (its welcome message, what the console or the panel says, announcements, and its answers to players' commands) start with a \"Server\" badge and name in this colour. The default is violet. Players see a change from the server's next line. Needs ReSkate 2.0.0.",
@@ -63,8 +70,14 @@ var fieldInfo = map[string]string{
 
 	"map_pool": "The maps players vote between and the rotation goes through, top to bottom. With none picked, it's every map: the retail ones and every custom map in Mods.\n" +
 		"Keep each pool map's mod installed: the server won't start while the pool names a map it doesn't have.",
-	"map_rotation_minutes": "After this long on a map, the server moves everyone to the next map in the pool, with a minute's warning in chat.\n" +
-		"The clock waits while nobody is on, starts over whenever the map changes (by a vote or an admin too), and holds back while a map vote runs. 0 turns it off; the most is 1440 (a day).",
+	"map_rotation_minutes": "After this long on a map, the server moves everyone to the next map in the pool, with a minute's warning in chat (from ReSkate 2.0.7, cards at 10, 5 and 1 minutes left while Tell players the minutes left is on).\n" +
+		"The clock waits while nobody is on, starts over whenever the map changes (by a vote or an admin too), and holds back while a vote runs. 0 turns it off; the most is 1440 (a day).",
+	"rotation_vote":           "When a map's time is up, players vote for the next one: three maps of the pool picked at random, Random map, and Stay here (while staying adds more than 0). The most votes wins, a tie is drawn, and with no vote at all it's the pool's next map. The maps are picked a minute before, so players' games have their pictures ready. Off, the rotation goes to the pool's next map. Needs ReSkate 2.0.7.",
+	"rotation_vote_seconds":   "How long the vote for the next map runs, 10 to 120 seconds. It ends sooner once everyone on has voted. No console command changes it, so it's written while the server is stopped. Needs ReSkate 2.0.7.",
+	"rotation_extend_minutes": "What Stay here in the vote for the next map adds to the map's time, and what a passed /vote extend adds, 1 to 240 minutes. 0 leaves Stay here out of the vote and turns extend votes off. Needs ReSkate 2.0.7.",
+	"rotation_announce":       "Players are told on a card when the map has 10, 5 and 1 minutes left, and what comes next: the next map, or a vote for it. Off, they get one line in chat a minute before. Needs ReSkate 2.0.7.",
+	"latest_versions":         "The server asks Thunderstore for the newest version of each of its custom maps when it starts and every so often after, and writes it into the mod's manifest.json; players then fetch that version as they join. It only looks up mod folders named Owner-Name, without a version: the ones the manager installs carry theirs and are left alone. See Map versions for what it means for the Mods page. The console's maps update asks at once. Needs ReSkate 2.0.7.",
+	"latest_check_minutes":    "How often the server asks Thunderstore about its maps, 5 to 1440 minutes. Needs ReSkate 2.0.7.",
 
 	"send_rate": "The most the server sends each player a second. About 1100 KB/s is what reaches a player through Steam's relays: set higher, what's lost is resent until the connection is full of resends and half of everything is lost.\n" +
 		"A change also applies to the players already on.",
@@ -106,11 +119,13 @@ var fieldInfo = map[string]string{
 	"activity_log":         "Writes console lines for throwdowns (drops placed, joins, starts, turns and results), objects placed or removed, and how long players take to load.",
 
 	"votes.map.enabled":         "Lets players start /vote map <map>. They can pick from the map pool only, or from all the server's maps while the pool is empty.",
-	"votes.map.percent":         "The share of connected players whose yes passes a map vote, rounded up. With 10 players on at 60%, 6 must vote yes.",
+	"votes.map.percent":         "The share of yes votes that passes a map vote, rounded up: from ReSkate 2.0.7 of the votes cast (with 5 of 10 players voting at 60%, 3 must vote yes), before it of everyone connected (6 of the 10).",
 	"votes.kick.enabled":        "Lets players start /vote kick <player>. A passed kick lasts until the server restarts. Admins can't be vote-kicked.",
-	"votes.kick.percent":        "The share of connected players whose yes passes a kick vote, rounded up. The player being kicked doesn't count or vote, and a kick always needs at least two yes votes.",
+	"votes.kick.percent":        "The share of yes votes that passes a kick vote, rounded up: from ReSkate 2.0.7 of the votes cast, before it of everyone connected. The player being kicked doesn't count or vote, and a kick always needs at least two yes votes.",
 	"votes.time_of_day.enabled": "Lets players start /vote tod <time>: morning, noon, afternoon, evening, night, weatherday, weathernight or default. Only works while World layer sync is on.",
-	"votes.time_of_day.percent": "The share of connected players whose yes passes a time of day vote, rounded up.",
+	"votes.time_of_day.percent": "The share of yes votes that passes a time of day vote, rounded up: from ReSkate 2.0.7 of the votes cast, before it of everyone connected.",
+	"votes.extend_map.enabled":  "Lets players start /vote extend, which gives the map in play the minutes under Staying adds. It runs only while the map rotation is on and staying is above 0. Needs ReSkate 2.0.7.",
+	"votes.extend_map.percent":  "The share of the votes cast whose yes passes an extend vote, rounded up. Needs ReSkate 2.0.7.",
 	"votes.seconds":             "How long a vote stays open, unless that kind of vote has its own length. One that hasn't passed by then fails.",
 	"votes.cooldown_seconds":    "After starting a vote, a player waits this long before starting another, unless the vote they started has its own cooldown. They can still vote on other players' votes.",
 	"votes.starter_votes_yes":   "On, starting a vote counts as voting yes. Off, the starter votes like everyone else, so on a near-empty server a vote can't pass on its starter alone. Needs ReSkate 2.0.2.",

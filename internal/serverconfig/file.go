@@ -184,6 +184,9 @@ var sections = map[string]string{
 	"admins": "access.admins", "reserved": "access.reserved_players_slots", "global_bans": "access.use_global_bans",
 
 	"map": "maps.map", "map_pool": "maps.pool", "map_rotation_minutes": "maps.rotation_minutes", "parks": "maps.parks",
+	"rotation_vote": "maps.rotation_vote", "rotation_vote_seconds": "maps.rotation_vote_seconds",
+	"rotation_extend_minutes": "maps.rotation_extend_minutes", "rotation_announce": "maps.rotation_announce",
+	"latest_versions": "maps.latest_versions", "latest_check_minutes": "maps.latest_check_minutes",
 	"world_layer_sync": "maps.world_layer_sync", "layers": "maps.layers", "park_mods": "maps.park_mods", "park_limits": "maps.park_limits",
 
 	"boosts": "players.allow_boosts", "no_bail": "players.allow_no_bail", "noclip": "players.allow_noclip",
@@ -798,6 +801,7 @@ var zeroOr = map[string]struct {
 	"votes.map.seconds":         {minVoteSeconds, "the vote length"},
 	"votes.kick.seconds":        {minVoteSeconds, "the vote length"},
 	"votes.time_of_day.seconds": {minVoteSeconds, "the vote length"},
+	"votes.extend_map.seconds":  {minVoteSeconds, "the vote length"},
 }
 
 // Limits of 2.0.2's custom votes (Server/server_config.h,
@@ -828,10 +832,17 @@ func validVoteName(s string) bool {
 	return true
 }
 
+// ReservedVoteNames are the words /vote already takes (custom_vote_name_free
+// in Server/server_config.cpp), which no custom vote may be called: the
+// server won't start with one. 2.0.7 took "extend" for its own vote.
+// web/src/lib/votes.ts has the same list, and cmd/reskate-watch compares it
+// with the server's.
+var ReservedVoteNames = []string{"map", "kick", "tod", "time", "extend", "yes", "y", "no", "n", "poll", "list"}
+
 // voteNameFree is custom_vote_name_free: not a word /vote already takes, and
 // not a number, which answers a poll.
 func voteNameFree(s string) bool {
-	if slices.Contains([]string{"map", "kick", "tod", "time", "yes", "y", "no", "n", "poll", "list"}, s) {
+	if slices.Contains(ReservedVoteNames, s) {
 		return false
 	}
 	return strings.Trim(s, "0123456789") != ""
@@ -969,20 +980,27 @@ const (
 	maxCommandRuns    = 8
 )
 
+// ReservedCommandNames are the chat's own commands and the server commands
+// admins type as /<command> (custom_command_name_free in
+// Server/server_config.cpp), which no chat command may be called: the server
+// won't start with one. web/src/lib/commands.ts has the same list, and
+// cmd/reskate-watch compares it with the server's.
+var ReservedCommandNames = []string{"help", "party", "p", "w", "whisper", "tell", "poll", "vote", "yes", "y", "no", "n", "tp",
+	"activity-log", "admin", "admins", "afk-kick", "announce", "announce-throwdowns", "announce-to", "announcements",
+	"ban", "bans", "bone-scale", "boosts", "boosts-allow", "chat-color", "chat-colour", "clear-objects", "crowd",
+	"distances", "effects", "kick", "layer", "layer-sync", "layers", "listed", "map", "map-pool", "maps", "msg",
+	"msg-admins", "msg-party", "name", "net", "nobail", "nobail-allow", "noclip", "noclip-allow", "object-limit",
+	"object-placement", "object-scaling", "objects", "park", "parties", "party-size", "password", "placement",
+	"players", "rate", "reserved", "rotation", "say", "score-allow", "score-check", "speed-check", "status", "tod",
+	"tpall", "tphere", "tps", "tuning", "tuning-enforce", "unban", "voice", "voice-allow", "voice-range",
+	"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update",
+	"role", "roles", "board-check", "park-mod", "teleport"} // 2.0.6
+
 // commandNameFree is custom_command_name_free: not one of the chat's own
 // commands, nor a server command admins type as /<command>, and not a
 // number, which answers a poll.
 func commandNameFree(s string) bool {
-	if slices.Contains([]string{"help", "party", "p", "w", "whisper", "tell", "poll", "vote", "yes", "y", "no", "n", "tp",
-		"activity-log", "admin", "admins", "afk-kick", "announce", "announce-throwdowns", "announce-to", "announcements",
-		"ban", "bans", "bone-scale", "boosts", "boosts-allow", "chat-color", "chat-colour", "clear-objects", "crowd",
-		"distances", "effects", "kick", "layer", "layer-sync", "layers", "listed", "map", "map-pool", "maps", "msg",
-		"msg-admins", "msg-party", "name", "net", "nobail", "nobail-allow", "noclip", "noclip-allow", "object-limit",
-		"object-placement", "object-scaling", "objects", "park", "parties", "party-size", "password", "placement",
-		"players", "rate", "reserved", "rotation", "say", "score-allow", "score-check", "speed-check", "status", "tod",
-		"tpall", "tphere", "tps", "tuning", "tuning-enforce", "unban", "voice", "voice-allow", "voice-range",
-		"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update",
-		"role", "roles", "board-check", "park-mod", "teleport"}, s) { // 2.0.6
+	if slices.Contains(ReservedCommandNames, s) {
 		return false
 	}
 	return strings.Trim(s, "0123456789") != ""
@@ -1359,6 +1377,8 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 var commandVerbs = map[string]string{
 	"name": "name", "map": "map", "listed": "listed", "reserved_slots": "reserved slots",
 	"map_rotation_minutes": "rotation", "send_rate": "rate", "crowd_budget": "crowd",
+	"rotation_vote": "rotation vote", "rotation_extend_minutes": "rotation stay", "rotation_announce": "rotation announce",
+	"latest_versions": "maps latest", "latest_check_minutes": "maps latest every",
 	"voice_chat": "voice", "voice_range": "voice-range",
 	"object_placement": "placement", "object_limit": "objects", "allow_object_scaling": "object-scaling",
 	"bone_scale_limit": "bone-scale", "bone_reach_limit": "bone-reach", "sync_effects": "effects",
@@ -1374,13 +1394,15 @@ var commandVerbs = map[string]string{
 	"votes.kick.cooldown_seconds": "votes kick cooldown", "votes.kick.min_players": "votes kick min-players",
 	"votes.time_of_day.enabled": "votes tod", "votes.time_of_day.percent": "votes tod", "votes.time_of_day.seconds": "votes tod seconds",
 	"votes.time_of_day.cooldown_seconds": "votes tod cooldown", "votes.time_of_day.min_players": "votes tod min-players",
+	"votes.extend_map.enabled": "votes extend", "votes.extend_map.percent": "votes extend", "votes.extend_map.seconds": "votes extend seconds",
+	"votes.extend_map.cooldown_seconds": "votes extend cooldown", "votes.extend_map.min_players": "votes extend min-players",
 	"votes.polls": "votes polls", "votes.poll_seconds": "votes poll-seconds",
 	"speed_check": "speed-check", "pinned_board": "board-check", "score_check": "score-check",
 	"use_global_word_filter": "words global", "world_layer_sync": "layer-sync",
 }
 
 // offAtZero are the numbers whose 0 the server takes as "<verb> off".
-var offAtZero = []string{"map_rotation_minutes", "crowd_budget", "object_limit", "bone_scale_limit", "bone_reach_limit",
+var offAtZero = []string{"map_rotation_minutes", "rotation_extend_minutes", "crowd_budget", "object_limit", "bone_scale_limit", "bone_reach_limit",
 	"afk_kick_minutes", "announcements.interval_minutes"}
 
 // settingCommand is the command that sets fd to v, when commandVerbs has one.

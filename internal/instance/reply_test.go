@@ -43,6 +43,11 @@ func TestStrayLinesAreNotReplies(t *testing.T) {
 		"[10:00:01] Changing map to Isle of Grom",
 		"[10:00:01] [vote] The vote to kick Eve passed (2 yes, 0 no, 2 needed).",
 		"[10:00:01] Eve left (You were kicked from this server by a vote.)",
+		// 2.0.7 counts the votes cast, and its extend vote runs "rotation extend".
+		"[10:00:01] [vote] The vote to give Isle of Grom 15 more minutes passed (2 yes, 1 no, 2 needed of 3 votes).",
+		"[10:00:01] The map changes every 20 min. Next: San Vansterdam in about 15 min.",
+		"[10:00:01] [vote] The vote to change the map to San Vansterdam passed (1 yes, 0 no, 1 needed of 1 vote).",
+		"[10:00:01] Changing map to San Vansterdam",
 		"[10:00:02] Server renamed to Test.",
 	} {
 		in.onLine(l)
@@ -52,13 +57,13 @@ func TestStrayLinesAreNotReplies(t *testing.T) {
 		t.Errorf("reply %q (%v)", text, ok)
 	}
 	c := in.Console()
-	for _, i := range []int{len(c) - 6, len(c) - 4} {
+	for _, i := range []int{len(c) - 10, len(c) - 8, len(c) - 4, len(c) - 2} {
 		if c[i].Kind != logparse.KindTagged || c[i].Tag != "vote" {
 			t.Errorf("vote outcome logged as %+v", c[i])
 		}
 	}
-	if c[len(c)-2].Kind != logparse.KindLeave {
-		t.Errorf("vote kick logged as %+v", c[len(c)-2])
+	if c[len(c)-6].Kind != logparse.KindLeave {
+		t.Errorf("vote kick logged as %+v", c[len(c)-6])
 	}
 
 	// An in-game admin's result can't be told from a reply by order alone, so
@@ -134,6 +139,44 @@ func TestServerRunCommandsAreNotReplies(t *testing.T) {
 	feed(`[10:01:31] [poll] Poll "Next map?" ended: Grom 2 (Grom wins).`, "[10:01:32] Server renamed to Test.")
 	if text, _ := got(w); text != "Server renamed to Test." {
 		t.Errorf("reply after a poll %q", text)
+	}
+}
+
+// 2.0.7 reads Mods again for maps reload, and by itself once
+// maps.latest_versions moved a mod on, which only the first answers.
+func TestMapsReadAgain(t *testing.T) {
+	in := New(Def{ID: "t", Dir: t.TempDir()}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	in.asm = logparse.NewAssembler()
+	feed := func(lines ...string) {
+		for _, l := range lines {
+			in.onLine(l)
+		}
+		in.onIdle()
+	}
+	in.maps = []string{"San Vansterdam"}
+
+	w := queue(in, nil)
+	feed(
+		"[10:00:00] Map versions: zeex64-Full_Skate_3_Map is now at 1.0.4 (was 1.0.3), Thunderstore's newest; players are sent there.",
+		"[10:00:00] Map versions: Owner-Other was left as it is: it is not on Thunderstore under that name",
+		"[10:00:00] Maps read again from Mods: 7 maps, none new.",
+		"[10:00:01] Server renamed to Test.",
+	)
+	if text, _ := got(w); text != "Server renamed to Test." {
+		t.Errorf("reply %q", text)
+	}
+	if in.maps != nil {
+		t.Error("the map list was kept after the server read Mods again")
+	}
+
+	in.maps = []string{"San Vansterdam"}
+	w = queue(in, nil)
+	feed("[10:01:00] Maps read again from Mods: 8 maps, new: Hangar.", "Mods: skipped Broken (no reskate-levels.json)")
+	if text, _ := got(w); text != "Maps read again from Mods: 8 maps, new: Hangar.\nMods: skipped Broken (no reskate-levels.json)" {
+		t.Errorf("maps reload's reply %q", text)
+	}
+	if in.maps != nil {
+		t.Error("the map list was kept after maps reload")
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// A config as ReSkate 2.0.6 writes it (layout in Server/server_config.cpp), in
+// A config as ReSkate 2.0.7 writes it (layout in Server/server_config.cpp), in
 // the sections of 1.1.7 and later, with the admins an older one listed: the
 // server moves them into data/roles.json when it starts.
 const sectionedConfig = `{
@@ -20,6 +20,8 @@ const sectionedConfig = `{
     "listed": true, "max_players": 32, "port": 27017, "query_port": 27018, "steam_token": "TOKEN", "auto_update": false, "activity_log": true},
   "access": {"admins": ["76561198000000001"], "reserved_players_slots": ["76561198000000002"], "use_global_bans": false},
   "maps": {"map": "Isle of Grom", "pool": ["Isle of Grom", "San Vansterdam"], "rotation_minutes": 20,
+    "rotation_vote": false, "rotation_vote_seconds": 30, "rotation_extend_minutes": 15, "rotation_announce": true,
+    "latest_versions": false, "latest_check_minutes": 60,
     "parks": {"construction": "skatepark_01", "historic": "empty", "financial": "empty"}, "world_layer_sync": true,
     "layers": {"grom_tod_1_night": "on"}, "park_mods": [], "park_limits": {"parks": 3, "objects": 512}},
   "players": {"allow_boosts": false, "allow_no_bail": true, "allow_noclip": false, "allow_parties": true, "party_size": 4,
@@ -32,6 +34,7 @@ const sectionedConfig = `{
   "votes": {"map": {"enabled": true, "percent": 60, "seconds": 0, "cooldown_seconds": 0, "min_players": 1},
     "kick": {"enabled": false, "percent": 70, "seconds": 20, "cooldown_seconds": 600, "min_players": 4},
     "time_of_day": {"enabled": true, "percent": 50, "seconds": 0, "cooldown_seconds": 0, "min_players": 1},
+    "extend_map": {"enabled": true, "percent": 50, "seconds": 0, "cooldown_seconds": 0, "min_players": 1},
     "seconds": 30, "cooldown_seconds": 120, "starter_votes_yes": true, "polls": "admins", "poll_seconds": 60,
     "custom": [{"name": "restart", "description": "Reload the current map", "command": "map {map}", "choices": [],
       "enabled": true, "percent": 60, "seconds": 0, "cooldown_seconds": 0, "min_players": 1}]},
@@ -265,6 +268,46 @@ func TestVoteSettings(t *testing.T) {
 	}
 }
 
+// 2.0.7's rotation vote, extend votes and map versions change live, but for
+// the vote's length.
+func TestRotationSettings(t *testing.T) {
+	f, _ := readSectioned(t)
+	p, err := Diff(f, map[string]any{"rotation_vote": true, "rotation_vote_seconds": 60.0, "rotation_extend_minutes": 0.0,
+		"rotation_announce": false, "latest_versions": true, "latest_check_minutes": 30.0,
+		"votes.extend_map.enabled": false, "votes.extend_map.percent": 70.0, "votes.extend_map.seconds": 45.0,
+		"votes.extend_map.cooldown_seconds": 300.0, "votes.extend_map.min_players": 3.0}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"rotation vote on", "rotation stay off", "rotation announce off", "maps latest on", "maps latest every 30",
+		"votes extend off", "votes extend 70", "votes extend seconds 45", "votes extend cooldown 300", "votes extend min-players 3"}
+	if !slices.Equal(p.Commands, want) || len(p.Restart) != 1 || p.Restart["rotation_vote_seconds"] != 60.0 {
+		t.Fatalf("planned %+v, want %q and the vote's length on restart", p, want)
+	}
+	if p, err := Diff(f, map[string]any{"rotation_extend_minutes": 30.0}, nil); err != nil || !slices.Equal(p.Commands, []string{"rotation stay 30"}) {
+		t.Errorf("planned %+v (%v)", p, err)
+	}
+	f.ApplyOffline(p.Changed)
+	for path, want := range map[string]string{"maps.rotation_vote": `true`, "maps.rotation_vote_seconds": `60`, "maps.latest_check_minutes": `30`,
+		"votes.extend_map.percent": `70`} {
+		got, ok := f.at(path)
+		if b, _ := json.Marshal(got); !ok || string(b) != want {
+			t.Errorf("%s = %s, want %s", path, b, want)
+		}
+	}
+	for _, bad := range []map[string]any{
+		{"rotation_vote_seconds": 9.0}, // 10 to 120
+		{"rotation_vote_seconds": 121.0},
+		{"rotation_extend_minutes": 241.0},
+		{"latest_check_minutes": 4.0}, // 5 to 1440
+		{"votes.extend_map.seconds": 5.0},
+	} {
+		if _, err := Diff(f, bad, nil); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+}
+
 // 2.0.2's announcements change live: the server only adds one at the end,
 // removes one by its place, or clears them.
 func TestAnnouncements(t *testing.T) {
@@ -375,8 +418,9 @@ func TestCustomVotes(t *testing.T) {
 	for _, bad := range []any{
 		seventeen,
 		[]any{"restart"},
-		[]any{vote(map[string]any{"name": "Map"})}, // map is the server's own
-		[]any{vote(map[string]any{"name": "12"})},  // a number answers a poll
+		[]any{vote(map[string]any{"name": "Map"})},    // map is the server's own
+		[]any{vote(map[string]any{"name": "extend"})}, // and extend is 2.0.7's
+		[]any{vote(map[string]any{"name": "12"})},     // a number answers a poll
 		[]any{vote(map[string]any{"name": "re start"})},
 		[]any{vote(map[string]any{"name": strings.Repeat("x", 17)})},
 		[]any{vote(nil), vote(nil)},

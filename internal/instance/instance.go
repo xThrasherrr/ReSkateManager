@@ -119,7 +119,7 @@ var fatalPrefixes = []string{"Config problem:", "Cannot read ", "Cannot load "}
 // lostConsole is why a server whose output closed while it ran was ended
 // (supervisor.Process.Lost). Restarting it would only do the same again.
 const lostConsole = "The server closed its console while running, so the manager could neither read nor stop it, and ended it. " +
-	"ReSkate 2.0.6's Windows server does this; until a release fixes it, put 2.0.5's server files in its folder by hand."
+	"ReSkate's Windows server does this from 2.0.6 on; until a release fixes it, put 2.0.5's server files in its folder by hand and turn off its auto-update."
 
 type waiter struct {
 	ch       chan logparse.Entry
@@ -155,7 +155,11 @@ type Instance struct {
 	failures  int
 	retry     *time.Timer
 	exited    chan struct{} // closed once watch has handled the current process's exit
-	maps      []string      // the server's map list, asked once per run
+	maps      []string      // the server's map list, asked once per run and again after it reads Mods again
+	mapsGen   int           // how many times the server read Mods again this run, so a list asked before isn't kept
+	// mapsMoved: a mod went to a newer version under maps.latest_versions
+	// (2.0.7), and the server reads Mods again by itself next.
+	mapsMoved bool
 	waiters   []*waiter
 	ranBy     string         // "vote" or "poll": the next line is a command a passed vote or poll-run ran, not a reply
 	pollRun   bool           // the open poll is the console's poll-run, whose winning answer runs a command
@@ -621,6 +625,21 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 	if !in.startupLineLocked(e) {
 		e.Kind = logparse.KindRaw
 	}
+	// From 2.0.7 the server reads Mods again while it runs: for maps reload
+	// (from here or in the game), and by itself once maps.latest_versions has
+	// moved a mod on, which it says first. Its maps change, and only the
+	// first is a reply.
+	switch {
+	case strings.HasPrefix(e.Text, logparse.MapsReread):
+		in.maps = nil
+		in.mapsGen++
+		if in.mapsMoved {
+			in.mapsMoved = false
+			e.Kind = logparse.KindStartup
+		}
+	case e.Kind == logparse.KindStartup && strings.HasPrefix(e.Text, logparse.MapVersions) && strings.Contains(e.Text, " is now at "):
+		in.mapsMoved = true
+	}
 	if in.ranBy != "" {
 		// A passed vote, or a poll-run's winner, logs its command's result
 		// straight after.
@@ -674,7 +693,7 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 			in.results = in.runs[name]
 		}
 	case logparse.KindReady:
-		in.runs, in.results, in.pollRun = nil, 0, false
+		in.runs, in.results, in.pollRun, in.mapsMoved = nil, 0, false, false
 		in.defaultRole = serverconfig.DefaultRole(in.def.ConfigPath())
 		in.state = Running
 		in.readyAt = time.Now()
@@ -825,9 +844,11 @@ func lifecycle(line string) error {
 }
 
 // votePassedRe is a vote that passed. What it ran logs its result straight
-// after: a map or time of day vote's command, or since 2.0.2 a custom vote's.
-// A kick vote's leave line comes there instead, which is an event anyway.
-var votePassedRe = regexp.MustCompile(`^\[vote\] The vote to .+ passed \(\d+ yes, \d+ no, \d+ needed\)\.$`)
+// after: a map or time of day vote's command, since 2.0.2 a custom vote's,
+// and since 2.0.7 an extend vote's "rotation extend". A kick vote's leave
+// line comes there instead, which is an event anyway. From 2.0.7 the tally
+// counts the votes cast: "2 needed of 3 votes".
+var votePassedRe = regexp.MustCompile(`^\[vote\] The vote to .+ passed \(\d+ yes, \d+ no, \d+ needed(?: of \d+ votes?)?\)\.$`)
 
 // pollEndRe is a poll ending, which since 2.0.3 runs a poll-run's command
 // for the winning answer straight after.

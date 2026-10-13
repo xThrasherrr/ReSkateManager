@@ -219,6 +219,7 @@ func (a *API) Handler() http.Handler {
 				r.With(a.can(auth.SettingsEdit)).Post("/mods/uploads", a.startModUpload)
 				r.With(a.can(auth.SettingsEdit)).Put("/mods/uploads/{uid}", a.modUploadChunk)
 				r.With(a.can(auth.SettingsView)).Get("/mods/updates", a.modUpdates)
+				r.With(a.can(auth.SettingsEdit)).Post("/mods/reload", a.reloadMods)
 				r.With(a.can(auth.SettingsEdit)).Post("/mods/updates", a.updateAllMods)
 				r.With(a.can(auth.SettingsEdit)).Post("/mods/installs", a.installMod)
 				r.With(a.can(auth.SettingsEdit)).Get("/mods/installs/{jid}", a.installStatus)

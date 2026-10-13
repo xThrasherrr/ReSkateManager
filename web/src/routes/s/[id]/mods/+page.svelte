@@ -7,6 +7,8 @@
 	import { uploads, SHARED } from '#lib/uploads.svelte.js';
 	import { ModsPage } from '#lib/mods.svelte.js';
 	import { session } from '#lib/session.svelte.js';
+	import { instances } from '#lib/instances.svelte.js';
+	import { newerVersion } from '#lib/thunderstore.svelte.js';
 	import { plural } from '#lib/format.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Modal from '#lib/components/Modal.svelte';
@@ -54,6 +56,19 @@
 	const otherMods = $derived((list?.mods ?? []).filter((m) => !m.maps.length && !m.problem));
 
 	const canUpload = $derived(ctx.can('settings.edit'));
+	// From ReSkate 2.0.7 the running server reads Mods again on its maps reload:
+	// not offered where the server is known to be older (a build the manager
+	// doesn't know may have it).
+	const serverVersion = $derived(instances.byId(ctx.id)?.serverVersion);
+	const canReload = $derived(canUpload && !(serverVersion && newerVersion('2.0.7', serverVersion)));
+	let reloading = $state(false);
+	async function reloadMods() {
+		reloading = true;
+		await attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/mods/reload`), (r) => r.reply.split('\n')[0] ?? r.reply);
+		reloading = false;
+		load();
+	}
+
 	// Linked shared mods are updated under Shared mods.
 	const ownOutdated = $derived(mods.outdated.filter((m) => !m.shared));
 
@@ -224,9 +239,16 @@
 		{/if}
 
 		{#if restartNote}
-			<p class="rounded-xl border-2 border-dashed border-warn/60 bg-warn/5 px-4 py-3 text-sm text-muted">
-				Mods changed since the server started: {restartNote}. Restart it to apply them.
-			</p>
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border-2 border-dashed border-warn/60 bg-warn/5 px-4 py-3 text-sm text-muted">
+				<p class="min-w-0 flex-1 basis-72">
+					Mods changed since the server started: {restartNote}. Restart it to apply them{canReload ? ', or load them now' : ''}.
+				</p>
+				{#if canReload}
+					<button class="btn btn-sm" disabled={reloading} onclick={reloadMods} title="The server reads its Mods folder again (ReSkate 2.0.7)"
+						><Icon name="restart" size={14} /> Load them now</button
+					>
+				{/if}
+			</div>
 		{/if}
 
 		<OutdatedMods
@@ -346,7 +368,7 @@
 				{@render poolWarning(pooled(mod))}
 			{/if}
 			{#if serverState === 'running' && mod.maps.some((m) => isLoaded(m.name))}
-				<p>The running server keeps its maps until it restarts.</p>
+				<p>The running server keeps its maps until it restarts, or until it reads its mods again (ReSkate 2.0.7).</p>
 			{/if}
 		</div>
 	{/if}
