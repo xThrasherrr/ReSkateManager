@@ -567,6 +567,29 @@ export interface ModUpdate {
 	newer: boolean; // latest is newer than the installed version
 }
 
+/** The launcher profile a server shares (ReSkate 2.0.8): the maps it loads that Thunderstore has. */
+export interface SharedProfile {
+	name: string;
+	mods: { package: string; version: string; title: string; server?: string }[]; // server: its version, when Thunderstore no longer has it
+	left: { title: string; why: string }[]; // maps it loads that the profile can't give players
+}
+
+/** One mod of a launcher profile read to install from, as it stands on the server. */
+export interface ProfileEntry {
+	name: string; // as the profile has it: Namespace-Name
+	version: string;
+	enabled: boolean;
+	package?: string; // on Thunderstore, as it spells it
+	title?: string;
+	install?: string; // the version to install: the profile's, or the newest when Thunderstore no longer has it
+	size?: number;
+	state: 'new' | 'replaces' | 'installed' | 'absent';
+	replaces?: string; // the version it takes the place of
+	note?: string; // how it's installed already
+	maps: ModMap[] | null; // null until someone has looked inside it
+	unknown?: string; // why it can't be looked inside
+}
+
 // A package on Thunderstore, as the mod browser shows it.
 export interface StoreMod {
 	name: string; // Name_With_Underscores

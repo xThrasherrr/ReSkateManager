@@ -93,6 +93,9 @@ type API struct {
 	probeMu    sync.Mutex
 	probes     map[string]*mapsProbe // looks inside Thunderstore zips, by version
 	probeSem   chan struct{}
+	shareMu    sync.Mutex
+	// shareCodes is the code each server last shared its maps under.
+	shareCodes map[string]shareCode
 	jobs       jobTable[*job] // backups, restores and imports
 	diskMu     sync.Mutex
 	disk       *diskMeasure // the last measurement of the manager's folder
@@ -220,6 +223,12 @@ func (a *API) Handler() http.Handler {
 				r.With(a.can(auth.SettingsEdit)).Put("/mods/uploads/{uid}", a.modUploadChunk)
 				r.With(a.can(auth.SettingsView)).Get("/mods/updates", a.modUpdates)
 				r.With(a.can(auth.SettingsEdit)).Post("/mods/reload", a.reloadMods)
+				// Launcher profiles (ReSkate 2.0.8): the maps it loads, for
+				// players, and mods to install from one.
+				r.With(a.can(auth.SettingsView)).Get("/mods/profile", a.modProfile)
+				r.With(a.can(auth.SettingsView)).Get("/mods/profile.r2z", a.modProfileFile)
+				r.With(a.can(auth.SettingsView)).Post("/mods/profile/code", a.modProfileCode)
+				r.With(a.can(auth.SettingsEdit)).Post("/mods/profile/read", a.readModProfile)
 				r.With(a.can(auth.SettingsEdit)).Post("/mods/updates", a.updateAllMods)
 				r.With(a.can(auth.SettingsEdit)).Post("/mods/installs", a.installMod)
 				r.With(a.can(auth.SettingsEdit)).Get("/mods/installs/{jid}", a.installStatus)

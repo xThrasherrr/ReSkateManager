@@ -73,6 +73,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 - **Mod browser:** search Thunderstore's ReSkate mods, tick any of your servers and the shared mods, and install one on all of them at once. Shows the maps a mod adds before you download it, and can filter to mods that add maps.
 - **Mods:** upload map mods as zips, sent in chunks so large maps clear proxy upload limits such as Cloudflare's. Enable, disable or delete mods, set a mod's map as the server's map, and update one mod or every outdated mod (**Update all**) in the background. From ReSkate 2.0.7, **Load them now** has a running server pick up changed mods without a restart.
+- **Launcher profiles:** from ReSkate 2.0.8, hand players the maps a server loads as one launcher profile, a code or a `.r2z` file they import in the ReSkate launcher (or r2modman) to download them all at the server's versions. A profile works the other way too: paste its code or pick its file to install its mods on a server, with the ones that add maps ticked.
 - **Shared mods:** keep one copy of a mod for several servers. Each server loads all, some, or none of them. Moving a server's mod into the shared pool (or turning shared mods on) swaps duplicate copies for links, reclaiming space.
 
 ### Updates and backups

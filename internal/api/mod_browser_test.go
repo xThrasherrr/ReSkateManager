@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,12 +28,35 @@ type storeMod struct {
 
 // fakeStore serves mods as Thunderstore does: the package listing, download
 // links, and each zip beside its icon, readable by ranges. A package's
-// versions go newest first. It counts the downloads.
+// versions go newest first. It counts the downloads. Its profile service
+// gives each profile sent to it a new code.
 func fakeStore(t *testing.T, mods ...storeMod) (*thunderstore.Client, *atomic.Int32) {
 	t.Helper()
 	var downloads atomic.Int32
+	var profileMu sync.Mutex
+	profiles := map[string][]byte{}
 	var srv *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/experimental/legacyprofile/create/" {
+			b, _ := io.ReadAll(r.Body)
+			profileMu.Lock()
+			code := fmt.Sprintf("%08d-cafe", len(profiles)+1)
+			profiles[code] = b
+			profileMu.Unlock()
+			fmt.Fprintf(w, `{"key":%q}`, code)
+			return
+		}
+		if code, ok := strings.CutPrefix(r.URL.Path, "/api/experimental/legacyprofile/get/"); ok {
+			profileMu.Lock()
+			b, found := profiles[strings.TrimSuffix(code, "/")]
+			profileMu.Unlock()
+			if found {
+				w.Write(b)
+			} else {
+				http.NotFound(w, r)
+			}
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/c/reskate/api/") || strings.HasPrefix(r.URL.Path, "/listing/") {
 			var order []string
 			versions := map[string][]string{}

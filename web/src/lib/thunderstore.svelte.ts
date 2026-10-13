@@ -7,7 +7,7 @@ export type MapsLook =
 	| { state: 'unknown'; reason: string }
 	| { state: 'failed'; error: string };
 
-const key = (mod: StoreMod, version: string) => `${mod.fullName}-${version}`.toLowerCase();
+const key = (fullName: string, version: string) => `${fullName}-${version}`.toLowerCase();
 
 /**
  * Thunderstore's ReSkate packages for the mod browser, kept while the panel is
@@ -20,7 +20,7 @@ class Thunderstore {
 	loading = $state(false);
 	fetched = $state(0);
 	looks = $state<Record<string, MapsLook>>({});
-	#queue: { mod: StoreMod; version: string }[] = [];
+	#queue: { fullName: string; version: string }[] = [];
 	#running = 0;
 
 	async load(refresh = false) {
@@ -40,7 +40,7 @@ class Thunderstore {
 
 	/** What is known of the maps a version adds; the newest by default. */
 	maps(mod: StoreMod, version = mod.versions[0]?.version ?? ''): MapsLook | undefined {
-		const look = this.looks[key(mod, version)];
+		const look = this.looks[key(mod.fullName, version)];
 		if (look) return look;
 		if (mod.maps && version === mod.versions[0]?.version) return { state: 'done', maps: mod.maps, problem: mod.mapsProblem };
 	}
@@ -48,9 +48,20 @@ class Thunderstore {
 	/** Queues a look inside a version's zip, unless one is known or on its way. */
 	look(mod: StoreMod, version = mod.versions[0]?.version ?? '') {
 		const known = this.maps(mod, version);
+		if (!known || known.state === 'failed') this.lookAt(mod.fullName, version);
+	}
+
+	/** What is known of the maps a version of the package fullName (Namespace-Name) adds. */
+	mapsOf(fullName: string, version: string): MapsLook | undefined {
+		return this.looks[key(fullName, version)];
+	}
+
+	/** Queues a look inside a version of the package fullName, unless one is known or on its way. */
+	lookAt(fullName: string, version: string) {
+		const known = this.mapsOf(fullName, version);
 		if (!version || (known && known.state !== 'failed')) return;
-		this.looks[key(mod, version)] = { state: 'looking' };
-		this.#queue.push({ mod, version });
+		this.looks[key(fullName, version)] = { state: 'looking' };
+		this.#queue.push({ fullName, version });
 		this.#next();
 	}
 
@@ -61,18 +72,18 @@ class Thunderstore {
 
 	#next() {
 		while (this.#running < 3 && this.#queue.length) {
-			const { mod, version } = this.#queue.shift()!;
+			const { fullName, version } = this.#queue.shift()!;
 			this.#running++;
-			const q = new URLSearchParams({ package: mod.fullName, version });
+			const q = new URLSearchParams({ package: fullName, version });
 			api
 				.get<{ maps: ModMap[] | null; problem?: string; unknown?: string }>(`/thunderstore/maps?${q}`)
 				.then(
 					(r) =>
-						(this.looks[key(mod, version)] = r.maps
+						(this.looks[key(fullName, version)] = r.maps
 							? { state: 'done', maps: r.maps, problem: r.problem || undefined }
 							: { state: 'unknown', reason: r.unknown || 'The manager cannot look inside this mod.' })
 				)
-				.catch((e) => (this.looks[key(mod, version)] = { state: 'failed', error: message(e) }))
+				.catch((e) => (this.looks[key(fullName, version)] = { state: 'failed', error: message(e) }))
 				.finally(() => {
 					this.#running--;
 					this.#next();

@@ -83,6 +83,8 @@ var routePerms = map[string]string{
 	"GET /api/instances/{id}/logs/files/{file}":          "console.view",
 	"GET /api/instances/{id}/mods":                       "settings.view",
 	"GET /api/instances/{id}/mods/installs/{jid}":        "settings.edit",
+	"GET /api/instances/{id}/mods/profile":               "settings.view",
+	"GET /api/instances/{id}/mods/profile.r2z":           "settings.view",
 	"GET /api/instances/{id}/mods/updates":               "settings.view",
 	"GET /api/instances/{id}/perf":                       "console.view",
 	"GET /api/instances/{id}/players":                    "players.view",
@@ -127,6 +129,8 @@ var routePerms = map[string]string{
 	"POST /api/instances/{id}/mods/{folder}/update":      "settings.edit",
 	"POST /api/instances/{id}/mods/installs":             "settings.edit",
 	"POST /api/instances/{id}/mods/reload":               "settings.edit",
+	"POST /api/instances/{id}/mods/profile/code":         "settings.view",
+	"POST /api/instances/{id}/mods/profile/read":         "settings.edit",
 	"POST /api/instances/{id}/mods/updates":              "settings.edit",
 	"POST /api/instances/{id}/mods/uploads":              "settings.edit",
 	"POST /api/instances/{id}/players/{steamId}/kick":    "players.kick",
@@ -155,9 +159,10 @@ var routePerms = map[string]string{
 
 // Mutating routes that write no audit entry, and why.
 var unauditedRoutes = map[string]string{
-	"POST /api/instances/{id}/mods/uploads": "only reserves an upload; its last chunk writes mod.upload",
-	"POST /api/shared-mods/uploads":         "only reserves an upload; its last chunk writes shared.upload",
-	"POST /api/imports":                     "only reserves an upload; the import its last chunk starts writes instance.import",
+	"POST /api/instances/{id}/mods/uploads":      "only reserves an upload; its last chunk writes mod.upload",
+	"POST /api/shared-mods/uploads":              "only reserves an upload; its last chunk writes shared.upload",
+	"POST /api/imports":                          "only reserves an upload; the import its last chunk starts writes instance.import",
+	"POST /api/instances/{id}/mods/profile/read": "only reads a profile; each install from it writes mod.install",
 }
 
 // route is one method and pattern from the router, with the middleware in

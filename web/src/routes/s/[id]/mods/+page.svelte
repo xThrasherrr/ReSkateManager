@@ -20,6 +20,7 @@
 	import OutdatedMods from '#lib/components/OutdatedMods.svelte';
 	import ModCredits from '#lib/components/ModCredits.svelte';
 	import ModUpdate from '#lib/components/ModUpdate.svelte';
+	import ModProfiles from '#lib/components/ModProfiles.svelte';
 	import SharedUsePicker from '#lib/components/SharedUsePicker.svelte';
 
 	const ctx = useLive();
@@ -237,6 +238,8 @@
 				<SharedUsePicker use={shared.use} label="Shared mods on this server" disabled={!canUpload || settingShared} onchoose={chooseShared} />
 			</section>
 		{/if}
+
+		<ModProfiles id={ctx.id} server={serverName} canAdd={canUpload} changed={list} />
 
 		{#if restartNote}
 			<div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border-2 border-dashed border-warn/60 bg-warn/5 px-4 py-3 text-sm text-muted">
