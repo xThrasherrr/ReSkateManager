@@ -232,7 +232,7 @@
 			</form>
 			{#if activityOff}
 				<p class="w-full text-xs text-muted">
-					Throwdowns aren't being counted: <a class="text-accent hover:underline" href="/s/{ctx.id}/settings">Log player activity</a> is off in this server's settings.
+					Throwdowns aren't being counted: <a class="text-accent hover:underline" href="/s/{ctx.id}/settings#gameplay">Log player activity</a> is off in this server's settings.
 				</p>
 			{/if}
 		</div>

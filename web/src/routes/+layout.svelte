@@ -232,7 +232,7 @@
 			{/if}
 			<nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3 text-sm">
 				{#snippet navLink(href: string, icon: IconName, label: string)}
-					<a {href} class="nav-link {path === href ? 'nav-link-active' : ''}" title={folded ? label : undefined}>
+					<a {href} class="nav-link {path === href || path.startsWith(href + '/') ? 'nav-link-active' : ''}" title={folded ? label : undefined}>
 						<Icon name={icon} /> <span class="rail:hidden">{label}</span>
 					</a>
 				{/snippet}

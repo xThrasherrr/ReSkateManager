@@ -353,7 +353,7 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 		(&alerts.Watcher{Store: db, Send: notifier.Send, Dirs: a.DiskDirs, Link: host, Log: log}).Run(ctx)
 	})
 	jobs.Go(func() {
-		backups.Run(ctx, func(err error) { notifier.Send(alerts.ForBackupFailed(a.PanelLink("/manager"), err)) })
+		backups.Run(ctx, func(err error) { notifier.Send(alerts.ForBackupFailed(a.PanelLink("/manager/backups"), err)) })
 	})
 	jobs.Go(func() {
 		(&restarts.Scheduler{Reg: reg, Log: log, OnRestart: func(in *instance.Instance, due time.Time, err error) {

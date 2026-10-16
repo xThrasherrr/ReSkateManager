@@ -89,26 +89,28 @@
 		<Loading />
 	{/if}
 {:else}
-	<form class="space-y-4" onsubmit={save}>
+	<form class="@container space-y-4" onsubmit={save}>
 		<fieldset class="space-y-2" disabled={lockedProxy}>
 			<legend class="label">How do people open this panel?</legend>
 			{#if lockedProxy}
 				<p class="text-xs text-muted">Set by <code class="font-mono">RSM_PROXY</code> in the manager's Docker settings (<code class="font-mono">compose.yaml</code>).</p>
 			{/if}
-			{#each options as o (o.value)}
-				<label
-					class="flex items-start gap-2 rounded-xl border-2 p-3 text-sm transition-colors {lockedProxy ? 'cursor-not-allowed' : 'cursor-pointer'} {choice === o.value
-						? 'border-accent bg-accent/10'
-						: 'border-line-strong hover:border-muted'}"
-				>
-					<input type="radio" bind:group={choice} value={o.value} class="mt-0.5" />
-					<span>
-						<span class="font-medium">{o.title}</span>
-						{#if o.value && o.value === loaded.suggested}<span class="sticker sticker-info ml-1.5">Looks like this one</span>{/if}
-						<br /><span class="text-xs text-muted">{o.hint}</span>
-					</span>
-				</label>
-			{/each}
+			<div class="grid gap-2 @3xl:grid-cols-3">
+				{#each options as o (o.value)}
+					<label
+						class="flex items-start gap-2 rounded-xl border-2 p-3 text-sm transition-colors {lockedProxy ? 'cursor-not-allowed' : 'cursor-pointer'} {choice === o.value
+							? 'border-accent bg-accent/10'
+							: 'border-line-strong hover:border-muted'}"
+					>
+						<input type="radio" bind:group={choice} value={o.value} class="mt-0.5" />
+						<span>
+							<span class="font-medium">{o.title}</span>
+							{#if o.value && o.value === loaded.suggested}<span class="sticker sticker-info ml-1.5">Looks like this one</span>{/if}
+							<br /><span class="text-xs text-muted">{o.hint}</span>
+						</span>
+					</label>
+				{/each}
+			</div>
 		</fieldset>
 
 		<div>

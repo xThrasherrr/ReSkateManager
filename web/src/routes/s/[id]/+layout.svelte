@@ -11,6 +11,7 @@
 	import { duration, moving, stateColor } from '#lib/format.js';
 	import Icon, { type IconName } from '#lib/components/Icon.svelte';
 	import StateBadge from '#lib/components/StateBadge.svelte';
+	import TabStrip from '#lib/components/TabStrip.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import type { LayoutProps } from './$types';
@@ -110,14 +111,6 @@
 	$effect(() => {
 		if (known && page.url.pathname === base && !session.can('console.view', id) && tabs[0]) goto(base + tabs[0].href, { replace: true });
 	});
-
-	// Keep the open tab in view when the strip scrolls sideways on a phone.
-	let strip: HTMLElement | undefined = $state();
-	$effect(() => {
-		page.url.pathname;
-		const el = strip?.querySelector<HTMLElement>('[aria-current="page"]');
-		if (strip && el) strip.scrollTo({ left: el.offsetLeft - (strip.clientWidth - el.offsetWidth) / 2 });
-	});
 </script>
 
 {#if gone}
@@ -175,21 +168,7 @@
 					</div>
 				{/if}
 			</div>
-			<nav bind:this={strip} class="no-scrollbar mt-3 flex gap-1 overflow-x-auto px-4 pb-3 text-sm sm:mt-4 sm:gap-1.5 sm:px-6 md:flex-wrap md:overflow-visible">
-				{#each tabs as t (t.href)}
-					{@const active = page.url.pathname === base + t.href}
-					<a
-						href={base + t.href}
-						aria-current={active ? 'page' : undefined}
-						class="flex shrink-0 items-center gap-1.5 rounded-lg border-2 px-3 py-1.5 font-semibold whitespace-nowrap transition-colors {active
-							? 'border-ink bg-fg text-ink shadow-ledge-sm'
-							: 'border-transparent text-muted hover:bg-raised hover:text-fg'}"
-					>
-						<Icon name={t.icon} size={14} />
-						{t.label}
-					</a>
-				{/each}
-			</nav>
+			<TabStrip tabs={tabs.map((t) => ({ ...t, href: base + t.href }))} />
 		</header>
 		<div class="min-h-0 flex-1">
 			<!-- Remounted per server, so no page shows, or acts on, the last one's data. -->

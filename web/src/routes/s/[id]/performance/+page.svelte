@@ -161,7 +161,7 @@
 		{#if !net.length}
 			<p class="card px-4 py-6 text-sm text-faint">
 				No network figures in this range. The server logs them once a minute while players are on, with Log player activity on under
-				<a class="text-accent hover:underline" href="/s/{ctx.id}/settings">Settings</a>.
+				<a class="text-accent hover:underline" href="/s/{ctx.id}/settings#gameplay">Settings</a>.
 			</p>
 		{:else}
 			{#each netCharts as c (c.title)}<SampleChart {samples} {...c} bind:hover />{/each}

@@ -296,7 +296,7 @@
 									<span class="font-medium">{m.name}</span>
 									<span class="min-w-0 flex-1 truncate font-mono text-xs text-faint" title={m.asset}>{m.asset}</span>
 									{#if !m.shadowed && poolSpot(m.name)}
-										<a class="sticker no-underline" href="/s/{ctx.id}/settings" title="Number {poolSpot(m.name)} in the map pool">Pool #{poolSpot(m.name)}</a>
+										<a class="sticker no-underline" href="/s/{ctx.id}/settings#maps" title="Number {poolSpot(m.name)} in the map pool">Pool #{poolSpot(m.name)}</a>
 									{/if}
 									{#if mod.disabled}
 										{#if isLoaded(m.name)}<span class="sticker sticker-warn">Restart to unload</span>{/if}

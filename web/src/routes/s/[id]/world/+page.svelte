@@ -117,7 +117,7 @@
 	{:else if world}
 		{#if !world.sync}
 			<p class="rounded-xl border-2 border-dashed border-warn/60 bg-warn/5 px-4 py-3 text-sm text-muted">
-				World layer sync is off, so players choose their own layers. Turn it on under <a class="text-accent hover:underline" href="/s/{ctx.id}/settings">Settings</a> to apply these to everyone.
+				World layer sync is off, so players choose their own layers. Turn it on under <a class="text-accent hover:underline" href="/s/{ctx.id}/settings#maps">Settings</a> to apply these to everyone.
 			</p>
 		{/if}
 

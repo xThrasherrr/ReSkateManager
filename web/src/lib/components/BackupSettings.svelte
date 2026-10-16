@@ -92,92 +92,97 @@
 {#if !saved}
 	{#if loadError}<LoadError error={loadError} onretry={load} />{:else}<Loading />{/if}
 {:else}
-	<div class="space-y-5">
-		{#if loadError}<LoadError error={loadError} onretry={load} />{/if}
-		<p class="text-sm text-muted">
-			A backup holds the manager's database, settings and plugins, and each server's config and world layers. Server programs are left out, since they download
-			again, and so are mods unless you include them: one map can be gigabytes.
-		</p>
+	<div class="@container">
+		<div class="grid grid-cols-[minmax(0,1fr)] items-start gap-5 @4xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] @4xl:gap-6">
+			<div class="space-y-5">
+				{#if loadError}<LoadError error={loadError} onretry={load} />{/if}
+				<p class="text-sm text-muted">
+					A backup holds the manager's database, settings and plugins, and each server's config and world layers. Server programs are left out, since they download
+					again, and so are mods unless you include them: one map can be gigabytes.
+				</p>
 
-		<form class="space-y-3" onsubmit={save}>
-			<label class="flex items-center gap-2 text-sm">
-				<input type="checkbox" bind:checked={scheduled} />
-				<span class="flex flex-wrap items-center gap-2">
-					Back up every
-					<input class="input w-20 tabular-nums" type="number" min="1" max="720" bind:value={every} disabled={!scheduled} aria-label="Hours between backups" />
-					hours
-				</span>
-			</label>
-			<label class="flex flex-wrap items-center gap-2 text-sm">
-				Keep the newest
-				<input class="input w-20 tabular-nums" type="number" min="1" max="100" bind:value={keep} aria-label="Backups to keep" />
-				of each kind
-			</label>
-			<label class="flex items-start gap-2 text-sm">
-				<input type="checkbox" class="mt-0.5" bind:checked={mods} disabled={!scheduled} />
-				<span>
-					Include mods in scheduled backups
-					<span class="block text-xs text-faint">Each backup kept is a full copy of every mod, the shared ones too.</span>
-				</span>
-			</label>
-			<p class="text-xs text-faint">
-				The manager also backs up before it installs a server update (that server's config), before it updates itself, and before it upgrades its
-				database. Backups you make here stay until you delete them.
-			</p>
-			<button class="btn btn-primary" disabled={!changed || busy || !valid}>Save</button>
-		</form>
+				<form class="space-y-3" onsubmit={save}>
+					<label class="flex items-center gap-2 text-sm">
+						<input type="checkbox" bind:checked={scheduled} />
+						<span class="flex flex-wrap items-center gap-2">
+							Back up every
+							<input class="input w-20 tabular-nums" type="number" min="1" max="720" bind:value={every} disabled={!scheduled} aria-label="Hours between backups" />
+							hours
+						</span>
+					</label>
+					<label class="flex flex-wrap items-center gap-2 text-sm">
+						Keep the newest
+						<input class="input w-20 tabular-nums" type="number" min="1" max="100" bind:value={keep} aria-label="Backups to keep" />
+						of each kind
+					</label>
+					<label class="flex items-start gap-2 text-sm">
+						<input type="checkbox" class="mt-0.5" bind:checked={mods} disabled={!scheduled} />
+						<span>
+							Include mods in scheduled backups
+							<span class="block text-xs text-faint">Each backup kept is a full copy of every mod, the shared ones too.</span>
+						</span>
+					</label>
+					<p class="text-xs text-faint">
+						The manager also backs up before it installs a server update (that server's config), before it updates itself, and before it upgrades its
+						database. Backups you make here stay until you delete them.
+					</p>
+					<button class="btn btn-primary" disabled={!changed || busy || !valid}>Save</button>
+				</form>
 
-		<div class="space-y-2 border-t-2 border-line pt-4">
-			<div class="flex flex-wrap items-center gap-3">
-				<button class="btn" disabled={!!job} onclick={backUp}><Icon name="archive" size={14} /> {job ? 'Backing up…' : 'Back up now'}</button>
-				<label class="flex items-center gap-2 text-sm">
-					<input type="checkbox" bind:checked={nowMods} disabled={!!job} /> With mods
-				</label>
+				<div class="space-y-2 border-t-2 border-line pt-4">
+					<div class="flex flex-wrap items-center gap-3">
+						<button class="btn" disabled={!!job} onclick={backUp}><Icon name="archive" size={14} /> {job ? 'Backing up…' : 'Back up now'}</button>
+						<label class="flex items-center gap-2 text-sm">
+							<input type="checkbox" bind:checked={nowMods} disabled={!!job} /> With mods
+						</label>
+					</div>
+					{#if job}
+						<Progress value={job.total ? job.done / job.total : null} label="Backing up" />
+						{#if job.total}<p class="text-xs text-faint tabular-nums">{bytes(job.done)} of {bytes(job.total)}</p>{/if}
+					{/if}
+				</div>
 			</div>
-			{#if job}
-				<Progress value={job.total ? job.done / job.total : null} label="Backing up" />
-				{#if job.total}<p class="text-xs text-faint tabular-nums">{bytes(job.done)} of {bytes(job.total)}</p>{/if}
+			{#if list}
+				<div class="space-y-3">
+						{#if list.length === 0}
+							<p class="text-sm text-faint">No backups yet.</p>
+						{:else}
+							<ul class="divide-y-2 divide-line rounded-xl border-2 border-line">
+								{#each list as b (b.name)}
+									<li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
+										<div class="min-w-0 flex-1">
+											{#if b.error}
+												<div class="font-mono text-xs break-all">{b.name}</div>
+												<div class="text-xs text-bad">Can't be read: {b.error}</div>
+											{:else}
+												<div class="text-sm">
+													<span class="font-semibold">{dateTime(b.created)}</span>
+													<span class="text-muted">· {backupLabel(b.kind, b.by)}</span>
+												</div>
+												<div class="flex flex-wrap items-center gap-x-2 text-xs text-faint">
+													<span>{holds(b)}</span>
+													{#if withMods(b)}<span class="rounded bg-accent/15 px-1.5 text-accent">with mods</span>{/if}
+													<span class="tabular-nums">{bytes(b.size)}</span>
+												</div>
+											{/if}
+										</div>
+										<div class="flex shrink-0 gap-1">
+											<a class="btn btn-ghost btn-sm" href="/api/backups/{encodeURIComponent(b.name)}" download title="Download {b.name}" aria-label="Download {b.name}"
+												><Icon name="download" size={14} /></a
+											>
+											<button class="btn btn-ghost btn-sm" onclick={() => ((deleting = b), (confirming = true))} title="Delete" aria-label="Delete {b.name}"><Icon name="trash" size={14} /></button>
+										</div>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+						<p class="text-xs text-faint">
+							Kept in <code class="break-all">{folder}</code>; a backup on the same disk won't survive the disk, so download one now and then. To restore a server,
+							open its Server page. To restore everything, stop the manager and run <code>ReSkateManager --restore &lt;backup&gt;</code>.
+						</p>
+				</div>
 			{/if}
 		</div>
-
-		{#if list}
-			{#if list.length === 0}
-				<p class="text-sm text-faint">No backups yet.</p>
-			{:else}
-				<ul class="divide-y-2 divide-line rounded-xl border-2 border-line">
-					{#each list as b (b.name)}
-						<li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
-							<div class="min-w-0 flex-1">
-								{#if b.error}
-									<div class="font-mono text-xs break-all">{b.name}</div>
-									<div class="text-xs text-bad">Can't be read: {b.error}</div>
-								{:else}
-									<div class="text-sm">
-										<span class="font-semibold">{dateTime(b.created)}</span>
-										<span class="text-muted">· {backupLabel(b.kind, b.by)}</span>
-									</div>
-									<div class="flex flex-wrap items-center gap-x-2 text-xs text-faint">
-										<span>{holds(b)}</span>
-										{#if withMods(b)}<span class="rounded bg-accent/15 px-1.5 text-accent">with mods</span>{/if}
-										<span class="tabular-nums">{bytes(b.size)}</span>
-									</div>
-								{/if}
-							</div>
-							<div class="flex shrink-0 gap-1">
-								<a class="btn btn-ghost btn-sm" href="/api/backups/{encodeURIComponent(b.name)}" download title="Download {b.name}" aria-label="Download {b.name}"
-									><Icon name="download" size={14} /></a
-								>
-								<button class="btn btn-ghost btn-sm" onclick={() => ((deleting = b), (confirming = true))} title="Delete" aria-label="Delete {b.name}"><Icon name="trash" size={14} /></button>
-							</div>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-			<p class="text-xs text-faint">
-				Kept in <code class="break-all">{folder}</code>; a backup on the same disk won't survive the disk, so download one now and then. To restore a server,
-				open its Server page. To restore everything, stop the manager and run <code>ReSkateManager --restore &lt;backup&gt;</code>.
-			</p>
-		{/if}
 	</div>
 {/if}
 
