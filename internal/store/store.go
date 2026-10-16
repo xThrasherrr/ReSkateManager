@@ -286,9 +286,9 @@ func (s *Store) MoveInstance(ctx context.Context, id, dir string) error {
 }
 
 // DeleteInstance removes an instance and everything the panel keeps about it:
-// its admins, announcements, samples, player history and visits, and the
-// roles granted on it. All of it goes, so a server added later under the
-// same ID starts with none of it, and none of its players.
+// its admins, announcements, samples, player history, visits and throwdowns,
+// and the roles granted on it. All of it goes, so a server added later under
+// the same ID starts with none of it, and none of its players.
 func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -302,6 +302,7 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 		"DELETE FROM net_samples WHERE instance_id = ?",
 		"DELETE FROM player_history WHERE instance_id = ?",
 		"DELETE FROM player_sessions WHERE instance_id = ?",
+		"DELETE FROM throwdowns WHERE instance_id = ?", // and their players with them
 		"DELETE FROM user_roles WHERE instance_id = ?",
 		"DELETE FROM instances WHERE id = ?",
 	} {
@@ -498,19 +499,37 @@ type PlayerRecord struct {
 	// PlaytimeAll is the same on all the servers PlayerHistory was given;
 	// nil when it was given none.
 	PlaytimeAll *int64 `json:"playtimeAll,omitempty"`
+	// Throwdowns is how many finished throwdowns they played on the server,
+	// not counting those they quit, and Wins how many of those they won.
+	Throwdowns int `json:"throwdowns"`
+	Wins       int `json:"wins"`
+	// ThrowdownsAll and WinsAll are the same on all the servers PlayerHistory
+	// was given; nil when it was given none.
+	ThrowdownsAll *int `json:"throwdownsAll,omitempty"`
+	WinsAll       *int `json:"winsAll,omitempty"`
 }
 
-// PrunePlayers forgets the players last seen before `before` and their
-// visits, on every server, and reports how many players went.
+// PrunePlayers forgets the players last seen before `before`, their visits
+// and their places in throwdowns, on every server, and reports how many
+// players went. A throwdown goes once nobody in it is left to count it.
 func (s *Store) PrunePlayers(ctx context.Context, before int64) (int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM player_sessions WHERE left_at < ?1 AND NOT EXISTS (SELECT 1 FROM player_history h
-		WHERE h.instance_id = player_sessions.instance_id AND h.steam_id = player_sessions.steam_id AND h.last_seen >= ?1)`, before); err != nil {
-		return 0, err
+	for _, q := range []string{
+		`DELETE FROM player_sessions WHERE left_at < ?1 AND NOT EXISTS (SELECT 1 FROM player_history h
+			WHERE h.instance_id = player_sessions.instance_id AND h.steam_id = player_sessions.steam_id AND h.last_seen >= ?1)`,
+		`DELETE FROM throwdown_players WHERE steam_id != '' AND throwdown_id IN (SELECT id FROM throwdowns WHERE finished_at < ?1)
+			AND NOT EXISTS (SELECT 1 FROM throwdowns t JOIN player_history h ON h.instance_id = t.instance_id
+				WHERE t.id = throwdown_players.throwdown_id AND h.steam_id = throwdown_players.steam_id AND h.last_seen >= ?1)`,
+		`DELETE FROM throwdowns WHERE finished_at < ?1 AND NOT EXISTS (SELECT 1 FROM throwdown_players p
+			WHERE p.throwdown_id = throwdowns.id AND p.steam_id != '')`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, before); err != nil {
+			return 0, err
+		}
 	}
 	res, err := tx.ExecContext(ctx, "DELETE FROM player_history WHERE last_seen < ?", before)
 	if err != nil {
@@ -522,26 +541,34 @@ func (s *Store) PrunePlayers(ctx context.Context, before int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// playtimeOf adds up a player's visits as of a time, on the servers a
-// condition on s picks.
-const playtimeOf = "(SELECT SUM(MAX(0, COALESCE(s.left_at, ?) - s.joined_at)) FROM player_sessions s WHERE s.steam_id = h.steam_id AND "
+// A player's playtime as of a time, their finished throwdowns and the ones
+// they won, each on the servers a condition on s or t picks, which follows.
+const (
+	playtimeOf   = "(SELECT SUM(MAX(0, COALESCE(s.left_at, ?) - s.joined_at)) FROM player_sessions s WHERE s.steam_id = h.steam_id AND s.instance_id "
+	throwdownsOf = "(SELECT COUNT(*) FROM throwdown_players p JOIN throwdowns t ON t.id = p.throwdown_id WHERE p.quit = 0 AND p.steam_id = h.steam_id AND t.instance_id "
+	winsOf       = "(SELECT COUNT(*) FROM throwdown_players p JOIN throwdowns t ON t.id = p.throwdown_id WHERE p.won = 1 AND p.steam_id = h.steam_id AND t.instance_id "
+)
 
 // PlayerHistory lists up to limit players an instance has seen, last seen
-// first, with their playtime there. Given a search, only those whose SteamID
-// is it or whose name has it. Given network, the servers whose playtime adds
-// up to each player's PlaytimeAll.
+// first, with their playtime and throwdowns there. Given a search, only
+// those whose SteamID is it or whose name has it. Given network, the servers
+// each player's PlaytimeAll, ThrowdownsAll and WinsAll add up.
 func (s *Store) PlayerHistory(ctx context.Context, instanceID, search string, limit int, network ...string) ([]PlayerRecord, error) {
 	now := time.Now().Unix()
-	q := "SELECT h.steam_id, h.name, h.first_seen, h.last_seen, h.sessions, " + playtimeOf + "s.instance_id = h.instance_id), "
+	q := "SELECT h.steam_id, h.name, h.first_seen, h.last_seen, h.sessions, " +
+		playtimeOf + "= h.instance_id), " + throwdownsOf + "= h.instance_id), " + winsOf + "= h.instance_id), "
 	args := []any{now}
 	if len(network) > 0 {
-		q += playtimeOf + "s.instance_id IN (?" + strings.Repeat(", ?", len(network)-1) + "))"
+		in := "IN (?" + strings.Repeat(", ?", len(network)-1) + "))"
+		q += playtimeOf + in + ", " + throwdownsOf + in + ", " + winsOf + in
 		args = append(args, now)
-		for _, id := range network {
-			args = append(args, id)
+		for range 3 {
+			for _, id := range network {
+				args = append(args, id)
+			}
 		}
 	} else {
-		q += "NULL"
+		q += "NULL, NULL, NULL"
 	}
 	q += " FROM player_history h WHERE h.instance_id = ?"
 	args = append(args, instanceID)
@@ -553,8 +580,65 @@ func (s *Store) PlayerHistory(ctx context.Context, instanceID, search string, li
 	q += " ORDER BY h.last_seen DESC LIMIT ?"
 	args = append(args, limit)
 	return queryAll(ctx, s.DB, func(p *PlayerRecord) []any {
-		return []any{&p.SteamID, &p.Name, &p.FirstSeen, &p.LastSeen, &p.Sessions, &p.Playtime, &p.PlaytimeAll}
+		return []any{&p.SteamID, &p.Name, &p.FirstSeen, &p.LastSeen, &p.Sessions, &p.Playtime, &p.Throwdowns, &p.Wins,
+			&p.PlaytimeAll, &p.ThrowdownsAll, &p.WinsAll}
 	}, q, args...)
+}
+
+// ---- throwdowns ----
+
+// throwdownNameMax caps a name kept with a throwdown, which a player picks.
+const throwdownNameMax = 128
+
+// AddThrowdown keeps a finished throwdown's results, as finished at `at`
+// (unix seconds). Quitting counts for nothing. Of a throwdown two or more
+// played, those who stayed with the most points, above 0, win: each of them
+// on a tie, and the one left when everyone else quit. S.K.A.T.E. is won on
+// letters, which the server never sees, so only that one wins it, with a
+// landed try.
+func (s *Store) AddThrowdown(ctx context.Context, instanceID string, at int64, t logparse.Throwdown) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, "INSERT INTO throwdowns(instance_id, mode, leader_id, leader, finished_at) VALUES(?, ?, ?, ?, ?)",
+		instanceID, t.Mode, t.Leader.ID, clip(t.Leader.Name, throwdownNameMax), at)
+	if err != nil {
+		return err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	stayed, top := 0, int64(0)
+	for _, r := range t.Results {
+		if !r.Quit {
+			stayed++
+			top = max(top, r.Points)
+		}
+	}
+	for i, r := range t.Results {
+		var place, points, landed, missed any
+		if t.Mode == logparse.ModeSkate {
+			landed, missed = r.Landed, r.Missed
+		} else {
+			place, points = r.Place, r.Points
+		}
+		var won bool
+		switch {
+		case len(t.Results) < 2 || r.Quit:
+		case t.Mode == logparse.ModeSkate:
+			won = stayed == 1 && r.Landed > 0
+		default:
+			won = top > 0 && r.Points == top
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO throwdown_players(throwdown_id, seat, steam_id, name, place, points, landed, missed, quit, won)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, i+1, r.ID, clip(r.Name, throwdownNameMax), place, points, landed, missed, r.Quit, won); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ---- audit log ----

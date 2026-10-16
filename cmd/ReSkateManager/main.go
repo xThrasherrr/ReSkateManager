@@ -266,6 +266,14 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 				log.Warn("player history", "err", err)
 			}
 		}
+		in.OnThrowdown = func(t logparse.Throwdown) {
+			if t.Kind != logparse.ThrowdownFinished {
+				return
+			}
+			if err := db.AddThrowdown(context.Background(), id, time.Now().Unix(), t); err != nil {
+				log.Warn("throwdown results", "instance", id, "err", err)
+			}
+		}
 		in.OnNetwork = func(run time.Time, n logparse.Network) {
 			if err := db.AddNetSample(context.Background(), id, time.Now().Unix(), run.Unix(), n); err != nil {
 				log.Warn("network sample", "instance", id, "err", err)

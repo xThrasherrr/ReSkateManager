@@ -115,6 +115,9 @@ func main() {
 			log("ok")
 		case "crash": // test hook: the server going down on its own
 			os.Exit(3)
+		case "emit": // test hook: a line of the server's own, as "emit [throwdown] ..."
+			log(arg)
+			log("ok")
 		case "role": // "role <id> <role>|none", saved to data/roles.json like the real server
 			id, role, _ := strings.Cut(arg, " ")
 			label := id

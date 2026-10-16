@@ -7,7 +7,7 @@
 	import { attempt } from '#lib/toast.svelte.js';
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
-	import { ago, dateTime, playtime } from '#lib/format.js';
+	import { ago, dateTime, playtime, plural } from '#lib/format.js';
 	import { onLine, roleLine } from '#lib/lines.svelte.js';
 	import { Paged } from '#lib/paged.svelte.js';
 	import Icon from '#lib/components/Icon.svelte';
@@ -29,7 +29,16 @@
 		playtime: number | null;
 		/** The same on every server whose players the user sees, when that's more than this one. */
 		playtimeAll?: number | null;
+		/** Finished throwdowns played here, not counting quits, and the ones of them won. */
+		throwdowns: number;
+		wins: number;
+		/** The same on every server whose players the user sees, as playtimeAll. */
+		throwdownsAll?: number | null;
+		winsAll?: number | null;
 	}
+
+	/** "12 · 5 won", or a dash for none. */
+	const throwdowns = (played: number, won: number) => (played ? `${played}${won ? ` · ${won} won` : ''}` : '—');
 
 	const ctx = useLive();
 	const live = $derived(ctx.live);
@@ -42,6 +51,19 @@
 	let historyError = $state('');
 	const past = new Paged('history', () => history ?? []);
 	const playtimeNote = 'Time on this server, counted since this manager began keeping it';
+	const throwdownNote =
+		"Throwdowns finished on this server, and won: the most points, or the last one left when everyone else quit. A quit counts for nothing. S.K.A.T.E. is won on letters, which the server never sees, so only by the last one left, with a landed try.";
+
+	// Throwdowns are counted from lines the server writes only with its
+	// activity log on.
+	let activityOff = $state(false);
+	$effect(() => {
+		if (ctx.can('settings.view'))
+			untrack(async () => {
+				const r = await api.get<{ values: Record<string, unknown> }>(`/instances/${ctx.id}/settings`).catch(() => null);
+				activityOff = r?.values.activity_log === false;
+			});
+	});
 	const begin = newest();
 	async function loadHistory() {
 		const current = begin();
@@ -208,6 +230,11 @@
 				<Icon name="search" size={14} class="absolute top-1/2 left-2 -translate-y-1/2 text-faint" />
 				<input class="input pl-7" placeholder="Name or SteamID64, then Enter" aria-label="Search player history" bind:value={q} />
 			</form>
+			{#if activityOff}
+				<p class="w-full text-xs text-muted">
+					Throwdowns aren't being counted: <a class="text-accent hover:underline" href="/s/{ctx.id}/settings">Log player activity</a> is off in this server's settings.
+				</p>
+			{/if}
 		</div>
 		{#if historyError}<LoadError class="m-4" error={historyError} onretry={loadHistory} />{/if}
 		{#if history?.length}
@@ -217,7 +244,8 @@
 						<tr>
 							<th>Player</th>{#if withRoles}<th>Role</th>{/if}<th class="hidden md:table-cell">SteamID64</th><th class="hidden lg:table-cell">First seen</th><th class="hidden sm:table-cell"
 								>Last seen</th
-							><th class="hidden sm:table-cell">Visits</th><th class="hidden sm:table-cell" title={playtimeNote}>Playtime</th><th></th>
+							><th class="hidden sm:table-cell">Visits</th><th class="hidden sm:table-cell" title={playtimeNote}>Playtime</th
+							><th class="hidden md:table-cell" title={throwdownNote}>Throwdowns</th><th></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -227,6 +255,7 @@
 									{h.name}
 									<SteamId id={h.id} small class="font-normal md:hidden" />
 									{#if h.playtime != null}<span class="block text-xs font-normal text-muted sm:hidden">{playtime(h.playtime)} played</span>{/if}
+									{#if h.throwdowns}<span class="block text-xs font-normal text-muted md:hidden">{plural(h.throwdowns, 'throwdown')}{h.wins ? ` · ${h.wins} won` : ''}</span>{/if}
 								</td>
 								{#if withRoles && roles}<td><RolePick id={h.id} name={h.name} {roles} onchange={loadRoles} /></td>{/if}
 								<td class="hidden md:table-cell"><SteamId id={h.id} /></td>
@@ -237,6 +266,12 @@
 									{playtime(h.playtime)}
 									{#if h.playtimeAll != null && playtime(h.playtimeAll) !== playtime(h.playtime)}
 										<span class="block text-xs text-faint" title="On every server whose players you can see">{playtime(h.playtimeAll)} on all servers</span>
+									{/if}
+								</td>
+								<td class="hidden whitespace-nowrap tabular-nums md:table-cell">
+									{throwdowns(h.throwdowns, h.wins)}
+									{#if h.throwdownsAll != null && h.throwdownsAll !== h.throwdowns}
+										<span class="block text-xs text-faint" title="On every server whose players you can see">{throwdowns(h.throwdownsAll, h.winsAll ?? 0)} on all servers</span>
 									{/if}
 								</td>
 								<td class="text-right">

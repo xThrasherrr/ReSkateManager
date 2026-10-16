@@ -53,7 +53,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Players and server control
 
-- **Player management:** see who's online and who has played, with each player's role from ReSkate 2.0.6 and their playtime, on that server and on all of yours. Kick (from 2.0.8 for as long as you pick, or the server's own kick time), ban, unban and manage in-game admins, which from 2.0.6 are the players with the server's `admin` role.
+- **Player management:** see who's online and who has played, with each player's role from ReSkate 2.0.6, their playtime, and the throwdowns they played and won (a quit counts for nothing; counted while the server's player activity log is on), on that server and on all of yours. Kick (from 2.0.8 for as long as you pick, or the server's own kick time), ban, unban and manage in-game admins, which from 2.0.6 are the players with the server's `admin` role.
 - **Crash recovery:** a crashed server restarts automatically, with backoff, up to five tries in a row.
 - **Scheduled restarts:** restart a server at set times of day, or after so many hours up. Players get a warning in chat 10, 5 and 1 minute before; a server with nobody on restarts straight away.
 
@@ -150,7 +150,7 @@ Everything the manager keeps sits next to the executable, or under the directory
 
 ```
 data/manager.toml   settings (listen address, public URL, TLS)
-data/manager.db     servers, users, roles, sessions, announcements, performance and network samples, audit log, player history and visits
+data/manager.db     servers, users, roles, sessions, announcements, performance and network samples, audit log, player history, visits and throwdowns
 data/manager.log
 data/manager.lock   held while the manager runs, so a second one can't use the folder
 servers/<id>/       one folder per server: ReSkateServer.exe, ReSkateServer.json, Mods/, ReSkateServer.log, console.log

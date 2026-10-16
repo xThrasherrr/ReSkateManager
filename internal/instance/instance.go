@@ -200,6 +200,9 @@ type Instance struct {
 	// unmatched are leave lines that named more than one player, kept until
 	// the roster check finds out which of them it was.
 	unmatched []Leave
+	// gone are the players who left this run, newest last: the server still
+	// names them in its lines, a throwdown's results for one.
+	gone []Player
 	// hooks are the OnJoin and OnLeave calls still running.
 	hooks sync.WaitGroup
 	// OnJoin runs (in its own goroutine) for every player join; set before Start.
@@ -207,6 +210,10 @@ type Instance struct {
 	// OnLeave runs (in its own goroutine) for every player OnJoin had, as they
 	// go from the roster; set before Start.
 	OnLeave func(Leave)
+	// OnThrowdown runs (in its own goroutine) for each [throwdown] line, with
+	// the players matched to their SteamIDs where that can be told; set before
+	// Start.
+	OnThrowdown func(logparse.Throwdown)
 	// OnReady runs (in its own goroutine) each time the server finishes starting.
 	OnReady func()
 	// OnNetwork runs (in its own goroutine) for each network summary the
@@ -364,6 +371,7 @@ func (in *Instance) startLocked() error {
 	}
 	in.asm = logparse.NewAssembler()
 	in.emptyRosterLocked(LeftRestart)
+	in.gone = nil // a new process knows nobody's name
 	in.info = Info{}
 	in.exitCode, in.lastError, in.lastLine = nil, "", ""
 	in.readyAt = time.Time{}
@@ -712,6 +720,10 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 			in.pollRun = false
 		case e.Tag == "network":
 			in.networkLocked(e.Text)
+		case e.Tag == "throwdown" && in.OnThrowdown != nil:
+			if t, ok := logparse.ParseThrowdown(e.Text, in.namesLocked()); ok {
+				in.hooks.Go(func() { in.OnThrowdown(t) })
+			}
 		}
 	case logparse.KindCommand:
 		if name := e.Fields["custom"]; name != "" {
@@ -1055,11 +1067,39 @@ func (in *Instance) joinedLocked(p Player) {
 	}
 }
 
+// goneKeep is how many players who left a run keeps for namesLocked.
+const goneKeep = 256
+
 // leftLocked runs OnLeave for a player gone from the roster.
 func (in *Instance) leftLocked(l Leave) {
+	if len(in.gone) >= goneKeep {
+		in.gone = in.gone[1:]
+	}
+	in.gone = append(in.gone, l.Player)
 	if in.OnLeave != nil {
 		in.hooks.Go(func() { in.OnLeave(l) })
 	}
+}
+
+// namesLocked tells who the server means by a name in its lines: the
+// SteamID64 of the one player by that name on the roster or who left this
+// run, whose names its lines still use, or "" for nobody or more than one.
+func (in *Instance) namesLocked() func(name string) string {
+	ids := make(map[string]string, len(in.players)+len(in.gone))
+	add := func(p Player) {
+		if id, seen := ids[p.Name]; !seen {
+			ids[p.Name] = p.ID
+		} else if id != p.ID {
+			ids[p.Name] = "" // two players had it
+		}
+	}
+	for _, p := range in.players {
+		add(*p)
+	}
+	for _, p := range in.gone {
+		add(p)
+	}
+	return func(name string) string { return ids[name] }
 }
 
 // emptyRosterLocked takes everyone off the roster, each leaving for why.
