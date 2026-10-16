@@ -2,6 +2,8 @@ package api
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -30,6 +32,7 @@ type pluginsInfo struct {
 	MemoryMB int              `json:"memoryMB"`
 	Events   []string         `json:"events"`
 	Grants   []plugins.Grant  `json:"grants"`
+	MaxMB    int              `json:"maxUploadMB"`
 	Plugins  []plugins.Status `json:"plugins"`
 }
 
@@ -39,7 +42,7 @@ func (a *API) listPlugins(w http.ResponseWriter, r *http.Request) {
 		list = []plugins.Status{}
 	}
 	writeJSON(w, http.StatusOK, pluginsInfo{Dir: a.Plugins.Dir, API: plugins.API, CallMs: plugins.CallTime.Milliseconds(),
-		MemoryMB: luavm.MemoryLimit >> 20, Events: plugins.Events, Grants: plugins.Grants, Plugins: list})
+		MemoryMB: luavm.MemoryLimit >> 20, Events: plugins.Events, Grants: plugins.Grants, MaxMB: plugins.MaxUpload >> 20, Plugins: list})
 }
 
 // setPlugin turns a plugin on or off, or changes what it's granted.
@@ -79,6 +82,55 @@ func (a *API) setPlugin(w http.ResponseWriter, r *http.Request) {
 		a.audit(r, "", "manager.plugins", what+id)
 	}
 	a.writePlugin(w, r, id)
+}
+
+// addPlugin installs a plugin from a zip of its folder, the request's body.
+// ?name= is the zip's file name, which names a plugin zipped without a
+// folder; ?replace=1 replaces one that's there already.
+func (a *API) addPlugin(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, plugins.MaxUpload))
+	var tooBig *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooBig):
+		writeErr(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("a plugin's zip can be %d MB at most", plugins.MaxUpload>>20))
+		return
+	case err != nil:
+		writeErr(w, http.StatusBadRequest, "the upload was cut off")
+		return
+	}
+	st, replaced, err := a.Plugins.Install(data, r.URL.Query().Get("name"), r.URL.Query().Get("replace") == "1")
+	var exists *plugins.ExistsError
+	switch {
+	case errors.As(err, &exists):
+		writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "plugin": exists.Plugin})
+		return
+	case errors.Is(err, plugins.ErrBadUpload):
+		writeErr(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), plugins.ErrBadUpload.Error()+": "))
+		return
+	case err != nil:
+		a.internalErr(w, r, err)
+		return
+	}
+	detail, code := "added "+st.ID, http.StatusCreated
+	if replaced {
+		detail, code = "replaced "+st.ID, http.StatusOK
+	}
+	if st.Version != "" {
+		detail += " " + st.Version
+	}
+	a.audit(r, "", "manager.plugins", detail)
+	writeJSON(w, code, st)
+}
+
+// removePlugin stops a plugin and deletes its folder.
+func (a *API) removePlugin(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "pid")
+	if err := a.Plugins.Remove(r.Context(), id); err != nil {
+		a.pluginErr(w, r, err)
+		return
+	}
+	a.audit(r, "", "manager.plugins", "removed "+id)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) reloadPlugin(w http.ResponseWriter, r *http.Request) {

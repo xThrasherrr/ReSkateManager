@@ -474,6 +474,7 @@ export interface PluginsInfo {
 	memoryMB: number; // the most one plugin may use
 	events: string[];
 	grants: PluginGrant[]; // the permissions plugins can be given
+	maxUploadMB: number; // the largest plugin zip Add plugin takes
 	plugins: Plugin[];
 }
 

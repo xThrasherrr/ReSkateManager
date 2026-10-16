@@ -105,7 +105,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Plugins
 
-- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. Owners turn each one on under **Manager**, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
+- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. Owners add them under **Manager** as a zip, or copy them into `plugins/`, and turn each one on there, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
 
 ## Getting started
 
@@ -236,6 +236,8 @@ A backup is a zip in `backups/`, laid out like the manager's folder: `data/manag
 ## Writing plugins
 
 A plugin is a folder in `plugins/` (in Docker, the volume's `plugins/`) holding a `plugin.toml` and a `main.lua`. The folder's name is the plugin's ID. It shows on the Plugins card under **Manager** straight away, turned off; an owner turns it on, and **Reload** reads its files again after you change them.
+
+You don't need to reach the machine or the Docker volume: **Add plugin** on the card takes a `.zip` of the plugin's folder (up to 4 MB), or of the files in it, in which case the zip's name is the ID. A plugin added this way starts off. Adding one that's there already asks first, then replaces its files and, if it was on, starts it again with them; what it was granted stays, and anything new its `plugin.toml` asks for waits for an owner to tick it. **Remove** stops a plugin and deletes its folder.
 
 ```toml
 # plugin.toml

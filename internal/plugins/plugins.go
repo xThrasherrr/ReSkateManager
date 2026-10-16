@@ -155,6 +155,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err := m.loadGrants(ctx); err != nil {
 		return err
 	}
+	m.cleanUploads()
 	m.scanLocked()
 	for _, p := range m.sortedLocked() {
 		if m.enabled[p.ID] {

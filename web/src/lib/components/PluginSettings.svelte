@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, message, sleep, type Plugin, type PluginsInfo, type PluginState } from '#lib/api.js';
-	import { attempt } from '#lib/toast.svelte.js';
+	import { api, ApiError, message, sleep, upload, type Plugin, type PluginsInfo, type PluginState } from '#lib/api.js';
+	import { ask } from '#lib/ask.svelte.js';
+	import { attempt, toast } from '#lib/toast.svelte.js';
 	import { bytes, duration, plural } from '#lib/format.js';
 	import FolderPath from './FolderPath.svelte';
 	import Icon from './Icon.svelte';
@@ -11,6 +12,8 @@
 	let info = $state.raw<PluginsInfo | null>(null);
 	let loadError = $state('');
 	let busy = $state<string | null>(null); // the plugin an action waits on
+	let picker = $state<HTMLInputElement>();
+	let adding = $state(false);
 
 	async function load() {
 		try {
@@ -55,6 +58,41 @@
 		busy = null;
 	}
 
+	// A zip of a plugin's folder, added off; one there already is replaced when they say so.
+	async function add(file: File | undefined) {
+		if (!file) return;
+		adding = true;
+		const send = (replace: boolean) => upload<Plugin>('POST', `/manager/plugins?name=${encodeURIComponent(file.name)}${replace ? '&replace=1' : ''}`, file);
+		let replaced = false;
+		try {
+			const p = await send(false).catch(async (e) => {
+				if (!(e instanceof ApiError && e.status === 409)) throw e;
+				const old = e.body.plugin as Plugin | undefined;
+				replaced = await ask({
+					title: `Replace ${old?.name ?? 'it'}?`,
+					body: `${e.message}. Its files are replaced with the ones in ${file.name}${old?.enabled ? ', and it starts again with them' : ''}. What it was granted stays; anything new it asks for waits for you to tick it.`,
+					action: 'Replace',
+					danger: false
+				});
+				return replaced ? send(true) : null;
+			});
+			if (p) toast.ok(replaced ? `Replaced ${p.name} with ${p.version || 'the upload'}` : `Added ${p.name}: turn it on below`);
+		} catch (e) {
+			toast.error(e);
+		}
+		adding = false;
+		await load();
+	}
+
+	async function remove(p: Plugin) {
+		const body = `Its folder, ${p.id}, is deleted with everything in it${p.enabled ? ', and it stops' : ''}. What it was granted is forgotten.`;
+		if (!(await ask({ title: `Remove ${p.name}?`, body, action: 'Remove' }))) return;
+		busy = p.id;
+		await attempt(() => api.del(`/manager/plugins/${encodeURIComponent(p.id)}`), `Removed ${p.name}`);
+		await load();
+		busy = null;
+	}
+
 	async function reload(p: Plugin) {
 		busy = p.id;
 		if (await attempt(() => api.post<Plugin>(`/manager/plugins/${encodeURIComponent(p.id)}/reload`), `Reloaded ${p.name}`)) await settle(p.id);
@@ -86,15 +124,32 @@
 			<span class="sticker sticker-warn shrink-0">Preview</span>
 			<span class="text-muted">Plugin API {info.api} may still change, so a plugin made for it may need changes later.</span>
 		</p>
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+			<input
+				bind:this={picker}
+				type="file"
+				accept=".zip,application/zip"
+				hidden
+				onchange={(e) => {
+					add(e.currentTarget.files?.[0]);
+					e.currentTarget.value = '';
+				}}
+			/>
+			<button class="btn btn-primary" disabled={adding || busy !== null} onclick={() => picker?.click()}>
+				<Icon name="upload" size={14} />
+				{adding ? 'Adding…' : 'Add plugin'}
+			</button>
+			<span class="text-xs text-faint">A <code>.zip</code> of its folder, up to {info.maxUploadMB} MB. It starts off.</span>
+		</div>
 		<FolderPath label="Plugins folder" folder={info.dir} />
 		<p class="text-xs text-faint">
-			Each plugin is a folder there with a <code>plugin.toml</code> and a <code>main.lua</code>. A call into a plugin may run for {info.callMs} ms, and a plugin may use
+			Each plugin is a folder there with a <code>plugin.toml</code> and a <code>main.lua</code>, added above or copied in. A call into a plugin may run for {info.callMs} ms, and a plugin may use
 			{info.memoryMB} MB. One that keeps failing or running over is stopped. Its log is on its card and in <code>data/plugins.log</code>.
 		</p>
 		<details class="rounded-xl border-2 border-line px-3 py-2 text-sm">
 			<summary class="cursor-pointer font-semibold">Make one</summary>
 			<div class="mt-2 space-y-2 text-xs">
-				<p class="text-muted">A folder <code>welcome</code> in the plugins folder, with:</p>
+				<p class="text-muted">A folder <code>welcome</code> with these two files, zipped and added above, or copied into the plugins folder:</p>
 				<pre class="overflow-x-auto rounded-lg bg-sunken p-2 font-mono"><span class="text-faint"># plugin.toml</span>
 name = "Welcome"
 version = "1.0.0"
@@ -135,6 +190,9 @@ end)</pre>
 							<div class="flex items-center gap-2">
 								<button class="btn btn-ghost btn-sm" disabled={busy !== null} title="Read its files again and start it afresh" onclick={() => reload(p)}>
 									<Icon name="restart" size={14} /> Reload
+								</button>
+								<button class="btn btn-ghost btn-sm" disabled={busy !== null || adding} title="Delete its folder" aria-label="Remove {p.name}" onclick={() => remove(p)}>
+									<Icon name="trash" size={14} />
 								</button>
 								<label class="inline-flex cursor-pointer items-center gap-2" title={p.enabled ? 'Turn it off' : 'Turn it on'}>
 									<input
