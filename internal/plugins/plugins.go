@@ -49,6 +49,7 @@ type Manager struct {
 	enabled map[string]bool
 	rt      *luavm.Runtime
 	out     *logfile.Writer
+	data    *data
 	closed  bool
 
 	runMu   sync.Mutex                          // guards changes to running
@@ -155,6 +156,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	if err := m.loadGrants(ctx); err != nil {
 		return err
 	}
+	if m.data, err = openData(ctx, m.Store, m.Log); err != nil {
+		return err
+	}
 	m.cleanUploads()
 	m.scanLocked()
 	for _, p := range m.sortedLocked() {
@@ -172,6 +176,10 @@ func (m *Manager) Close() {
 	m.closed = true
 	for _, p := range m.plugins {
 		m.stopLocked(p, "")
+	}
+	if m.data != nil {
+		m.data.close()
+		m.data = nil
 	}
 	if m.rt != nil {
 		m.rt.Close(context.Background())

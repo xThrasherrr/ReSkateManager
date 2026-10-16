@@ -29,8 +29,9 @@ var migrations embed.FS
 // ErrNotFound is a row that isn't there.
 var ErrNotFound = errors.New("not found")
 
-// Store is the manager's database.
-type Store struct{ DB *sql.DB }
+// Store is the manager's database. DB is its one writer, and Read reads on
+// connections of its own, for reads that can take a while.
+type Store struct{ DB, Read *sql.DB }
 
 // Open opens the database at path, made and migrated as needed.
 func Open(path string) (*Store, error) { return OpenWith(path, nil) }
@@ -50,11 +51,17 @@ func OpenWith(path string, beforeMigrate func(db *sql.DB, from int) error) (*Sto
 		db.Close()
 		return nil, err
 	}
+	// WAL lets these read while the writer writes.
+	if s.Read, err = sql.Open("sqlite", DSN(path, "query_only(1)", "busy_timeout(5000)")); err != nil {
+		db.Close()
+		return nil, err
+	}
+	s.Read.SetMaxOpenConns(4)
 	return s, nil
 }
 
 // Close closes the database.
-func (s *Store) Close() error { return s.DB.Close() }
+func (s *Store) Close() error { return errors.Join(s.Read.Close(), s.DB.Close()) }
 
 // DSN is the address of the database file at path for the sqlite driver,
 // with these pragmas. It is a URI, so a folder named with "#", "?" or "%"
@@ -286,8 +293,8 @@ func (s *Store) MoveInstance(ctx context.Context, id, dir string) error {
 }
 
 // DeleteInstance removes an instance and everything the panel keeps about it:
-// its admins, announcements, samples, player history, visits and throwdowns,
-// and the roles granted on it. All of it goes, so a server added later under
+// its admins, announcements, samples, player history, visits, throwdowns and
+// board scores, and the roles granted on it. All of it goes, so a server added later under
 // the same ID starts with none of it, and none of its players.
 func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -303,6 +310,7 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 		"DELETE FROM player_history WHERE instance_id = ?",
 		"DELETE FROM player_sessions WHERE instance_id = ?",
 		"DELETE FROM throwdowns WHERE instance_id = ?", // and their players with them
+		"DELETE FROM board_scores WHERE instance_id = ?",
 		"DELETE FROM user_roles WHERE instance_id = ?",
 		"DELETE FROM instances WHERE id = ?",
 	} {
@@ -511,7 +519,9 @@ type PlayerRecord struct {
 
 // PrunePlayers forgets the players last seen before `before`, their visits
 // and their places in throwdowns, on every server, and reports how many
-// players went. A throwdown goes once nobody in it is left to count it.
+// players went. A throwdown goes once nobody in it is left to count it. A
+// board score goes when nobody seen on any server has it, unless it changed
+// since; a past month's or week's goes once it began before `before`.
 func (s *Store) PrunePlayers(ctx context.Context, before int64) (int64, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -533,6 +543,12 @@ func (s *Store) PrunePlayers(ctx context.Context, before int64) (int64, error) {
 	}
 	res, err := tx.ExecContext(ctx, "DELETE FROM player_history WHERE last_seen < ?", before)
 	if err != nil {
+		return 0, err
+	}
+	now := time.Now()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM board_scores WHERE (at < ?1 AND steam_id NOT IN (SELECT steam_id FROM player_history))
+		OR (period = 'month' AND starts < MIN(?1, ?2)) OR (period = 'week' AND starts < MIN(?1, ?3))`,
+		before, PeriodStart("month", now), PeriodStart("week", now)); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -639,6 +655,248 @@ func (s *Store) AddThrowdown(ctx context.Context, instanceID string, at int64, t
 		}
 	}
 	return tx.Commit()
+}
+
+// Playtime is a player's seconds on a server, or on all of them for "", a
+// visit going on now counted up to now (unix seconds).
+func (s *Store) Playtime(ctx context.Context, steamID, server string, now int64) (int64, error) {
+	q := "SELECT COALESCE(SUM(MAX(0, COALESCE(left_at, ?) - joined_at)), 0) FROM player_sessions WHERE steam_id = ?"
+	args := []any{now, steamID}
+	if server != "" {
+		q += " AND instance_id = ?"
+		args = append(args, server)
+	}
+	var n int64
+	err := s.Read.QueryRowContext(ctx, q, args...).Scan(&n)
+	return n, err
+}
+
+// Visit is one of a player's visits to a server; LeftAt is nil while it goes
+// on.
+type Visit struct {
+	Server   string
+	JoinedAt int64
+	LeftAt   *int64
+	Reason   string
+}
+
+// Visits is up to limit of a player's latest visits, on any server, newest
+// first.
+func (s *Store) Visits(ctx context.Context, steamID string, limit int) ([]Visit, error) {
+	return queryAll(ctx, s.Read, func(v *Visit) []any { return []any{&v.Server, &v.JoinedAt, &v.LeftAt, &v.Reason} },
+		"SELECT instance_id, joined_at, left_at, reason FROM player_sessions WHERE steam_id = ? ORDER BY joined_at DESC LIMIT ?", steamID, limit)
+}
+
+// ---- plugin stores ----
+
+// PluginStore is all a plugin keeps in its store, each value as package
+// luavm encodes it.
+func (s *Store) PluginStore(ctx context.Context, plugin string) (map[string][]byte, error) {
+	type pair struct {
+		k string
+		v []byte
+	}
+	list, err := queryAll(ctx, s.DB, func(p *pair) []any { return []any{&p.k, &p.v} }, "SELECT key, value FROM plugin_store WHERE plugin = ?", plugin)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]byte, len(list))
+	for _, p := range list {
+		out[p.k] = p.v
+	}
+	return out, nil
+}
+
+// SavePluginStore writes the keys of a plugin's store that changed, a nil
+// value deleting its key.
+func (s *Store) SavePluginStore(ctx context.Context, plugin string, changed map[string][]byte) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for k, v := range changed {
+		if v == nil {
+			_, err = tx.ExecContext(ctx, "DELETE FROM plugin_store WHERE plugin = ? AND key = ?", plugin, k)
+		} else {
+			_, err = tx.ExecContext(ctx, "INSERT INTO plugin_store(plugin, key, value) VALUES(?, ?, ?) ON CONFLICT DO UPDATE SET value = excluded.value", plugin, k, v)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ---- boards ----
+
+// How a board keeps a player's score: adding up what they're given, or the
+// highest or the lowest of it.
+const (
+	KeepSum     = "sum"
+	KeepBest    = "best"
+	KeepFastest = "fastest"
+)
+
+// PlaytimeBoard is the board every player is on: their time on the servers,
+// from their visits, in seconds.
+const PlaytimeBoard = "playtime"
+
+// Periods are what a board ranks over: all time, the month and the week.
+var Periods = []string{"all", "month", "week"}
+
+// PeriodStart is when the period holding t began, in unix seconds: 0 for all
+// time, else the 1st of its month or the Monday of its week, UTC.
+func PeriodStart(period string, t time.Time) int64 {
+	t = t.UTC()
+	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	switch period {
+	case "month":
+		return day.AddDate(0, 0, 1-t.Day()).Unix()
+	case "week":
+		return day.AddDate(0, 0, -(int(t.Weekday())+6)%7).Unix()
+	}
+	return 0
+}
+
+// Board is a board a plugin defined.
+type Board struct {
+	ID     string
+	Plugin string
+	Title  string
+	Unit   string
+	Keep   string
+	Public bool
+}
+
+// Boards is every board plugins defined.
+func (s *Store) Boards(ctx context.Context) ([]Board, error) {
+	return queryAll(ctx, s.DB, func(b *Board) []any { return []any{&b.ID, &b.Plugin, &b.Title, &b.Unit, &b.Keep, &b.Public} },
+		"SELECT id, plugin, title, unit, keep, public FROM boards ORDER BY id")
+}
+
+// SaveBoards keeps boards as defined, new or changed.
+func (s *Store) SaveBoards(ctx context.Context, list []Board) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, b := range list {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO boards(id, plugin, title, unit, keep, public) VALUES(?, ?, ?, ?, ?, ?)
+			ON CONFLICT(id) DO UPDATE SET plugin = excluded.plugin, title = excluded.title, unit = excluded.unit, keep = excluded.keep, public = excluded.public`,
+			b.ID, b.Plugin, b.Title, b.Unit, b.Keep, b.Public); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Score is what a player was given on a board, on a server, at a time (unix
+// seconds).
+type Score struct {
+	Board   string
+	Keep    string // the board's
+	Server  string
+	SteamID string
+	Value   float64
+	At      int64
+}
+
+// AddScores adds scores to their boards: each to the player's rows on its
+// server for all time, and for the month and the week it falls in.
+func (s *Store) AddScores(ctx context.Context, list []Score) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO board_scores(board, period, starts, instance_id, steam_id, value, at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+		ON CONFLICT DO UPDATE SET
+			value = CASE ?8 WHEN 'sum' THEN value + excluded.value WHEN 'best' THEN MAX(value, excluded.value) ELSE MIN(value, excluded.value) END,
+			at = CASE WHEN ?8 = 'sum' OR (?8 = 'best' AND excluded.value > value) OR (?8 = 'fastest' AND excluded.value < value) THEN excluded.at ELSE at END`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, sc := range list {
+		for _, p := range Periods {
+			if _, err := stmt.ExecContext(ctx, sc.Board, p, PeriodStart(p, time.Unix(sc.At, 0)), sc.Server, sc.SteamID, sc.Value, sc.At, sc.Keep); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+// BoardQuery picks a board's scores over the period holding Now: on one
+// server, or with none on all of them together, a sum adding the servers' up,
+// a best taking the highest and a fastest the lowest.
+type BoardQuery struct {
+	Board  Board
+	Server string
+	Period string
+	Now    time.Time
+}
+
+// Ranked is a player's place on a board.
+type Ranked struct {
+	Rank    int
+	SteamID string
+	Name    string // the latest they had on any server; "" when none is known
+	Value   any    // int64, or float64 for a fraction
+}
+
+// Ranking is everyone on a board, best first. Equal scores share a rank,
+// whoever got there first listed first. It reads on Read, so however long a
+// big board takes, it holds up no write.
+func (s *Store) Ranking(ctx context.Context, q BoardQuery) ([]Ranked, error) {
+	start := PeriodStart(q.Period, q.Now)
+	var from string
+	var args []any
+	if q.Board.ID == PlaytimeBoard { // each visit's part in the period
+		now := q.Now.Unix()
+		from = `SELECT steam_id, SUM(MAX(0, COALESCE(left_at, ?) - MAX(joined_at, ?))) AS v, MAX(COALESCE(left_at, ?)) AS at
+			FROM player_sessions WHERE (left_at IS NULL OR left_at > ?)`
+		args = []any{now, start, now, start}
+	} else {
+		// A lone MAX or MIN takes at from the row it picked.
+		agg := map[string]string{KeepSum: "SUM(value) AS v, MAX(at) AS at", KeepBest: "MAX(value) AS v, at", KeepFastest: "MIN(value) AS v, at"}[q.Board.Keep]
+		from = "SELECT steam_id, " + agg + " FROM board_scores WHERE board = ? AND period = ? AND starts = ?"
+		args = []any{q.Board.ID, q.Period, start}
+	}
+	if q.Server != "" {
+		from += " AND instance_id = ?"
+		args = append(args, q.Server)
+	}
+	from += " GROUP BY steam_id"
+	if q.Board.ID == PlaytimeBoard {
+		from += " HAVING v > 0"
+	}
+	order := "s.v DESC"
+	if q.Board.Keep == KeepFastest {
+		order = "s.v"
+	}
+	list, err := queryAll(ctx, s.Read, func(r *Ranked) []any { return []any{&r.SteamID, &r.Name, &r.Value} },
+		`SELECT s.steam_id, COALESCE((SELECT h.name FROM player_history h WHERE h.steam_id = s.steam_id ORDER BY h.last_seen DESC LIMIT 1), ''), s.v
+		FROM (`+from+`) s ORDER BY `+order+`, s.at, s.steam_id`, args...)
+	for i := range list {
+		if list[i].Rank = i + 1; i > 0 && number(list[i].Value) == number(list[i-1].Value) {
+			list[i].Rank = list[i-1].Rank
+		}
+	}
+	return list, err
+}
+
+// number is a value SQLite gave as an integer or a real, to compare.
+func number(v any) float64 {
+	switch v := v.(type) {
+	case int64:
+		return float64(v)
+	case float64:
+		return v
+	}
+	return 0
 }
 
 // ---- audit log ----

@@ -85,7 +85,7 @@ func (r *runner) serverCall(name string, args []any) ([]any, error) {
 		}
 		return nil
 	}
-	in, err := r.server(name, arg(0))
+	in, err := r.server(name, 1, arg(0))
 	if err != nil {
 		return nil, err
 	}
@@ -229,21 +229,22 @@ func (r *runner) need(call, perm, server string) error {
 	return fmt.Errorf("%s needs %s (%s), which this plugin wasn't granted: %s", call, perm, auth.PermLabel(perm), how)
 }
 
-// server is the server a call names first, if the plugin runs on it.
-func (r *runner) server(call string, v any) (*instance.Instance, error) {
+// server is the server a call names as its argument n, if the plugin runs
+// on it.
+func (r *runner) server(call string, n int, v any) (*instance.Instance, error) {
 	id, ok := v.(string)
 	if !ok {
-		return nil, badArg(1, call, "server ID", v)
+		return nil, badArg(n, call, "server ID", v)
 	}
 	if !r.onServer(id) {
-		return nil, fmt.Errorf("bad argument #1 to '%s' (this plugin doesn't run on %q)", call, id)
+		return nil, fmt.Errorf("bad argument #%d to '%s' (this plugin doesn't run on %q)", n, call, id)
 	}
 	if r.m.Servers != nil {
 		if in, ok := r.m.Servers.Get(id); ok {
 			return in, nil
 		}
 	}
-	return nil, fmt.Errorf("bad argument #1 to '%s' (no server %q)", call, id)
+	return nil, fmt.Errorf("bad argument #%d to '%s' (no server %q)", n, call, id)
 }
 
 // infos is server.info for each of the plugin's servers.

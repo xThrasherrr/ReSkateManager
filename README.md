@@ -105,7 +105,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Plugins
 
-- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. Owners add them under **Manager** as a zip, or copy them into `plugins/`, and turn each one on there, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
+- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. They keep values of their own, read players' playtime, and rank players on leaderboards across your servers or on one. Owners add them under **Manager** as a zip, or copy them into `plugins/`, and turn each one on there, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
 
 ## Getting started
 
@@ -281,6 +281,20 @@ What a plugin can call:
 | `server.teleport(id, steamIds, to)` | Teleports a player or a list of up to 64 to a player (a SteamID64) or a place, `{x =, y =, z =}` with `y` up. Several stand in a ring round it |
 | `server.role(id, steamId, role)` | Gives a player one of the server's roles, or `"none"` |
 | `server.command(id, line)` | Runs a console line |
+| `store.get(key)`, `store.set(key, value)` | Reads or keeps one of the plugin's own values, which outlive restarts: `nil`, a boolean, a number, a string, or a table of those. Setting `nil` deletes it |
+| `store.delete(key)` | Deletes a value; true if it was there |
+| `store.keys([prefix])` | The plugin's keys, sorted, or those that start with `prefix` |
+| `playtime.total(steamId [, server])` | A player's seconds on your servers, or on one, a visit going on now included |
+| `playtime.sessions(steamId [, limit])` | Their latest visits, newest first (10, or up to 100): `server`, `joined_at`, and `left_at` and `reason` once it's over |
+| `stats.define(board, {title, unit, keep, public})` | Makes a board of the plugin's. `keep` is `"sum"` (the default: scores add up), `"best"` (the highest counts) or `"fastest"` (the lowest) |
+| `stats.add(board, server, steamId, n)` | Gives a player `n` on one of the plugin's boards, on the server it happened on |
+| `stats.top(board [, {server, period, limit}])` | A board's first players (10, or up to 100), each `{rank, id, name, value}` |
+| `stats.rank(board, steamId [, {server, period}])` | A player's rank and score on a board, or `nil` when they aren't on it |
+| `stats.around(board, steamId [, {server, period, limit}])` | The players about a player's place (5, or up to 100), theirs in the middle where there's room |
+
+A board covers all your servers: a sum adds a player's scores up from every server, a best takes their highest and a fastest their lowest. `{server = id}` reads one server's instead, and `{period = "month"}` or `{period = "week"}` this calendar month or the week from Monday (UTC) instead of all time. Players with the same score share a rank, whoever got there first listed first. Every plugin can read `playtime`, a board of everyone's time on your servers, from the panel's own record of visits. A board belongs to the plugin that defined it first: only that one adds to it, its `keep` can't change, and every plugin reads it. `public` marks a board you'd let out of the panel, for when there's a way out.
+
+Boards are read from a snapshot, worked out again once something is added (a read waits up to 50 ms for it, then takes the one before) or once it's 30 seconds old. A read that can't be answered returns `nil` and why: `local rows, err = stats.top("wins")`. What plugins keep is written within a second, so a crash loses that second at most. Removing a plugin keeps its store and its boards, so adding it again brings them back.
 
 Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` is a player's SteamID64:
 
@@ -315,6 +329,7 @@ The limits it runs under:
 - A plugin may use 64 MB. Past that, Lua raises "not enough memory" in it.
 - Each plugin has its own queue of 256 events. A plugin too busy to keep up drops events, which its card counts, and never slows a server or another plugin.
 - A plugin sends its servers 4 commands a second, after 8 at once, with up to 64 waiting; past that a call returns `false`, and its card counts them. Chat is cut at the server's 200 bytes, on one line.
+- A plugin's store holds 1 MB: 64 KB a value and 256 bytes a key. Up to 10,000 of its scores wait to be written at once; past that `stats.add` returns `false`.
 - Turning on a plugin runs its code inside the manager, as installing a mod runs it inside the game. Only owners can, and only turn on plugins you trust.
 
 ## Troubleshooting

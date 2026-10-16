@@ -31,6 +31,16 @@ function log(...) call("log", line(...)) end
 function warn(...) call("warn", line(...)) end
 print = log
 
+-- api(prefix, names) is a table whose functions each call prefix.name.
+local function api(prefix, names)
+  local t = {}
+  for _, name in ipairs(names) do
+    local what = prefix .. "." .. name
+    t[name] = function(...) return call(what, ...) end
+  end
+  return t
+end
+
 -- server.* reads and acts on the plugin's servers, each call naming one by
 -- its ID first: an event's e.server is the server it happened on.
 -- server.list(), server.info(id) and server.players(id) read. The rest are
@@ -42,11 +52,30 @@ print = log
 -- server.role(id, steamId, role or "none") and server.command(id, line).
 -- Each returns true once queued, and calls a function given last with
 -- whether it went through and the server's reply.
-server = {}
-for _, name in ipairs({"list", "info", "players", "say", "msg", "kick", "ban", "unban", "teleport", "role", "command"}) do
-  local what = "server." .. name
-  server[name] = function(...) return call(what, ...) end
-end
+server = api("server", {"list", "info", "players", "say", "msg", "kick", "ban", "unban", "teleport", "role", "command"})
+
+-- store.* keeps the plugin's own values, through restarts: store.get(key),
+-- store.set(key, value) (nil deletes it), store.delete(key), true when it
+-- was there, and store.keys([prefix]), sorted. A value is nil, a boolean, a
+-- number, a string or a table of those; a store holds 1 MB.
+store = api("store", {"get", "set", "delete", "keys"})
+
+-- playtime.total(steamId [, server]) is a player's seconds on the servers,
+-- or on one, and playtime.sessions(steamId [, limit]) their latest visits,
+-- newest first, each {server, joined_at, and left_at and reason once over}.
+-- Both return nil and why when the database is busy.
+playtime = api("playtime", {"total", "sessions"})
+
+-- stats.* ranks players on boards. stats.define(board, {title =, unit =,
+-- keep = "sum", "best" or "fastest", public =}) makes one of the plugin's,
+-- and stats.add(board, server, steamId, n) gives a player n on it.
+-- stats.top(board [, {server =, period =, limit =}]), stats.rank(board,
+-- steamId [, {server =, period =}]) and stats.around(board, steamId [,
+-- {server =, period =, limit =}]) read any board, "playtime" too: all the
+-- servers unless one is named, over "all" time, the "month" or the "week"
+-- (UTC, from Monday). Rows are {rank, id, name, value}; rank returns rank
+-- and value. Each returns nil and why when the board can't be read.
+stats = api("stats", {"define", "add", "top", "rank", "around"})
 
 -- require(name) runs one of the plugin's own files once and returns what it
 -- returned: "lib.util" is lib/util.lua in the plugin's folder.

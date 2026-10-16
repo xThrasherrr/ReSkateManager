@@ -152,6 +152,10 @@ func (r *runner) loop() {
 	defer r.m.unlist(r)
 	defer r.reset()
 	go r.send()
+	if err := r.m.data.load(r.p.ID); err != nil {
+		r.fail(Failed, "Its store didn't load: "+err.Error())
+		return
+	}
 	if !r.boot() {
 		return
 	}
@@ -526,8 +530,11 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 		}
 		return []any{src, file}, nil
 	}
-	if strings.HasPrefix(name, "server.") {
+	switch name[:max(0, strings.IndexByte(name, '.'))] {
+	case "server":
 		return r.serverCall(name, args)
+	case "store", "playtime", "stats":
+		return r.dataCall(name, args)
 	}
 	return nil, fmt.Errorf("no function %s", name)
 }

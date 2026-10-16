@@ -66,6 +66,7 @@ func TestAnnouncementsMigrationGrantsAdministrator(t *testing.T) {
 	for _, q := range []string{
 		"CREATE TABLE roles (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, permissions TEXT NOT NULL DEFAULT '[]', builtin INTEGER NOT NULL DEFAULT 0)",
 		"CREATE TABLE instances (id TEXT PRIMARY KEY, name TEXT NOT NULL, dir TEXT NOT NULL UNIQUE, auto_start INTEGER NOT NULL DEFAULT 0, auto_restart INTEGER NOT NULL DEFAULT 1, auto_update INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)",
+		"CREATE TABLE player_history (instance_id TEXT NOT NULL, steam_id TEXT NOT NULL, name TEXT NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, sessions INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (instance_id, steam_id))",
 		`INSERT INTO roles(name, permissions, builtin) VALUES('Administrator', '["console.view"]', 1), ('Moderator', '["console.view"]', 1)`,
 		"PRAGMA user_version = 3",
 	} {

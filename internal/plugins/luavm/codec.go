@@ -258,6 +258,35 @@ func encode(b []byte, v any, depth int) ([]byte, error) {
 	return nil, fmt.Errorf("a Go %T has no Lua value", v)
 }
 
+// Marshal is a value to keep: nil, a boolean, number, string, or a table of
+// those. A function can't be kept, since it lives only in the Lua it came from.
+func Marshal(v any) ([]byte, error) {
+	var funcs func(v any) bool
+	funcs = func(v any) bool {
+		switch v := v.(type) {
+		case Ref:
+			return true
+		case *Table:
+			return slices.ContainsFunc(v.Keys, funcs) || slices.ContainsFunc(v.Vals, funcs)
+		}
+		return false
+	}
+	if funcs(v) {
+		return nil, errors.New("a function can't be kept")
+	}
+	return encode(nil, v, 0)
+}
+
+// Unmarshal is a value Marshal made.
+func Unmarshal(b []byte) (any, error) {
+	r := &reader{b: b}
+	v, err := r.value(0)
+	if err == nil && len(r.b) != 0 {
+		err = errors.New("value has bytes left over")
+	}
+	return v, err
+}
+
 // TypeName is what Lua calls a value's type, for messages.
 func TypeName(v any) string {
 	switch v.(type) {

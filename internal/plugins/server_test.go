@@ -180,7 +180,7 @@ end
 
 // The table covers every server.* call the prelude makes, and every grant.
 func TestCallPermissionsCoverEveryCall(t *testing.T) {
-	m := regexp.MustCompile(`for _, name in ipairs\(\{([^}]*)\}\) do\s+local what = "server\." \.\. name`).FindStringSubmatch(prelude)
+	m := regexp.MustCompile(`server = api\("server", \{([^}]*)\}\)`).FindStringSubmatch(prelude)
 	if m == nil {
 		t.Fatal("no server.* list in the prelude")
 	}
