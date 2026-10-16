@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
@@ -50,7 +51,7 @@ func TestDeleteInstancePurge(t *testing.T) {
 		}
 		reg.Add(d)
 	}
-	if err := st.SeenPlayer(ctx, "a", "76561198000000001", "skater"); err != nil {
+	if err := st.SeenPlayer(ctx, "a", "76561198000000001", "skater", time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer((&API{Store: st, Auth: svc, Reg: reg, Log: log, ServersDir: servers,
@@ -400,7 +401,7 @@ func TestDeleteInstanceForgetsIt(t *testing.T) {
 	if code, b := p.do("POST", "/api/instances", `{"name":"lobby"}`); code != 201 {
 		t.Fatalf("create: %d %s", code, b)
 	}
-	if err := st.SeenPlayer(ctx, "lobby", "76561198000000001", "skater"); err != nil {
+	if err := st.SeenPlayer(ctx, "lobby", "76561198000000001", "skater", time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	p.createUser("mod", fmt.Sprintf(`{"roleId":%d,"instance":"lobby"}`, p.roleID("Moderator")))

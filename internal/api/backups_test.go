@@ -432,7 +432,7 @@ func TestServerRoles(t *testing.T) {
 	writeFile(t, filepath.Join(filepath.Dir(cfg), serverconfig.RolesFile), `{"default_role": "player",
 		"roles": [{"name": "player"}, {"name": "vip", "tag": "VIP", "color": "#FFD24A", "rank": 10}],
 		"players": {"76561198000000003": "vip", "76561198000000004": "vip"}}`)
-	if err := a.Store.SeenPlayer(context.Background(), "a", "76561198000000003", "VipGal"); err != nil {
+	if err := a.Store.SeenPlayer(context.Background(), "a", "76561198000000003", "VipGal", time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	code, b := p.do("GET", "/api/instances/a/roles", "")

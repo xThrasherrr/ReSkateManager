@@ -254,11 +254,16 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 			}
 		}
 		in.OnJoin = func(p instance.Player) {
-			if err := db.SeenPlayer(context.Background(), id, p.ID, p.Name); err != nil {
+			if err := db.SeenPlayer(context.Background(), id, p.ID, p.Name, p.JoinedAt/1000); err != nil {
 				log.Warn("player history", "err", err)
 			}
 			if err := restarts.Tell(ctx, in, p); err != nil && ctx.Err() == nil {
 				log.Warn("restart notice", "instance", id, "err", err)
+			}
+		}
+		in.OnLeave = func(l instance.Leave) {
+			if err := db.LeftPlayer(context.Background(), id, l.ID, l.JoinedAt/1000, l.At/1000, l.Reason); err != nil {
+				log.Warn("player history", "err", err)
 			}
 		}
 		in.OnNetwork = func(run time.Time, n logparse.Network) {
@@ -267,6 +272,12 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 			}
 		}
 		in.LinkSharedMods = a.LinkSharedMods
+	}
+	// No server runs yet, so a visit still open is one the last run never closed.
+	if n, err := db.CloseOpenSessions(ctx, instance.LeftUnclosed); err != nil {
+		log.Warn("close visits left open", "err", err)
+	} else if n > 0 {
+		log.Info("closed visits the last run left open", "visits", n)
 	}
 	defs, err := db.Instances(ctx)
 	if err != nil {

@@ -286,9 +286,9 @@ func (s *Store) MoveInstance(ctx context.Context, id, dir string) error {
 }
 
 // DeleteInstance removes an instance and everything the panel keeps about it:
-// its admins, announcements, samples, player history and the roles granted
-// on it. All of it goes, so a server added later under the same ID starts
-// with none of it, and none of its players.
+// its admins, announcements, samples, player history and visits, and the
+// roles granted on it. All of it goes, so a server added later under the
+// same ID starts with none of it, and none of its players.
 func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -301,6 +301,7 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 		"DELETE FROM perf_samples WHERE instance_id = ?",
 		"DELETE FROM net_samples WHERE instance_id = ?",
 		"DELETE FROM player_history WHERE instance_id = ?",
+		"DELETE FROM player_sessions WHERE instance_id = ?",
 		"DELETE FROM user_roles WHERE instance_id = ?",
 		"DELETE FROM instances WHERE id = ?",
 	} {
@@ -411,14 +412,77 @@ func (s *Store) DeleteAnnouncement(ctx context.Context, id int64) error {
 
 // ---- player history ----
 
-// SeenPlayer records a player joining an instance, under the name they used.
-func (s *Store) SeenPlayer(ctx context.Context, instanceID, steamID, name string) error {
-	now := time.Now().Unix()
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO player_history(instance_id, steam_id, name, first_seen, last_seen, sessions)
+// SeenPlayer records a player joining an instance at joined (unix seconds),
+// under the name they used: one more visit, open until LeftPlayer closes it.
+func (s *Store) SeenPlayer(ctx context.Context, instanceID, steamID, name string, joined int64) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO player_history(instance_id, steam_id, name, first_seen, last_seen, sessions)
 		VALUES(?, ?, ?, ?, ?, 1)
-		ON CONFLICT(instance_id, steam_id) DO UPDATE SET name = excluded.name, last_seen = excluded.last_seen, sessions = sessions + 1`,
-		instanceID, steamID, name, now, now)
-	return err
+		ON CONFLICT(instance_id, steam_id) DO UPDATE SET name = excluded.name, last_seen = MAX(last_seen, excluded.last_seen), sessions = sessions + 1`,
+		instanceID, steamID, name, joined, joined); err != nil {
+		return err
+	}
+	// Ignored when the leave was written first: the two come in either order.
+	if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO player_sessions(instance_id, steam_id, joined_at) VALUES(?, ?, ?)",
+		instanceID, steamID, joined); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// leaveReasonMax caps what a visit keeps of why it ended, which is the
+// server's text.
+const leaveReasonMax = 256
+
+// LeftPlayer closes a player's visit to an instance, the one that began at
+// joined, at left (unix seconds) and with why it ended. Written before the
+// join, it makes the visit closed already.
+func (s *Store) LeftPlayer(ctx context.Context, instanceID, steamID string, joined, left int64, reason string) error {
+	left = max(left, joined)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO player_sessions(instance_id, steam_id, joined_at, left_at, reason) VALUES(?, ?, ?, ?, ?)
+		ON CONFLICT(instance_id, steam_id, joined_at) DO UPDATE SET left_at = excluded.left_at, reason = excluded.reason`,
+		instanceID, steamID, joined, left, clip(reason, leaveReasonMax)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE player_history SET last_seen = MAX(last_seen, ?) WHERE instance_id = ? AND steam_id = ?",
+		left, instanceID, steamID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CloseOpenSessions closes the visits still open, which only a manager that
+// ended without closing them leaves: each as if the player left at the last
+// sample taken of their server since they joined (one every 30 s), or as
+// they joined when there is none. It runs before any server starts, and
+// reports how many it closed.
+func (s *Store) CloseOpenSessions(ctx context.Context, reason string) (int, error) {
+	type open struct {
+		instance, steam string
+		joined, last    int64
+	}
+	list, err := queryAll(ctx, s.DB, func(o *open) []any { return []any{&o.instance, &o.steam, &o.joined, &o.last} },
+		`SELECT s.instance_id, s.steam_id, s.joined_at,
+			COALESCE((SELECT MAX(p.at) FROM perf_samples p WHERE p.instance_id = s.instance_id AND p.at >= s.joined_at), s.joined_at)
+		FROM player_sessions s WHERE s.left_at IS NULL`)
+	if err != nil {
+		return 0, err
+	}
+	for _, o := range list {
+		if err := s.LeftPlayer(ctx, o.instance, o.steam, o.joined, o.last, reason); err != nil {
+			return 0, err
+		}
+	}
+	return len(list), nil
 }
 
 // PlayerRecord is one player in an instance's history.
@@ -428,32 +492,68 @@ type PlayerRecord struct {
 	FirstSeen int64  `json:"firstSeen"`
 	LastSeen  int64  `json:"lastSeen"`
 	Sessions  int    `json:"sessions"`
+	// Playtime is seconds on the server, a visit going on now included; nil
+	// for a player not seen there since the manager began keeping visits.
+	Playtime *int64 `json:"playtime"`
+	// PlaytimeAll is the same on all the servers PlayerHistory was given;
+	// nil when it was given none.
+	PlaytimeAll *int64 `json:"playtimeAll,omitempty"`
 }
 
-// PrunePlayers forgets the players last seen before `before`, on every
-// server, and reports how many records went.
+// PrunePlayers forgets the players last seen before `before` and their
+// visits, on every server, and reports how many players went.
 func (s *Store) PrunePlayers(ctx context.Context, before int64) (int64, error) {
-	res, err := s.DB.ExecContext(ctx, "DELETE FROM player_history WHERE last_seen < ?", before)
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM player_sessions WHERE left_at < ?1 AND NOT EXISTS (SELECT 1 FROM player_history h
+		WHERE h.instance_id = player_sessions.instance_id AND h.steam_id = player_sessions.steam_id AND h.last_seen >= ?1)`, before); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, "DELETE FROM player_history WHERE last_seen < ?", before)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
 }
 
+// playtimeOf adds up a player's visits as of a time, on the servers a
+// condition on s picks.
+const playtimeOf = "(SELECT SUM(MAX(0, COALESCE(s.left_at, ?) - s.joined_at)) FROM player_sessions s WHERE s.steam_id = h.steam_id AND "
+
 // PlayerHistory lists up to limit players an instance has seen, last seen
-// first. Given a search, only those whose SteamID is it or whose name has it.
-func (s *Store) PlayerHistory(ctx context.Context, instanceID, search string, limit int) ([]PlayerRecord, error) {
-	q := "SELECT steam_id, name, first_seen, last_seen, sessions FROM player_history WHERE instance_id = ?"
-	args := []any{instanceID}
+// first, with their playtime there. Given a search, only those whose SteamID
+// is it or whose name has it. Given network, the servers whose playtime adds
+// up to each player's PlaytimeAll.
+func (s *Store) PlayerHistory(ctx context.Context, instanceID, search string, limit int, network ...string) ([]PlayerRecord, error) {
+	now := time.Now().Unix()
+	q := "SELECT h.steam_id, h.name, h.first_seen, h.last_seen, h.sessions, " + playtimeOf + "s.instance_id = h.instance_id), "
+	args := []any{now}
+	if len(network) > 0 {
+		q += playtimeOf + "s.instance_id IN (?" + strings.Repeat(", ?", len(network)-1) + "))"
+		args = append(args, now)
+		for _, id := range network {
+			args = append(args, id)
+		}
+	} else {
+		q += "NULL"
+	}
+	q += " FROM player_history h WHERE h.instance_id = ?"
+	args = append(args, instanceID)
 	if search != "" {
-		q += " AND (steam_id = ? OR name LIKE ? ESCAPE '\\')"
+		q += " AND (h.steam_id = ? OR h.name LIKE ? ESCAPE '\\')"
 		esc := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(search)
 		args = append(args, search, "%"+esc+"%")
 	}
-	q += " ORDER BY last_seen DESC LIMIT ?"
+	q += " ORDER BY h.last_seen DESC LIMIT ?"
 	args = append(args, limit)
 	return queryAll(ctx, s.DB, func(p *PlayerRecord) []any {
-		return []any{&p.SteamID, &p.Name, &p.FirstSeen, &p.LastSeen, &p.Sessions}
+		return []any{&p.SteamID, &p.Name, &p.FirstSeen, &p.LastSeen, &p.Sessions, &p.Playtime, &p.PlaytimeAll}
 	}, q, args...)
 }
 

@@ -42,6 +42,16 @@ export function duration(fromMs?: number, now = Date.now()): string {
 	return `${m}m ${s % 60}s`;
 }
 
+/** Time played, in hours however long: "45m", "3h 12m", "212h". */
+export function playtime(seconds?: number | null): string {
+	if (seconds == null) return '—';
+	const m = Math.floor(seconds / 60);
+	if (m < 1) return seconds > 0 ? '<1m' : '0m';
+	if (m < 60) return `${m}m`;
+	const h = Math.floor(m / 60);
+	return h < 100 ? `${h}h ${m % 60}m` : `${h}h`;
+}
+
 export function dateTime(unixSeconds?: number): string {
 	if (!unixSeconds) return '—';
 	return new Date(unixSeconds * 1000).toLocaleString();

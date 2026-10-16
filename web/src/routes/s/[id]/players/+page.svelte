@@ -7,7 +7,7 @@
 	import { attempt } from '#lib/toast.svelte.js';
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
-	import { ago, dateTime } from '#lib/format.js';
+	import { ago, dateTime, playtime } from '#lib/format.js';
 	import { onLine, roleLine } from '#lib/lines.svelte.js';
 	import { Paged } from '#lib/paged.svelte.js';
 	import Icon from '#lib/components/Icon.svelte';
@@ -25,6 +25,10 @@
 		firstSeen: number;
 		lastSeen: number;
 		sessions: number;
+		/** Seconds on this server; null for a player not seen since it was first kept. */
+		playtime: number | null;
+		/** The same on every server whose players the user sees, when that's more than this one. */
+		playtimeAll?: number | null;
 	}
 
 	const ctx = useLive();
@@ -37,6 +41,7 @@
 	let history = $state.raw<Seen[] | null>(null);
 	let historyError = $state('');
 	const past = new Paged('history', () => history ?? []);
+	const playtimeNote = 'Time on this server, counted since this manager began keeping it';
 	const begin = newest();
 	async function loadHistory() {
 		const current = begin();
@@ -212,7 +217,7 @@
 						<tr>
 							<th>Player</th>{#if withRoles}<th>Role</th>{/if}<th class="hidden md:table-cell">SteamID64</th><th class="hidden lg:table-cell">First seen</th><th class="hidden sm:table-cell"
 								>Last seen</th
-							><th class="hidden sm:table-cell">Visits</th><th></th>
+							><th class="hidden sm:table-cell">Visits</th><th class="hidden sm:table-cell" title={playtimeNote}>Playtime</th><th></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -221,12 +226,19 @@
 								<td class="font-medium">
 									{h.name}
 									<SteamId id={h.id} small class="font-normal md:hidden" />
+									{#if h.playtime != null}<span class="block text-xs font-normal text-muted sm:hidden">{playtime(h.playtime)} played</span>{/if}
 								</td>
 								{#if withRoles && roles}<td><RolePick id={h.id} name={h.name} {roles} onchange={loadRoles} /></td>{/if}
 								<td class="hidden md:table-cell"><SteamId id={h.id} /></td>
 								<td class="hidden text-muted lg:table-cell">{dateTime(h.firstSeen)}</td>
 								<td class="hidden text-muted sm:table-cell">{dateTime(h.lastSeen)}</td>
 								<td class="hidden tabular-nums sm:table-cell">{h.sessions}</td>
+								<td class="hidden whitespace-nowrap tabular-nums sm:table-cell" title={h.playtime == null ? playtimeNote : undefined}>
+									{playtime(h.playtime)}
+									{#if h.playtimeAll != null && playtime(h.playtimeAll) !== playtime(h.playtime)}
+										<span class="block text-xs text-faint" title="On every server whose players you can see">{playtime(h.playtimeAll)} on all servers</span>
+									{/if}
+								</td>
 								<td class="text-right">
 									{#if ctx.can('players.ban')}
 										<button class="btn btn-sm btn-danger" onclick={() => askBan(h.id, h.name)} aria-label="Ban {h.name}"><Icon name="ban" size={14} /> <span class="hidden sm:inline">Ban</span></button>

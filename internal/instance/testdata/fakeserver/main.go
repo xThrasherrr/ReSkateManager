@@ -110,6 +110,11 @@ func main() {
 			delete(players, arg)
 			log(name + " left (Disconnected)")
 			log("ok")
+		case "vanish": // test hook: a player gone without a leave line
+			delete(players, arg)
+			log("ok")
+		case "crash": // test hook: the server going down on its own
+			os.Exit(3)
 		case "role": // "role <id> <role>|none", saved to data/roles.json like the real server
 			id, role, _ := strings.Cut(arg, " ")
 			label := id

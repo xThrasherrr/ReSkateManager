@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/announce"
+	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/perf"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
@@ -445,8 +446,20 @@ func (a *API) players(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, inst(r).Players())
 }
 
+// history lists the server's players, each with their playtime on it and,
+// when the caller sees players on other servers too, on all of those.
 func (a *API) history(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.Store.PlayerHistory(r.Context(), inst(r).ID(), strings.TrimSpace(r.URL.Query().Get("q")), 200)
+	var network []string
+	c := from(r)
+	for _, id := range a.Reg.IDs() {
+		if c.perms.Can(auth.PlayersView, id) {
+			network = append(network, id)
+		}
+	}
+	if len(network) < 2 {
+		network = nil
+	}
+	rows, err := a.Store.PlayerHistory(r.Context(), inst(r).ID(), strings.TrimSpace(r.URL.Query().Get("q")), 200, network...)
 	if err != nil {
 		a.internalErr(w, r, err)
 		return

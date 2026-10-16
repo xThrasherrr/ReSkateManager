@@ -77,6 +77,23 @@ type Player struct {
 	JoinedAt int64  `json:"joinedAt,omitempty"`
 }
 
+// Leave is a player going from the roster: they left, or it emptied without
+// saying so, as when the server stops.
+type Leave struct {
+	Player
+	At     int64  // unix ms
+	Reason string // the server's, as "Disconnected.", or one of the Left reasons
+}
+
+// Why the roster let a player go when the server never said they left.
+const (
+	LeftStopped  = "Server stopped."
+	LeftExited   = "Server exited." // on its own: crashed, or quit from the game
+	LeftRestart  = "Server restarted."
+	LeftNotOn    = "Not on the server." // missing from its players list, or joined again
+	LeftUnclosed = "Manager stopped."   // still open when the manager next started
+)
+
 // Info is what the server announces at startup.
 type Info struct {
 	ServerName string `json:"serverName,omitempty"`
@@ -180,8 +197,16 @@ type Instance struct {
 	reconciling bool
 	// stops counts Stop calls, so a restart can tell another stop came.
 	stops uint64
+	// unmatched are leave lines that named more than one player, kept until
+	// the roster check finds out which of them it was.
+	unmatched []Leave
+	// hooks are the OnJoin and OnLeave calls still running.
+	hooks sync.WaitGroup
 	// OnJoin runs (in its own goroutine) for every player join; set before Start.
 	OnJoin func(Player)
+	// OnLeave runs (in its own goroutine) for every player OnJoin had, as they
+	// go from the roster; set before Start.
+	OnLeave func(Leave)
 	// OnReady runs (in its own goroutine) each time the server finishes starting.
 	OnReady func()
 	// OnNetwork runs (in its own goroutine) for each network summary the
@@ -338,7 +363,7 @@ func (in *Instance) startLocked() error {
 		return errors.New(in.lastError)
 	}
 	in.asm = logparse.NewAssembler()
-	in.players = map[string]*Player{}
+	in.emptyRosterLocked(LeftRestart)
 	in.info = Info{}
 	in.exitCode, in.lastError, in.lastLine = nil, "", ""
 	in.readyAt = time.Time{}
@@ -476,9 +501,13 @@ func (in *Instance) watch(p *supervisor.Process, exited chan struct{}) {
 	code := p.ExitCode()
 	in.exitCode = &code
 	in.proc = nil
-	in.players = map[string]*Player{}
 	in.failWaitersLocked()
 	requested := in.state == Stopping || in.state == Updating
+	if requested {
+		in.emptyRosterLocked(LeftStopped)
+	} else {
+		in.emptyRosterLocked(LeftExited)
+	}
 	wasReady := !in.readyAt.IsZero()
 	uptime := time.Since(in.readyAt)
 	if p.Lost() {
@@ -700,7 +729,7 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		in.info.ServerName = e.Name
 		in.info.Map = e.Fields["map"]
 		in.info.MaxPlayers, _ = strconv.Atoi(e.Fields["max"])
-		in.players = map[string]*Player{}
+		in.emptyRosterLocked(LeftRestart)
 		in.publishStateLocked()
 		if in.OnReady != nil {
 			go in.OnReady()
@@ -716,28 +745,36 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		in.publishStateLocked()
 	case logparse.KindJoin:
 		p := in.newPlayerLocked(e.ID, e.Name, e.Fields["role"])
+		if old := in.players[e.ID]; old != nil { // a leave the console didn't show
+			in.leftLocked(Leave{Player: *old, At: p.JoinedAt, Reason: LeftNotOn})
+		}
 		in.players[e.ID] = p
 		in.publishPlayersLocked()
-		if in.OnJoin != nil {
-			go in.OnJoin(*p)
-		}
+		in.joinedLocked(*p)
 		if n, _ := strconv.Atoi(e.Fields["players"]); n != len(in.players) {
 			in.reconcileLocked()
 		}
 	case logparse.KindLeave:
-		matches := 0
-		for id, p := range in.players {
+		// The line names the player, not their SteamID: with two of that
+		// name on, the roster check finds out which one went.
+		var gone []*Player
+		for _, p := range in.players {
 			if p.Name == e.Name {
-				if matches == 0 {
-					delete(in.players, id)
-				}
-				matches++
+				gone = append(gone, p)
 			}
 		}
-		in.publishPlayersLocked()
-		if matches != 1 {
-			in.reconcileLocked()
+		l := Leave{Player: Player{Name: e.Name}, At: time.Now().UnixMilli(), Reason: e.Fields["reason"]}
+		if len(gone) == 1 {
+			delete(in.players, gone[0].ID)
+			in.publishPlayersLocked()
+			l.Player = *gone[0]
+			in.leftLocked(l)
+			break
 		}
+		if len(gone) > 1 {
+			in.unmatched = append(in.unmatched, l)
+		}
+		in.reconcileLocked()
 	}
 	if !hidden {
 		in.appendLocked(e)
@@ -1011,6 +1048,30 @@ func (in *Instance) newPlayerLocked(id, name, role string) *Player {
 // setRole gives the player a role as the roster keeps it (givenRoleLocked).
 func (p *Player) setRole(role string) { p.Role, p.Admin = role, role == serverconfig.AdminRole }
 
+// joinedLocked runs OnJoin for a player new on the roster.
+func (in *Instance) joinedLocked(p Player) {
+	if in.OnJoin != nil {
+		in.hooks.Go(func() { in.OnJoin(p) })
+	}
+}
+
+// leftLocked runs OnLeave for a player gone from the roster.
+func (in *Instance) leftLocked(l Leave) {
+	if in.OnLeave != nil {
+		in.hooks.Go(func() { in.OnLeave(l) })
+	}
+}
+
+// emptyRosterLocked takes everyone off the roster, each leaving for why.
+func (in *Instance) emptyRosterLocked(why string) {
+	now := time.Now().UnixMilli()
+	for _, p := range in.players {
+		in.leftLocked(Leave{Player: *p, At: now, Reason: why})
+	}
+	in.players = map[string]*Player{}
+	in.unmatched = nil
+}
+
 // Reconcile replaces the roster with the server's own `players` list. The
 // reply is hidden from the console but still lands in ReSkateServer.log, so
 // it runs only when the join/leave lines disagree with the server's count.
@@ -1033,14 +1094,28 @@ func (in *Instance) Reconcile() {
 		p := in.newPlayerLocked(r.ID, r.Name, r.Role)
 		if old, ok := in.players[r.ID]; ok {
 			p.JoinedAt = old.JoinedAt
-		} else if in.OnJoin != nil {
+		} else {
 			// A join the console showed some other way (its line taken for
 			// another kind, say): still a player who was here.
-			go in.OnJoin(*p)
+			in.joinedLocked(*p)
 		}
 		next[r.ID] = p
 	}
-	in.players = next
+	// Gone without a leave line of their own: one that named two players
+	// was one of these.
+	now := time.Now().UnixMilli()
+	for id, p := range in.players {
+		if next[id] != nil {
+			continue
+		}
+		l := Leave{Player: *p, At: now, Reason: LeftNotOn}
+		if i := slices.IndexFunc(in.unmatched, func(u Leave) bool { return u.Name == p.Name }); i >= 0 {
+			l.At, l.Reason = in.unmatched[i].At, in.unmatched[i].Reason
+			in.unmatched = slices.Delete(in.unmatched, i, i+1)
+		}
+		in.leftLocked(l)
+	}
+	in.players, in.unmatched = next, nil
 	in.publishPlayersLocked()
 }
 

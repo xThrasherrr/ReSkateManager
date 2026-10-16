@@ -23,9 +23,11 @@ func TestSweepKeepsWhatRetentionSays(t *testing.T) {
 	for _, at := range []int64{day(100), day(10)} {
 		s.Audit(ctx, store.AuditEntry{At: at, Action: "x"})
 	}
-	s.SeenPlayer(ctx, "a", "76561198000000001", "old")
-	s.SeenPlayer(ctx, "a", "76561198000000002", "recent")
-	s.DB.Exec("UPDATE player_history SET last_seen = ? WHERE name = 'old'", day(200))
+	s.SeenPlayer(ctx, "a", "76561198000000001", "old", day(201))
+	s.LeftPlayer(ctx, "a", "76561198000000001", day(201), day(200), "Disconnected.")
+	s.SeenPlayer(ctx, "a", "76561198000000002", "recent", day(300))
+	s.LeftPlayer(ctx, "a", "76561198000000002", day(300), day(300)+60, "Disconnected.")
+	s.SeenPlayer(ctx, "a", "76561198000000002", "recent", day(1))
 
 	if r, err := LoadRetention(ctx, s); err != nil || r != DefaultRetention {
 		t.Fatalf("default retention: %+v, %v", r, err)
@@ -37,6 +39,16 @@ func TestSweepKeepsWhatRetentionSays(t *testing.T) {
 	}
 	if players, _ := s.PlayerHistory(ctx, "a", "", 10); len(players) != 1 || players[0].Name != "recent" {
 		t.Errorf("players after 180 days: %+v", players)
+	}
+	// A player kept keeps all their visits, however old; one forgotten takes theirs along.
+	var visits int
+	s.DB.QueryRow("SELECT COUNT(*) FROM player_sessions WHERE steam_id = '76561198000000002'").Scan(&visits)
+	if visits != 2 {
+		t.Errorf("the kept player has %d visits, want 2", visits)
+	}
+	s.DB.QueryRow("SELECT COUNT(*) FROM player_sessions WHERE steam_id = '76561198000000001'").Scan(&visits)
+	if visits != 0 {
+		t.Errorf("the forgotten player has %d visits left", visits)
 	}
 
 	// 0 keeps them for good; a bad value is refused.

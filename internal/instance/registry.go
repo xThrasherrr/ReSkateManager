@@ -87,7 +87,9 @@ func (r *Registry) List() []*Instance {
 	return out
 }
 
-// StopAll stops every running server in parallel, for manager shutdown.
+// StopAll stops every running server in parallel, for manager shutdown, and
+// waits for the OnJoin and OnLeave calls that sent, so what they write lands
+// before the manager closes its database.
 func (r *Registry) StopAll(timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -96,7 +98,13 @@ func (r *Registry) StopAll(timeout time.Duration) {
 		wg.Go(func() {
 			if err := in.Stop(ctx); err != nil {
 				in.Kill()
+				killed, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if in.Stop(killed) != nil {
+					return // its exit unhandled, its leaves unsent: the next start closes those visits
+				}
 			}
+			in.hooks.Wait()
 		})
 	}
 	wg.Wait()
