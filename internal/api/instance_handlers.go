@@ -25,6 +25,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/perf"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
+	"github.com/xThrasherrr/ReSkateManager/internal/supervisor"
 )
 
 type instanceView struct {
@@ -548,41 +549,14 @@ func readConfig(w http.ResponseWriter, in *instance.Instance) (*serverconfig.Fil
 	return f, true
 }
 
-// cleanText makes text someone typed fit on a console line, as the server's
-// clean_chat_text does with chat: line breaks and tabs become spaces, other
-// control characters and bytes that aren't UTF-8 go, and the ends are trimmed.
-func cleanText(s string) string {
-	s = strings.Map(func(r rune) rune {
-		switch {
-		case r == '\n' || r == '\r' || r == '\t':
-			return ' '
-		case r < 0x20 || r == 0x7f || r >= 0x80 && r <= 0x9f:
-			return -1
-		}
-		return r
-	}, strings.ToValidUTF8(s, ""))
-	return strings.TrimSpace(s)
-}
-
 // maxMessage is the longest chat message or announcement the panel sends, in
 // bytes.
 const maxMessage = 200
 
-// chatText is s as cleanText makes it, and whether it's 1 to maxMessage bytes.
+// chatText is s as supervisor.CleanText makes it, and whether it's 1 to maxMessage bytes.
 func chatText(s string) (string, bool) {
-	msg := cleanText(s)
+	msg := supervisor.CleanText(s)
 	return msg, msg != "" && len(msg) <= maxMessage
-}
-
-// cut shortens s to at most n bytes, on a character boundary.
-func cut(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n]
 }
 
 func (a *API) ban(w http.ResponseWriter, r *http.Request) {
@@ -597,7 +571,7 @@ func (a *API) ban(w http.ResponseWriter, r *http.Request) {
 	if !validSteamID(w, req.ID) {
 		return
 	}
-	name := strings.TrimSpace(cut(cleanText(req.Name), 64))
+	name := strings.TrimSpace(supervisor.CutText(supervisor.CleanText(req.Name), 64))
 	var reply string
 	var err error
 	if running(in) {
@@ -819,7 +793,7 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 	failed := 0
 	for _, cmd := range plan.Commands {
 		reply, err := in.Command(r.Context(), cmd, user)
-		res := cmdResult{Command: auditLine(cmd), Reply: reply}
+		res := cmdResult{Command: auth.AuditLine(cmd), Reply: reply}
 		if err != nil {
 			res.Error = err.Error()
 			failed++

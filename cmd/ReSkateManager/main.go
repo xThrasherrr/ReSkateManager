@@ -221,7 +221,7 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 	notifier := &alerts.Notifier{Store: db, Log: log, Version: version}
 	notifier.Start(ctx)
 	status := &discord.Poster{Store: db, Reg: reg, Log: log, Version: version, Release: builds.Version}
-	plugs := &plugins.Manager{Dir: filepath.Join(root, "plugins"), Store: db, Log: log, LogPath: filepath.Join(dataDir, "plugins.log")}
+	plugs := &plugins.Manager{Dir: filepath.Join(root, "plugins"), Store: db, Log: log, LogPath: filepath.Join(dataDir, "plugins.log"), Servers: reg}
 	a := &api.API{Cfg: cfg, Store: db, Auth: authSvc, Reg: reg, Updates: updates, Builds: builds, Admins: admins, Self: self, Log: log, Version: version,
 		ConfigPath: cfgPath, ServersDir: serversDir, SharedDir: sharedDir, DataDir: dataDir, CacheDir: cacheDir, Static: static, Backups: backups,
 		Thunderstore: thunderstoreClient(), Alerts: notifier, Discord: status, Plugins: plugs, Exe: exe, Restart: func() { restart.request(reg, stop) }, Base: ctx}

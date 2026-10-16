@@ -83,6 +83,7 @@ func main() {
 		log("1 admin(s). Type help for commands.")
 	}
 	players := map[string]string{}
+	banned := map[string]bool{}
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
 		line := in.Text()
@@ -189,6 +190,56 @@ func main() {
 			}
 			log("[announcement] " + arg)
 			log("Announced.")
+		case "kick": // "kick <id> [minutes|restart]"
+			id, _, _ := strings.Cut(arg, " ")
+			name, on := players[id]
+			if !on {
+				log("No single connected player matches \"" + arg + "\".")
+				break
+			}
+			delete(players, id)
+			log(name + " left (You were kicked from this server.)")
+			log(name + " was kicked.")
+		case "ban": // "ban <id> [name]"
+			id, _, _ := strings.Cut(arg, " ")
+			if banned[id] {
+				log(id + " is already banned.")
+				break
+			}
+			banned[id] = true
+			label := id
+			if name, on := players[id]; on {
+				label = name
+				delete(players, id)
+				log(name + " left (You were banned from this server.)")
+			}
+			log(label + " was banned.")
+		case "unban":
+			if !banned[arg] {
+				log("That SteamID64 is not banned.")
+				break
+			}
+			delete(banned, arg)
+			log(arg + " was unbanned.")
+		case "teleport": // "teleport <id|id,id,...> <player|x y z>"
+			movers, where, _ := strings.Cut(arg, " ")
+			sent := 0
+			for _, id := range strings.Split(movers, ",") {
+				if _, on := players[id]; on {
+					sent++
+				}
+			}
+			if sent == 0 {
+				log("Nobody to teleport.")
+				break
+			}
+			if name, on := players[where]; on {
+				where = name
+			} else {
+				where = "(" + strings.ReplaceAll(where, " ", ", ") + ")"
+			}
+			log(fmt.Sprintf("[teleport] %d player(s) to %s by console", sent, where))
+			log(fmt.Sprintf("%d player(s) teleported to %s.", sent, where))
 		case "players":
 			text := fmt.Sprintf("%d players", len(players))
 			for id, name := range players {

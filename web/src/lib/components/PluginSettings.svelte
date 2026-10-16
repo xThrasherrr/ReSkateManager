@@ -46,6 +46,15 @@
 		busy = null;
 	}
 
+	async function grant(p: Plugin, key: string, on: boolean) {
+		busy = p.id;
+		const granted = on ? [...p.granted, key] : p.granted.filter((k) => k !== key);
+		const label = info?.grants.find((g) => g.key === key)?.label.toLowerCase() ?? key;
+		await attempt(() => api.patch<Plugin>(`/manager/plugins/${encodeURIComponent(p.id)}`, { granted }), on ? `${p.name} may now ${label}` : `${p.name} may no longer ${label}`);
+		await load();
+		busy = null;
+	}
+
 	async function reload(p: Plugin) {
 		busy = p.id;
 		if (await attempt(() => api.post<Plugin>(`/manager/plugins/${encodeURIComponent(p.id)}/reload`), `Reloaded ${p.name}`)) await settle(p.id);
@@ -89,16 +98,20 @@
 				<pre class="overflow-x-auto rounded-lg bg-sunken p-2 font-mono"><span class="text-faint"># plugin.toml</span>
 name = "Welcome"
 version = "1.0.0"
-api = {info.api}</pre>
+api = {info.api}
+permissions = ["players.chat"]</pre>
 				<pre class="overflow-x-auto rounded-lg bg-sunken p-2 font-mono"><span class="text-faint">-- main.lua</span>
 on("player.joined", function(e)
   log(e.name .. " joined " .. e.server)
+  server.msg(e.server, e.id, "Welcome, " .. e.name)
 end)</pre>
 				<p class="text-muted">
-					Then turn it on below. <code>on(event, fn)</code> takes {plural(info.events.length, 'event')}:
+					Then turn it on below, and tick what it asks to do. <code>on(event, fn)</code> takes {plural(info.events.length, 'event')}:
 					{#each info.events as e, i}<code>{e}</code>{i < info.events.length - 1 ? ', ' : ''}{/each}. <code>after(seconds, fn)</code> and
 					<code>every(seconds, fn)</code> run it later, <code>cancel(timer)</code> stops one, <code>log(...)</code> writes to its log, and
-					<code>require("lib.util")</code> runs <code>lib/util.lua</code> from its folder.
+					<code>require("lib.util")</code> runs <code>lib/util.lua</code> from its folder. <code>server.players(id)</code> and
+					<code>server.info(id)</code> read a server; <code>server.say</code>, <code>server.msg</code>, <code>server.kick</code> and the rest act on one, a few a
+					second, with what you grant the plugin.
 				</p>
 			</div>
 		</details>
@@ -148,6 +161,25 @@ end)</pre>
 						<p class="text-xs text-muted">
 							{p.servers?.length ? `On ${p.servers.join(', ')}` : 'On every server'}{p.stats.handlers?.length ? ` · listens to ${p.stats.handlers.join(', ')}` : ''}
 						</p>
+						{#if p.permissions?.length}
+							<fieldset class="space-y-1.5">
+								<legend class="text-xs font-semibold text-muted">It asks to</legend>
+								{#each p.permissions as key (key)}
+									{@const g = info.grants.find((g) => g.key === key)}
+									{#if g}
+										<label class="flex items-start gap-2 text-sm">
+											<input type="checkbox" class="mt-0.5" checked={p.granted.includes(key)} disabled={busy !== null} onchange={(e) => grant(p, key, e.currentTarget.checked)} />
+											<span class="min-w-0">{g.label}<span class="block text-xs break-words text-faint">{g.calls.join(', ')}</span></span>
+										</label>
+									{:else}
+										<p class="flex items-start gap-2 text-sm text-faint">
+											<Icon name="alert" size={14} class="mt-0.5 shrink-0" />
+											<span class="min-w-0 break-words"><code>{key}</code>: plugins can't be given this</span>
+										</p>
+									{/if}
+								{/each}
+							</fieldset>
+						{/if}
 						{#if p.state === 'running' || p.stats.calls > 0}
 							<p class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-faint tabular-nums">
 								{#if p.state === 'running' && p.since}<span>Up {duration(p.since)}</span>{/if}
@@ -157,6 +189,8 @@ end)</pre>
 								<span title="Its slowest call">slowest {ms(p.stats.slowestMs)} ms</span>
 								{#if p.stats.memory}<span>{bytes(p.stats.memory)}</span>{/if}
 								{#if p.stats.timers}<span>{plural(p.stats.timers, 'timer')}</span>{/if}
+								{#if p.stats.sent}<span title="Commands it gave its servers">{plural(p.stats.sent, 'command')}</span>{/if}
+								{#if p.stats.unsent}<span class="text-warn" title="Commands not sent: too many were waiting">{p.stats.unsent} unsent</span>{/if}
 								{#if p.restarts}<span class="text-warn" title="Fresh starts after running over its time">{plural(p.restarts, 'restart')}</span>{/if}
 							</p>
 						{/if}

@@ -18,7 +18,7 @@ func TestPlugins(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "hello"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(dir, "hello", "plugin.toml"), []byte("api = 0\nname = \"Hello\"\nversion = \"0.1.0\""), 0o644)
+	os.WriteFile(filepath.Join(dir, "hello", "plugin.toml"), []byte("api = 0\nname = \"Hello\"\nversion = \"0.1.0\"\npermissions = [\"players.chat\", \"audit.view\"]"), 0o644)
 	os.WriteFile(filepath.Join(dir, "hello", "main.lua"), []byte(`log("hi")`), 0o644)
 	p := newPanel(t, func(a *API) {
 		a.Plugins = &plugins.Manager{Dir: dir, Store: a.Store, Log: a.Log, LogPath: filepath.Join(dir, "plugins.log")}
@@ -38,8 +38,14 @@ func TestPlugins(t *testing.T) {
 		return info
 	}
 	info := list()
-	if info.API != 0 || info.CallMs != 100 || info.MemoryMB != 64 || len(info.Plugins) != 1 || info.Plugins[0].Name != "Hello" || info.Plugins[0].State != plugins.Off {
+	if info.API != 0 || info.CallMs != 100 || info.MemoryMB != 64 || len(info.Plugins) != 1 || info.Plugins[0].Name != "Hello" || info.Plugins[0].State != plugins.Off ||
+		len(info.Grants) != len(plugins.Grants) || len(info.Plugins[0].Granted) != 0 {
 		t.Fatalf("list %+v", info)
+	}
+	code, b := p.do("PATCH", "/api/manager/plugins/hello", `{"granted":["players.chat"]}`)
+	var s plugins.Status
+	if err := json.Unmarshal(b, &s); code != http.StatusOK || err != nil || !slices.Equal(s.Granted, []string{"players.chat"}) || s.Enabled {
+		t.Fatalf("grant: %d %s", code, b)
 	}
 	if code, b := p.do("PATCH", "/api/manager/plugins/hello", `{"enabled":true}`); code != http.StatusOK {
 		t.Fatalf("enable: %d %s", code, b)
@@ -62,12 +68,15 @@ func TestPlugins(t *testing.T) {
 		{"PATCH", "/api/manager/plugins/nope", `{"enabled":true}`, http.StatusNotFound},
 		{"POST", "/api/manager/plugins/nope/reload", "", http.StatusNotFound},
 		{"PATCH", "/api/manager/plugins/hello", `{}`, http.StatusBadRequest},
+		{"PATCH", "/api/manager/plugins/hello", `{"granted":["audit.view"]}`, http.StatusBadRequest},
+		{"PATCH", "/api/manager/plugins/hello", `{"granted":["players.ban"]}`, http.StatusBadRequest},
+		{"PATCH", "/api/manager/plugins/nope", `{"granted":[]}`, http.StatusNotFound},
 	} {
 		if code, b := p.do(c.method, c.path, c.body); code != c.want {
 			t.Errorf("%s %s: %d %s, want %d", c.method, c.path, code, b, c.want)
 		}
 	}
-	_, b := p.do("GET", "/api/audit", "")
+	_, b = p.do("GET", "/api/audit", "")
 	var entries []struct{ Action, Detail, Username string }
 	json.Unmarshal(b, &entries)
 	var saw []string
@@ -77,7 +86,7 @@ func TestPlugins(t *testing.T) {
 		}
 	}
 	slices.Sort(saw)
-	if !slices.Equal(saw, []string{"reloaded hello", "turned on hello"}) {
+	if !slices.Equal(saw, []string{"granted hello players.chat", "reloaded hello", "turned on hello"}) {
 		t.Fatalf("audited %q", saw)
 	}
 

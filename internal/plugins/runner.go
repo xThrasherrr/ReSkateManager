@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +43,7 @@ type job struct {
 	event   string
 	payload map[string]any
 	timer   int64
+	result  *result // what came of a command it sent
 }
 
 type timer struct {
@@ -61,7 +63,8 @@ func (t *timer) cancel() {
 
 // runner runs one plugin on its own goroutine, which alone touches its VM,
 // handlers and timers. The servers' events reach it through jobs, which never
-// blocks the server: a full queue drops the event and counts it.
+// blocks the server: a full queue drops the event and counts it. Its
+// commands go out on a goroutine of their own (send).
 type runner struct {
 	m       *Manager
 	p       *Plugin
@@ -69,8 +72,12 @@ type runner struct {
 	rt      *luavm.Runtime
 	servers map[string]bool // nil for all of them
 	jobs    chan job
-	quit    chan struct{}
+	acts    chan action
+	ctx     context.Context // done once it stops
+	cancel  context.CancelFunc
+	quit    <-chan struct{} // ctx.Done()
 	done    chan struct{}
+	sent    chan struct{}                   // closed once send has returned
 	want    atomic.Pointer[map[string]bool] // the events it has handlers for
 
 	vmMu sync.Mutex // guards vm, which stop reads from another goroutine
@@ -79,6 +86,7 @@ type runner struct {
 	handlers  map[string][]luavm.Ref
 	timers    map[int64]*timer
 	nextTimer int64
+	gen       uint64 // counts fresh starts, so a command's answer finds the Lua that sent it
 	overruns  []time.Time
 	fails     []time.Time
 	tokens    float64 // for the log's rate
@@ -87,8 +95,10 @@ type runner struct {
 }
 
 func newRunner(m *Manager, p *Plugin, man Manifest, rt *luavm.Runtime) *runner {
-	r := &runner{m: m, p: p, man: man, rt: rt, jobs: make(chan job, queueSize), quit: make(chan struct{}), done: make(chan struct{}),
-		tokens: logBurst, tokensAt: time.Now()}
+	r := &runner{m: m, p: p, man: man, rt: rt, jobs: make(chan job, queueSize), acts: make(chan action, actionQueue), done: make(chan struct{}),
+		sent: make(chan struct{}), tokens: logBurst, tokensAt: time.Now()}
+	r.ctx, r.cancel = context.WithCancel(context.Background())
+	r.quit = r.ctx.Done()
 	if len(man.Servers) > 0 {
 		r.servers = map[string]bool{}
 		for _, s := range man.Servers {
@@ -126,11 +136,7 @@ func (r *runner) ended() bool {
 
 // stop ends the runner, breaking off a call that runs, and waits for it.
 func (r *runner) stop() {
-	select {
-	case <-r.quit:
-	default:
-		close(r.quit)
-	}
+	r.cancel()
 	r.vmMu.Lock()
 	if r.vm != nil {
 		r.vm.Stop()
@@ -141,8 +147,11 @@ func (r *runner) stop() {
 
 func (r *runner) loop() {
 	defer close(r.done)
+	defer func() { <-r.sent }()
+	defer r.cancel() // ends send when the plugin ends on its own
 	defer r.m.unlist(r)
 	defer r.reset()
+	go r.send()
 	if !r.boot() {
 		return
 	}
@@ -204,13 +213,21 @@ func (r *runner) start() bool {
 	return true
 }
 
-// reset ends the plugin's Lua: its timers stop and its handlers go.
+// reset ends the plugin's Lua: its timers stop, its handlers go, and so do
+// the commands it hasn't sent.
 func (r *runner) reset() {
 	for _, t := range r.timers {
 		t.cancel()
 	}
 	r.timers, r.handlers = nil, nil
 	r.want.Store(nil)
+	r.gen++
+	for len(r.acts) > 0 {
+		select {
+		case <-r.acts:
+		default:
+		}
+	}
 	r.vmMu.Lock()
 	if r.vm != nil {
 		r.vm.Close()
@@ -224,6 +241,9 @@ func (r *runner) reset() {
 
 // handle runs one job, and reports whether the plugin keeps running.
 func (r *runner) handle(j job) bool {
+	if j.result != nil {
+		return r.answered(j.result)
+	}
 	if j.event != "" {
 		r.p.mu.Lock()
 		r.p.stats.Events++
@@ -244,7 +264,7 @@ func (r *runner) handle(j job) bool {
 		delete(r.timers, j.timer)
 	}
 	vm := r.vm
-	ok = r.call("timer", t.fn, nil)
+	ok = r.call("timer", t.fn)
 	if t.every == 0 && r.vm == vm && vm != nil { // not after a fresh start: its refs are its own
 		vm.Release(t.fn)
 	}
@@ -258,14 +278,9 @@ func (r *runner) handle(j job) bool {
 // call runs one of the plugin's functions. A failure goes in its log; one
 // that ran past its time starts the plugin afresh. It reports whether the
 // plugin's Lua carries on as it was.
-func (r *runner) call(what string, fn luavm.Ref, arg map[string]any) bool {
+func (r *runner) call(what string, fn luavm.Ref, args ...any) bool {
 	start := time.Now()
-	var err error
-	if arg != nil {
-		err = r.vm.Call(fn, arg)
-	} else {
-		err = r.vm.Call(fn)
-	}
+	err := r.vm.Call(fn, args...)
 	r.took(time.Since(start))
 	if err == nil {
 		return true
@@ -510,6 +525,9 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 			return nil, err
 		}
 		return []any{src, file}, nil
+	}
+	if strings.HasPrefix(name, "server.") {
+		return r.serverCall(name, args)
 	}
 	return nil, fmt.Errorf("no function %s", name)
 }

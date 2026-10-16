@@ -105,7 +105,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Plugins
 
-- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. For now they can watch and log; acting on servers comes next. Owners turn each one on under **Manager**, where its card shows its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
+- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. Owners turn each one on under **Manager**, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
 
 ## Getting started
 
@@ -244,12 +244,14 @@ version = "1.0.0"
 api = 0                      # the plugin API it was made for
 description = "Says hello."
 servers = ["skate-3"]        # server IDs; leave it out for all of them
+permissions = ["players.chat"] # what it asks to do, granted on its card
 ```
 
 ```lua
 -- main.lua
 on("player.joined", function(e)
   log(e.name .. " joined " .. e.server)
+  server.msg(e.server, e.id, "Welcome, " .. e.name)
 end)
 
 every(60, function() log("still here") end)
@@ -267,6 +269,16 @@ What a plugin can call:
 | `cancel(timer)` | Stops a timer; true if it was still going |
 | `log(...)`, `warn(...)` | Writes a line to the plugin's log: its card and `data/plugins.log`. `print` is `log` |
 | `require(name)` | Runs one of the plugin's own files once, `"lib.util"` being `lib/util.lua`, and returns what it returned |
+| `server.list()` | Each of the plugin's servers, as `server.info` gives it |
+| `server.info(id)` | A server: `id`, `name`, `state`, `players` (how many), and `map`, `slots` and `started_at` once known |
+| `server.players(id)` | Who is on it, first in first, each as `player.joined` gives them |
+| `server.say(id, text)` | Says `text` in the server's chat |
+| `server.msg(id, steamId, text)` | Sends one player a message, shown to them as "[DM from Server]" |
+| `server.kick(id, steamId [, minutes])` | Kicks a player, kept out that long (1-1440, or 0 until the server restarts) or as the server's settings say. Before ReSkate 2.0.8 every kick lasts until the server restarts, so a time is refused |
+| `server.ban(id, steamId)`, `server.unban(id, steamId)` | Bans or unbans a SteamID64, on the server or not |
+| `server.teleport(id, steamIds, to)` | Teleports a player or a list of up to 64 to a player (a SteamID64) or a place, `{x =, y =, z =}` with `y` up. Several stand in a ring round it |
+| `server.role(id, steamId, role)` | Gives a player one of the server's roles, or `"none"` |
+| `server.command(id, line)` | Runs a console line |
 
 Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` is a player's SteamID64:
 
@@ -279,12 +291,28 @@ Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` 
 | `state` | `state` and `was`: `starting`, `running`, `stopping`, `stopped`, `crashed` or `updating`; `map` once known |
 | `throwdown.placed`, `.removed`, `.joined`, `.left`, `.started`, `.quit`, `.lead`, `.scored`, `.landed`, `.missed`, `.finished` | `kind`, `mode` (`jam`, `spot_battle`, `skate`), `leader` and `player` as `{name, id}`, and by kind `points`, `round`, `best`, `turn`, `queue`, `near`, `players` or `results` (each `{name, id, place, points, quit}`, or `landed` and `missed` for S.K.A.T.E.). Needs the server's **Log player activity** on |
 
+`server.*` calls name a server first, by its ID: an event's `e.server` is the one it happened on, and a plugin limited to some servers can't reach the others. Reading needs nothing. The other calls send a command, and each needs a permission the plugin asks for in `permissions` and an owner grants it on its card:
+
+| Permission | Calls |
+| --- | --- |
+| `players.chat` | `server.say`, `server.msg` |
+| `players.kick` | `server.kick` |
+| `players.ban` | `server.ban`, `server.unban` |
+| `ingame.admins.manage` | `server.role` |
+| `console.exec` | `server.teleport`, `server.command` |
+| `settings.edit` | `server.command` for lines that change settings |
+
+`server.command` needs what the panel's console asks of the person typing the line: `console.exec`, and for a line that kicks, bans, chats, gives roles or changes settings, that permission as well. Plugins can't run `poll-run`, `quit` or `update`. A call the plugin wasn't granted raises an error that says what to grant.
+
+Commands are sent after the call returns, in the order made, with the panel's: the call returns `true` once it's queued, or `false` and why when too many are waiting. A function given last is called with what came of it, `fn(ok, reply)`: `ok` is false when the server didn't get it, wasn't running or didn't know the command, and `reply` is the server's answer (which may say it couldn't, as "No single connected player matches ...") or why it failed. Without one, a command that failed goes in the plugin's log. Each command shows in the server's console and the audit log as `plugin:<ID>`'s.
+
 The limits it runs under:
 
 - A plugin is Lua 5.4 and the plugin API, nothing more: the `string`, `table`, `math`, `utf8` and `coroutine` libraries, without `io`, `os`, `debug`, `package` or loading code from text or bytecode. It can't reach files outside its folder, other programs or the network.
 - One call into a plugin (an event, a timer or its `main.lua`) may run for 100 ms. One that runs over is cut off wherever it is, and the plugin starts afresh; three times in 10 minutes and it's stopped. One that fails 20 times in a minute is stopped too. A stopped plugin stays on, so **Reload** or the next start of the manager tries again.
 - A plugin may use 64 MB. Past that, Lua raises "not enough memory" in it.
 - Each plugin has its own queue of 256 events. A plugin too busy to keep up drops events, which its card counts, and never slows a server or another plugin.
+- A plugin sends its servers 4 commands a second, after 8 at once, with up to 64 waiting; past that a call returns `false`, and its card counts them. Chat is cut at the server's 200 bytes, on one line.
 - Turning on a plugin runs its code inside the manager, as installing a mod runs it inside the game. Only owners can, and only turn on plugins you trust.
 
 ## Troubleshooting

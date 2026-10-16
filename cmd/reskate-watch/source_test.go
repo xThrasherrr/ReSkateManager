@@ -191,7 +191,7 @@ func TestNewForms(t *testing.T) {
 	r.srcDir = t.TempDir()
 	r.checkSource(&usage{frags: map[string][]string{}, words: map[string]bool{}})
 	want := []string{"New form of command `\"maps\"`: `\"maps [reload]\"`",
-		"New form of command `\"status\"`: `\"status [verbose]\"`, which the panel's console lets anyone who may run commands use, as it does `\"status\"`: decide its permission (internal/api/console.go)"}
+		"New form of command `\"status\"`: `\"status [verbose]\"`, which the panel's console lets anyone who may run commands use, as it does `\"status\"`: decide its permission (internal/auth/console.go)"}
 	if !slices.Equal(r.Adds, want) {
 		t.Errorf("adds\n got %q\nwant %q", r.Adds, want)
 	}

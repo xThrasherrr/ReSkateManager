@@ -180,7 +180,8 @@ const (
 	maxRoleRank = 1000
 )
 
-var roleNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,24}$`)
+// RoleNameRe is a role's name, as data/roles.json and the role command take it.
+var RoleNameRe = regexp.MustCompile(`^[a-z0-9_-]{1,24}$`)
 
 // GameTags are the tags the game uses itself, for the server, a lobby's host,
 // friends and the ReSkate team, which no role may wear (roles_error): lower
@@ -234,7 +235,7 @@ func (f *File) AddRole(l RoleLook) error {
 	if f.roles == nil {
 		return ErrNoRoles
 	}
-	if !roleNameRe.MatchString(l.Name) || l.Name == "none" {
+	if !RoleNameRe.MatchString(l.Name) || l.Name == "none" {
 		return errors.New("a role's name is 1 to 24 of a-z, 0-9, - and _, and not none")
 	}
 	if f.hasRole(l.Name) {

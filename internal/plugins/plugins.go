@@ -42,6 +42,7 @@ type Manager struct {
 	Store   *store.Store
 	Log     *slog.Logger // the manager's log
 	LogPath string       // where plugins' log lines go, as data/plugins.log
+	Servers Servers      // the servers plugins read and act on; nil for none
 
 	mu      sync.Mutex // guards what follows, and starting and stopping runners
 	plugins map[string]*Plugin
@@ -50,8 +51,9 @@ type Manager struct {
 	out     *logfile.Writer
 	closed  bool
 
-	runMu   sync.Mutex                // guards changes to running
-	running atomic.Pointer[[]*runner] // for Notice, which can't wait on a lock
+	runMu   sync.Mutex                          // guards changes to running
+	running atomic.Pointer[[]*runner]           // for Notice, which can't wait on a lock
+	grants  atomic.Pointer[map[string][]string] // for the runners, as they call
 }
 
 // Plugin is one folder in Dir, and what became of it.
@@ -92,6 +94,8 @@ type Stats struct {
 	Memory   int64    `json:"memory"`
 	Timers   int      `json:"timers"`
 	Handlers []string `json:"handlers"`
+	Sent     uint64   `json:"sent"`   // commands sent to its servers
+	Unsent   uint64   `json:"unsent"` // commands not sent: too many were waiting
 }
 
 // Line is a line in a plugin's log.
@@ -112,6 +116,7 @@ type Status struct {
 	Dir string `json:"dir"`
 	Manifest
 	Unknown  []string `json:"unknown,omitempty"`
+	Granted  []string `json:"granted"` // of the permissions it asks for
 	Problem  string   `json:"problem,omitempty"`
 	Enabled  bool     `json:"enabled"`
 	State    string   `json:"state"`
@@ -145,6 +150,9 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.enabled[id] = true
 		}
 	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err := m.loadGrants(ctx); err != nil {
 		return err
 	}
 	m.scanLocked()
@@ -211,6 +219,9 @@ func (m *Manager) status(p *Plugin) Status {
 	}
 	if s.Failures == nil {
 		s.Failures = []Line{}
+	}
+	if s.Granted = m.granted(p.ID, p.manifest.Permissions); s.Granted == nil {
+		s.Granted = []string{}
 	}
 	return s
 }

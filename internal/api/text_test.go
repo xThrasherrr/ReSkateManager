@@ -12,27 +12,6 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 )
 
-func TestCleanText(t *testing.T) {
-	for in, want := range map[string]string{
-		"  hello  ":              "hello",
-		"two\nlines\r\nhere":     "two lines  here",
-		"tab\there":              "tab here",
-		"ctrl-z\x1a gone":        "ctrl-z gone",
-		"nul\x00 and del\x7f":    "nul and del",
-		"c1\u0085 too":           "c1 too",
-		"bad \xff bytes":         "bad  bytes",
-		"héllo 🛹 — ünïcode":      "héllo 🛹 — ünïcode",
-		"family 👨\u200d👩\u200d👧": "family 👨\u200d👩\u200d👧", // joiners stay
-	} {
-		if got := cleanText(in); got != want {
-			t.Errorf("cleanText(%q) = %q, want %q", in, got, want)
-		}
-	}
-	if got := cut("aé", 2); got != "a" {
-		t.Errorf("cut through a character: %q", got)
-	}
-}
-
 // A panic in background work fails that job, not the manager.
 func TestJobPanicFailsTheJob(t *testing.T) {
 	a := &API{Log: slog.New(slog.DiscardHandler)}

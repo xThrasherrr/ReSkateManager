@@ -31,6 +31,23 @@ function log(...) call("log", line(...)) end
 function warn(...) call("warn", line(...)) end
 print = log
 
+-- server.* reads and acts on the plugin's servers, each call naming one by
+-- its ID first: an event's e.server is the server it happened on.
+-- server.list(), server.info(id) and server.players(id) read. The rest are
+-- commands, sent a few a second after the call returns, and each needs a
+-- permission the owner granted the plugin on its card: server.say(id,
+-- text), server.msg(id, steamId, text), server.kick(id, steamId [,
+-- minutes]), server.ban(id, steamId), server.unban(id, steamId),
+-- server.teleport(id, steamIds, steamId or {x =, y =, z =}),
+-- server.role(id, steamId, role or "none") and server.command(id, line).
+-- Each returns true once queued, and calls a function given last with
+-- whether it went through and the server's reply.
+server = {}
+for _, name in ipairs({"list", "info", "players", "say", "msg", "kick", "ban", "unban", "teleport", "role", "command"}) do
+  local what = "server." .. name
+  server[name] = function(...) return call(what, ...) end
+end
+
 -- require(name) runs one of the plugin's own files once and returns what it
 -- returned: "lib.util" is lib/util.lua in the plugin's folder.
 local loaded = {}

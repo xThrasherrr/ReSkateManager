@@ -277,6 +277,33 @@ func CheckLine(line string) error {
 	return nil
 }
 
+// CleanText makes text someone typed fit on a console line, as the server's
+// clean_chat_text does with chat: line breaks and tabs become spaces, other
+// control characters and bytes that aren't UTF-8 go, and the ends are trimmed.
+func CleanText(s string) string {
+	s = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			return ' '
+		case r < 0x20 || r == 0x7f || r >= 0x80 && r <= 0x9f:
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(s, ""))
+	return strings.TrimSpace(s)
+}
+
+// CutText shortens s to at most n bytes, on a character boundary.
+func CutText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
 // Stop asks the server to quit (it logs off Steam and tells players), then kills it after timeout.
 func (p *Process) Stop(timeout time.Duration) {
 	_ = p.Send("quit")

@@ -442,7 +442,8 @@ export interface Plugin {
 	api: number | null;
 	description?: string;
 	servers?: string[]; // none: all of them
-	permissions?: string[];
+	permissions?: string[]; // what its plugin.toml asks for
+	granted: string[]; // of those, what the owner granted it
 	unknown?: string[]; // settings in plugin.toml that do nothing
 	problem?: string; // why it can't start as it is
 	enabled: boolean;
@@ -459,6 +460,8 @@ export interface Plugin {
 		memory: number; // bytes
 		timers: number;
 		handlers: string[] | null;
+		sent: number; // commands it gave its servers
+		unsent: number; // commands not sent: too many were waiting
 	};
 	recent: PluginLine[]; // the newest last
 	failures: PluginLine[];
@@ -470,7 +473,14 @@ export interface PluginsInfo {
 	callMs: number; // the longest one call into a plugin may run
 	memoryMB: number; // the most one plugin may use
 	events: string[];
+	grants: PluginGrant[]; // the permissions plugins can be given
 	plugins: Plugin[];
+}
+
+export interface PluginGrant {
+	key: string;
+	label: string;
+	calls: string[]; // what it lets a plugin call
 }
 
 // When scheduled backups run, and how many of each kind of automatic backup are kept.

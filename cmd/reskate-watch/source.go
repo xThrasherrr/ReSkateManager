@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/xThrasherrr/ReSkateManager/internal/api"
+	"github.com/xThrasherrr/ReSkateManager/internal/auth"
 	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 )
@@ -119,7 +119,7 @@ func (r *report) checkSource(use *usage) {
 	}
 	// A new command is taken up once the panel's console has decided who may
 	// run it: the watcher is built from the same tree as the manager it reads.
-	decided := api.ConsoleVerbs()
+	decided := auth.ConsoleVerbs()
 	for _, verb := range slices.Sorted(maps.Keys(newCmds)) {
 		forms, was := newCmds[verb], oldCmds[verb]
 		if was == nil {
@@ -136,7 +136,7 @@ func (r *report) checkSource(use *usage) {
 			}
 			// One the panel takes for a read-only command, which anyone who
 			// may use its console runs: 2.0.7's maps reload, of maps.
-			if api.ConsolePerm(formLine(f)) == "" {
+			if auth.ConsolePerm(formLine(f)) == "" {
 				open = append(open, f)
 			} else {
 				added = append(added, f)
@@ -146,7 +146,7 @@ func (r *report) checkSource(use *usage) {
 			r.Adds = append(r.Adds, fmt.Sprintf("New form of command %s: %s", code(verb), codes(added)))
 		}
 		if len(open) > 0 {
-			r.Adds = append(r.Adds, fmt.Sprintf("New form of command %s: %s, which the panel's console lets anyone who may run commands use, as it does %s: decide its permission (internal/api/console.go)",
+			r.Adds = append(r.Adds, fmt.Sprintf("New form of command %s: %s, which the panel's console lets anyone who may run commands use, as it does %s: decide its permission (internal/auth/console.go)",
 				code(verb), codes(open), code(verb)))
 		}
 	}
