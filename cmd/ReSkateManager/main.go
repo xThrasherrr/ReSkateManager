@@ -36,6 +36,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/logfile"
 	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
 	"github.com/xThrasherrr/ReSkateManager/internal/perf"
+	"github.com/xThrasherrr/ReSkateManager/internal/plugins"
 	"github.com/xThrasherrr/ReSkateManager/internal/restarts"
 	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
@@ -163,7 +164,8 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 		log.Warn("manager.toml has a setting this manager doesn't know, which does nothing; check its spelling", "key", k)
 	}
 	sharedDir := filepath.Join(root, serverconfig.SharedName)
-	backups := &backup.Service{Dir: filepath.Join(root, "backups"), DataDir: dataDir, Root: root, SharedDir: sharedDir, Version: version, Log: log}
+	backups := &backup.Service{Dir: filepath.Join(root, "backups"), DataDir: dataDir, Root: root, SharedDir: sharedDir,
+		PluginsDir: filepath.Join(root, "plugins"), Version: version, Log: log}
 	db, err := store.OpenWith(filepath.Join(dataDir, "manager.db"), backups.BeforeMigration)
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
@@ -219,9 +221,10 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 	notifier := &alerts.Notifier{Store: db, Log: log, Version: version}
 	notifier.Start(ctx)
 	status := &discord.Poster{Store: db, Reg: reg, Log: log, Version: version, Release: builds.Version}
+	plugs := &plugins.Manager{Dir: filepath.Join(root, "plugins"), Store: db, Log: log, LogPath: filepath.Join(dataDir, "plugins.log")}
 	a := &api.API{Cfg: cfg, Store: db, Auth: authSvc, Reg: reg, Updates: updates, Builds: builds, Admins: admins, Self: self, Log: log, Version: version,
 		ConfigPath: cfgPath, ServersDir: serversDir, SharedDir: sharedDir, DataDir: dataDir, CacheDir: cacheDir, Static: static, Backups: backups,
-		Thunderstore: thunderstoreClient(), Alerts: notifier, Discord: status, Exe: exe, Restart: func() { restart.request(reg, stop) }, Base: ctx}
+		Thunderstore: thunderstoreClient(), Alerts: notifier, Discord: status, Plugins: plugs, Exe: exe, Restart: func() { restart.request(reg, stop) }, Base: ctx}
 	serverName := func(id string) string {
 		if in, ok := reg.Get(id); ok {
 			return in.Def().Name
@@ -279,6 +282,7 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 				log.Warn("network sample", "instance", id, "err", err)
 			}
 		}
+		in.OnNotice = plugs.Notice(id)
 		in.LinkSharedMods = a.LinkSharedMods
 	}
 	// No server runs yet, so a visit still open is one the last run never closed.
@@ -324,6 +328,10 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 	banner(ctx, url, cfg, authSvc)
 	log.Info("ReSkateManager started", "version", version, "root", root, "listen", cfg.Listen)
 
+	// Before the servers start, so the plugins hear them start.
+	if err := plugs.Start(ctx); err != nil {
+		log.Warn("plugins didn't start", "err", err)
+	}
 	resume := takeResume(dataDir) // the servers that ran before an update restart
 	for _, in := range reg.List() {
 		if in.Def().AutoStart || slices.Contains(resume, in.ID()) {
@@ -386,6 +394,7 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 	if !updates.Wait(15 * time.Second) {
 		log.Warn("a server update was still running at shutdown")
 	}
+	plugs.Close()
 	log.Info("stopping servers")
 	reg.StopAll(25 * time.Second)
 	jobs.Wait()

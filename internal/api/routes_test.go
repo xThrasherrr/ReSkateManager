@@ -25,6 +25,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/backup"
 	"github.com/xThrasherrr/ReSkateManager/internal/discord"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
+	"github.com/xThrasherrr/ReSkateManager/internal/plugins"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
@@ -95,6 +96,7 @@ var routePerms = map[string]string{
 	"GET /api/manager/alerts":                            "owner",
 	"GET /api/manager/discord":                           "owner",
 	"GET /api/manager/retention":                         "owner",
+	"GET /api/manager/plugins":                           "owner",
 	"GET /api/manager/settings":                          "owner",
 	"GET /api/roles":                                     "panel.users.manage",
 	"GET /api/shared-mods/":                              "settings.view",
@@ -112,6 +114,7 @@ var routePerms = map[string]string{
 	"PATCH /api/manager/alerts":                          "owner",
 	"PATCH /api/manager/discord":                         "owner",
 	"PATCH /api/manager/retention":                       "owner",
+	"PATCH /api/manager/plugins/{pid}":                   "owner",
 	"PATCH /api/manager/settings":                        "owner",
 	"PATCH /api/roles/{rid}":                             "panel.users.manage",
 	"PATCH /api/users/{uid}":                             "panel.users.manage",
@@ -144,6 +147,7 @@ var routePerms = map[string]string{
 	"POST /api/instances/{id}/world":                     "settings.edit",
 	"POST /api/manager/alerts/test":                      "owner",
 	"POST /api/manager/discord/test":                     "owner",
+	"POST /api/manager/plugins/{pid}/reload":             "owner",
 	"POST /api/manager/update":                           "owner",
 	"POST /api/roles":                                    "panel.users.manage",
 	"POST /api/say":                                      "players.chat",
@@ -217,7 +221,7 @@ func TestRoutesNeedPermission(t *testing.T) {
 	// The shared mods, backups and Discord on: a route of one turned off
 	// turns everyone away, which would hide a missing permission check.
 	a := &API{Store: st, Auth: svc, Reg: reg, Log: log, Static: fstest.MapFS{}, SharedDir: t.TempDir(),
-		Backups: &backup.Service{}, Discord: &discord.Poster{}}
+		Backups: &backup.Service{}, Discord: &discord.Poster{}, Plugins: &plugins.Manager{}}
 
 	tokens := map[string]string{} // missing permission -> session
 	for i, p := range auth.AllPerms {

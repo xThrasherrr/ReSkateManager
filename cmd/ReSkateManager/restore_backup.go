@@ -42,7 +42,7 @@ func restoreBackup(root, zip string) error {
 	}
 
 	svc := &backup.Service{Dir: filepath.Join(root, "backups"), DataDir: dataDir, Root: root,
-		SharedDir: filepath.Join(root, serverconfig.SharedName), Version: version}
+		SharedDir: filepath.Join(root, serverconfig.SharedName), PluginsDir: filepath.Join(root, "plugins"), Version: version}
 	rep, err := svc.RestoreAll(context.Background(), zip)
 	if rep.Safety != "" {
 		fmt.Println("The database it replaced is backed up in backups/" + rep.Safety)
@@ -59,6 +59,9 @@ func restoreBackup(root, zip string) error {
 	}
 	if len(rep.Shared) > 0 {
 		fmt.Println("Restored shared mods: " + strings.Join(rep.Shared, ", "))
+	}
+	if len(rep.Plugins) > 0 {
+		fmt.Println("Restored plugins: " + strings.Join(rep.Plugins, ", "))
 	}
 	for _, n := range rep.Notes {
 		fmt.Println("Note: " + n)

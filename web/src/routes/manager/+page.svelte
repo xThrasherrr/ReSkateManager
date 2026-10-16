@@ -4,6 +4,7 @@
 	import AlertSettings from '#lib/components/AlertSettings.svelte';
 	import BackupSettings from '#lib/components/BackupSettings.svelte';
 	import DiscordSettings from '#lib/components/DiscordSettings.svelte';
+	import PluginSettings from '#lib/components/PluginSettings.svelte';
 	import RetentionSettings from '#lib/components/RetentionSettings.svelte';
 </script>
 
@@ -24,6 +25,10 @@
 		<section class="card p-4 sm:p-5">
 			<h2 class="mb-3">Discord status message</h2>
 			<DiscordSettings />
+		</section>
+		<section class="card p-4 sm:p-5">
+			<h2 class="mb-3">Plugins</h2>
+			<PluginSettings />
 		</section>
 		<section class="card p-4 sm:p-5">
 			<h2 class="mb-3">Backups</h2>

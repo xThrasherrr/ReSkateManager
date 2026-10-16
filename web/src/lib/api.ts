@@ -425,6 +425,54 @@ export interface Retention {
 	playerDays: number;
 }
 
+// The owner's Lua plugins, in the manager's plugins/ folder.
+export type PluginState = 'off' | 'starting' | 'running' | 'failed' | 'stopped';
+
+export interface PluginLine {
+	at: number; // unix ms
+	level: 'info' | 'warn' | 'error';
+	text: string;
+}
+
+export interface Plugin {
+	id: string; // its folder's name
+	dir: string;
+	name: string;
+	version: string;
+	api: number | null;
+	description?: string;
+	servers?: string[]; // none: all of them
+	permissions?: string[];
+	unknown?: string[]; // settings in plugin.toml that do nothing
+	problem?: string; // why it can't start as it is
+	enabled: boolean;
+	state: PluginState;
+	reason?: string; // why it failed or was stopped
+	since?: number; // unix ms it has run since
+	restarts: number; // fresh starts after running past its time
+	stats: {
+		events: number;
+		dropped: number; // events and timers it was too busy for
+		calls: number;
+		errors: number;
+		slowestMs: number;
+		memory: number; // bytes
+		timers: number;
+		handlers: string[] | null;
+	};
+	recent: PluginLine[]; // the newest last
+	failures: PluginLine[];
+}
+
+export interface PluginsInfo {
+	dir: string;
+	api: number; // the plugin API this manager runs; 0 is the preview
+	callMs: number; // the longest one call into a plugin may run
+	memoryMB: number; // the most one plugin may use
+	events: string[];
+	plugins: Plugin[];
+}
+
 // When scheduled backups run, and how many of each kind of automatic backup are kept.
 export interface BackupSettings {
 	every: number; // hours; 0 is off
@@ -455,6 +503,7 @@ export interface BackupInfo {
 	servers: { id: string; name: string; files: string[]; mods: BackupMod[]; modFiles: boolean }[];
 	shared?: BackupMod[];
 	sharedFiles?: boolean;
+	plugins?: string[];
 	error?: string; // why it can't be read
 }
 

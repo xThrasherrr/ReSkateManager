@@ -27,6 +27,11 @@ tasks:
     cmds:
       - go build -trimpath -ldflags "-s -w -X main.version={{.VERSION}}" -o bin/{{.EXE}} ./cmd/ReSkateManager
 
+  lua:wasm:
+    desc: Rebuild the plugins' Lua (internal/plugins/luavm/lua.wasm) in a Linux container
+    cmds:
+      - docker run --rm -v "{{.ROOT_DIR}}/internal/plugins/luavm:/w" golang:1.27-trixie sh /w/wasm/build.sh
+
   dev:api:
     desc: Run the manager against ./dev (no tray, no browser)
     cmds: [go run ./cmd/ReSkateManager --root ./dev --no-tray --no-browser]

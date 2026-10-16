@@ -36,6 +36,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/config"
 	"github.com/xThrasherrr/ReSkateManager/internal/discord"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
+	"github.com/xThrasherrr/ReSkateManager/internal/plugins"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 	"github.com/xThrasherrr/ReSkateManager/internal/thunderstore"
 	"github.com/xThrasherrr/ReSkateManager/internal/updater"
@@ -79,6 +80,8 @@ type API struct {
 	// Backups makes and lists the backups, and restores servers from them;
 	// nil turns them off.
 	Backups *backup.Service
+	// Plugins runs the owner's Lua plugins; nil turns the Plugins card off.
+	Plugins *plugins.Manager
 
 	cfgMu sync.Mutex // one settings change at a time
 	modMu sync.Mutex // one change to a Mods folder at a time
@@ -166,6 +169,9 @@ func (a *API) Handler() http.Handler {
 				r.With(a.discordOn).Post("/discord/test", a.testDiscord)
 				r.Get("/retention", a.retention)
 				r.Patch("/retention", a.saveRetention)
+				r.With(a.pluginsOn).Get("/plugins", a.listPlugins)
+				r.With(a.pluginsOn).Patch("/plugins/{pid}", a.setPlugin)
+				r.With(a.pluginsOn).Post("/plugins/{pid}/reload", a.reloadPlugin)
 			})
 			r.Post("/auth/password", a.changePassword)
 			r.Post("/auth/steam/unlink", a.steamUnlink)

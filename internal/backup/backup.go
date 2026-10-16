@@ -48,11 +48,13 @@ const Format = 1
 //	servers/<id>/Mods/<folder>/...
 //	servers/<id>/DisabledMods/<folder>/...
 //	shared/Mods/<folder>/...
+//	plugins/<id>/...
 const (
-	manifestName = "backup.json"
-	dbName       = "data/manager.db"
-	tomlName     = "data/manager.toml"
-	sharedPrefix = "shared/Mods/"
+	manifestName  = "backup.json"
+	dbName        = "data/manager.db"
+	tomlName      = "data/manager.toml"
+	sharedPrefix  = "shared/Mods/"
+	pluginsPrefix = "plugins/"
 )
 
 func serverPrefix(id string) string { return "servers/" + id + "/" }
@@ -92,6 +94,8 @@ type Manifest struct {
 	// The shared mods there were, and whether it holds their files.
 	Shared      []Mod `json:"shared,omitempty"`
 	SharedFiles bool  `json:"sharedFiles,omitempty"`
+	// The plugins it holds, by ID: every one, with the database.
+	Plugins []string `json:"plugins,omitempty"`
 }
 
 // Server is one server in a backup: its settings in the panel, and which of
@@ -131,10 +135,13 @@ type Service struct {
 	DataDir   string // data/, with manager.toml
 	Root      string // the manager's folder
 	SharedDir string // the shared mods' folder; "" with them off
-	Version   string
-	Store     *store.Store
-	Reg       *instance.Registry
-	Log       *slog.Logger
+	// PluginsDir is the plugins' folder, which a backup of the database
+	// holds too; "" leaves them out.
+	PluginsDir string
+	Version    string
+	Store      *store.Store
+	Reg        *instance.Registry
+	Log        *slog.Logger
 
 	mu      sync.Mutex // one backup at a time
 	cacheMu sync.Mutex
@@ -206,6 +213,15 @@ func (s *Service) create(ctx context.Context, db *sql.DB, opt Options) (Info, er
 		m.Schema, _ = store.Schema(db)
 		entries = appendFile(entries, dbName, tmp, false)
 		entries = appendFile(entries, tomlName, filepath.Join(s.DataDir, "manager.toml"), false)
+		// Not in the copies of the database alone made before it changes.
+		if s.PluginsDir != "" && opt.Kind != Migration && opt.Kind != Restore {
+			ids, es, err := collectPlugins(s.PluginsDir)
+			if err != nil {
+				return Info{}, fmt.Errorf("plugins: %w", err)
+			}
+			m.Plugins = ids
+			entries = append(entries, es...)
+		}
 	}
 	for _, id := range opt.Servers {
 		in, ok := s.Reg.Get(id)
@@ -422,6 +438,35 @@ func collectShared(shared string) ([]Mod, []entry, error) {
 		}
 	}
 	return mods, entries, nil
+}
+
+// collectPlugins lists the plugins' folders and their files.
+func collectPlugins(dir string) ([]string, []entry, error) {
+	list, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	var ids []string
+	var entries []entry
+	for _, e := range list {
+		if !e.IsDir() || !validPluginFolder(e.Name()) {
+			continue
+		}
+		ids = append(ids, e.Name())
+		if entries, err = appendTree(entries, filepath.Join(dir, e.Name()), pluginsPrefix+e.Name()+"/"); err != nil {
+			return nil, nil, err
+		}
+	}
+	return ids, entries, nil
+}
+
+// validPluginFolder is a folder the plugins can be in: as package plugins
+// reads them, and nothing hidden.
+func validPluginFolder(name string) bool {
+	return name != "" && name[0] != '.' && cleanRel(name) == name && !strings.ContainsAny(name, `/\`)
 }
 
 func modOf(m serverconfig.Mod) Mod {

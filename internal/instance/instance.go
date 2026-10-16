@@ -85,6 +85,29 @@ type Leave struct {
 	Reason string // the server's, as "Disconnected.", or one of the Left reasons
 }
 
+// Notice is something that happened on the server, for the plugins. Kind
+// says which, and which fields are set.
+type Notice struct {
+	Kind      string             // NoticeJoined, NoticeLeft, ...
+	Player    Player             // joined, left and chat; a chat's ID is "" when its name could be more than one
+	Leave     Leave              // left
+	Text      string             // chat: the message
+	Map       string             // map, and state: the map loaded
+	Throwdown logparse.Throwdown // throwdown
+	State     State              // state: now, and before
+	Was       State
+}
+
+// The kinds of Notice.
+const (
+	NoticeJoined    = "joined"
+	NoticeLeft      = "left"
+	NoticeChat      = "chat"
+	NoticeThrowdown = "throwdown"
+	NoticeMap       = "map"
+	NoticeState     = "state"
+)
+
 // Why the roster let a player go when the server never said they left.
 const (
 	LeftStopped  = "Server stopped."
@@ -216,6 +239,11 @@ type Instance struct {
 	OnThrowdown func(logparse.Throwdown)
 	// OnReady runs (in its own goroutine) each time the server finishes starting.
 	OnReady func()
+	// OnNotice runs for each Notice, in the order they happen, under the
+	// instance's lock: it must return at once and never call back into the
+	// instance. Set before Start.
+	OnNotice func(Notice)
+	noticed  State // the state OnNotice last heard of
 	// OnNetwork runs (in its own goroutine) for each network summary the
 	// running server logs, with the start of its run; set before Start.
 	OnNetwork func(run time.Time, n logparse.Network)
@@ -229,7 +257,7 @@ type Instance struct {
 
 // New makes a stopped instance, its console seeded with the end of its log.
 func New(def Def, log *slog.Logger) *Instance {
-	in := &Instance{id: def.ID, def: def, state: Stopped, players: map[string]*Player{}, cmdSem: make(chan struct{}, 1), log: log.With("instance", def.ID)}
+	in := &Instance{id: def.ID, def: def, state: Stopped, noticed: Stopped, players: map[string]*Player{}, cmdSem: make(chan struct{}, 1), log: log.With("instance", def.ID)}
 	in.loadHistory()
 	return in
 }
@@ -720,10 +748,17 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 			in.pollRun = false
 		case e.Tag == "network":
 			in.networkLocked(e.Text)
-		case e.Tag == "throwdown" && in.OnThrowdown != nil:
+		case e.Tag == "throwdown" && (in.OnThrowdown != nil || in.OnNotice != nil):
 			if t, ok := logparse.ParseThrowdown(e.Text, in.namesLocked()); ok {
-				in.hooks.Go(func() { in.OnThrowdown(t) })
+				if in.OnThrowdown != nil {
+					in.hooks.Go(func() { in.OnThrowdown(t) })
+				}
+				in.noticeLocked(Notice{Kind: NoticeThrowdown, Throwdown: t})
 			}
+		}
+	case logparse.KindChat:
+		if in.OnNotice != nil && e.IsEvent() && e.Fields != nil {
+			in.noticeLocked(Notice{Kind: NoticeChat, Player: Player{ID: in.namesLocked()(e.Name), Name: e.Name}, Text: e.Fields["message"]})
 		}
 	case logparse.KindCommand:
 		if name := e.Fields["custom"]; name != "" {
@@ -755,6 +790,7 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 	case logparse.KindLoaded:
 		in.info.Map = e.Fields["map"]
 		in.publishStateLocked()
+		in.noticeLocked(Notice{Kind: NoticeMap, Map: in.info.Map})
 	case logparse.KindJoin:
 		p := in.newPlayerLocked(e.ID, e.Name, e.Fields["role"])
 		if old := in.players[e.ID]; old != nil { // a leave the console didn't show
@@ -847,6 +883,11 @@ func (in *Instance) networkLocked(text string) {
 func (in *Instance) publishStateLocked() {
 	v := in.viewLocked()
 	in.hub.publish(Event{Type: "state", Instance: in.def.ID, State: &v})
+	if in.state != in.noticed { // every change of state is published
+		was := in.noticed
+		in.noticed = in.state
+		in.noticeLocked(Notice{Kind: NoticeState, State: in.state, Was: was, Map: in.info.Map})
+	}
 }
 
 func (in *Instance) publishPlayersLocked() {
@@ -1065,6 +1106,13 @@ func (in *Instance) joinedLocked(p Player) {
 	if in.OnJoin != nil {
 		in.hooks.Go(func() { in.OnJoin(p) })
 	}
+	in.noticeLocked(Notice{Kind: NoticeJoined, Player: p})
+}
+
+func (in *Instance) noticeLocked(n Notice) {
+	if in.OnNotice != nil {
+		in.OnNotice(n)
+	}
 }
 
 // goneKeep is how many players who left a run keeps for namesLocked.
@@ -1079,6 +1127,7 @@ func (in *Instance) leftLocked(l Leave) {
 	if in.OnLeave != nil {
 		in.hooks.Go(func() { in.OnLeave(l) })
 	}
+	in.noticeLocked(Notice{Kind: NoticeLeft, Player: l.Player, Leave: l})
 }
 
 // namesLocked tells who the server means by a name in its lines: the

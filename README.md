@@ -26,6 +26,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
   - [Mods](#mods)
   - [Updates and backups](#updates-and-backups)
   - [Users, roles and alerts](#users-roles-and-alerts)
+  - [Plugins](#plugins)
 - [Getting started](#getting-started)
   - [Windows](#windows)
   - [Linux](#linux)
@@ -35,6 +36,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
   - [Exposing the panel](#exposing-the-panel)
   - [Settings, environment and flags](#settings-environment-and-flags)
 - [Backups and restoring](#backups-and-restoring)
+- [Writing plugins](#writing-plugins)
 - [Troubleshooting](#troubleshooting)
 - [How it works](#how-it-works)
 - [Development](#development)
@@ -101,6 +103,10 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
   Once saved, the token is never shown again. The message's title is yours to change, and join codes can be hidden; a server with a password still asks for it. If Discord turns the bot away, the card says why. A refused token or a wrong channel ID stops it until you change them; a bot that can't see the channel yet, such as one not invited, is tried again every few minutes.
 
+### Plugins
+
+- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. For now they can watch and log; acting on servers comes next. Owners turn each one on under **Manager**, where its card shows its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
+
 ## Getting started
 
 Download the latest build from the [releases page](https://github.com/xThrasherrr/ReSkateManager/releases/latest). On first run the manager prints a one-time **setup PIN**. Open the panel and enter it to create the owner account.
@@ -152,9 +158,11 @@ Everything the manager keeps sits next to the executable, or under the directory
 data/manager.toml   settings (listen address, public URL, TLS)
 data/manager.db     servers, users, roles, sessions, announcements, performance and network samples, audit log, player history, visits and throwdowns
 data/manager.log
+data/plugins.log    what plugins log, and why one was stopped
 data/manager.lock   held while the manager runs, so a second one can't use the folder
 servers/<id>/       one folder per server: ReSkateServer.exe, ReSkateServer.json, Mods/, ReSkateServer.log, console.log
 shared/Mods/        shared mods, linked into the Mods/ of each server that uses them
+plugins/<id>/       one folder per plugin: plugin.toml, main.lua and its other .lua files
 backups/            backups, one zip each
 cache/              downloaded server releases (the newest two are kept)
 ```
@@ -201,10 +209,10 @@ From 1.0 on, these names, the folder layout above, the backup format, the system
 
 ## Backups and restoring
 
-A backup is a zip in `backups/`, laid out like the manager's folder: `data/manager.db`, `data/manager.toml`, and `servers/<id>/` with each server's `ReSkateServer.json` and `world-layers.json`. Server programs are never in it, since they download again. Mods are in it only when you include them, as `servers/<id>/Mods/` and `shared/Mods/`. Owners set the schedule and how many to keep under **Manager**. The ones you make by hand stay until you delete them. A backup on the same disk won't survive that disk, so download one now and then, or mount another disk at `backups/`.
+A backup is a zip in `backups/`, laid out like the manager's folder: `data/manager.db`, `data/manager.toml`, `plugins/<id>/` with each plugin's files, and `servers/<id>/` with each server's `ReSkateServer.json` and `world-layers.json`. Server programs are never in it, since they download again. Mods are in it only when you include them, as `servers/<id>/Mods/` and `shared/Mods/`. Owners set the schedule and how many to keep under **Manager**. The ones you make by hand stay until you delete them. A backup on the same disk won't survive that disk, so download one now and then, or mount another disk at `backups/`.
 
 - **One server:** open its **Server** tab, stop it, and choose **Restore** on a backup. Its config and world layers go back as they were. With a backup that holds mods, its own mods are swapped for the backup's, and shared mods the manager no longer has come back. Servers without a program can install it again from the same dialog.
-- **Everything:** stop the manager, then run it with `--restore` and the backup. It puts back the database and `manager.toml`, then each server's config and mods, and the shared mods that are missing. The database it replaces is backed up first. Everyone signs in again afterwards: the sessions in the backup are dropped, since some may have been ended since it was made. A backup from a newer manager, or a damaged database, is refused before anything is replaced, and so is a restore while a manager is running with the folder. A server whose folder was in the old `servers/` lands in this manager's, so a backup made on Windows restores into Docker too. Start the manager again afterwards.
+- **Everything:** stop the manager, then run it with `--restore` and the backup. It puts back the database and `manager.toml`, then each server's config and mods, and the shared mods and plugins that are missing. The database it replaces is backed up first. Everyone signs in again afterwards: the sessions in the backup are dropped, since some may have been ended since it was made. A backup from a newer manager, or a damaged database, is refused before anything is replaced, and so is a restore while a manager is running with the folder. A server whose folder was in the old `servers/` lands in this manager's, so a backup made on Windows restores into Docker too. Start the manager again afterwards.
 
   ```sh
   # Windows (in the manager's folder)
@@ -224,6 +232,60 @@ A backup is a zip in `backups/`, laid out like the manager's folder: `data/manag
 
   To do it by hand instead, stop the manager, copy `data/manager.db` and `data/manager.toml` from the zip into `data/`, and delete `data/manager.db-wal` and `data/manager.db-shm` if they're there.
 - **Moving a server to another manager:** on its **Server** tab choose **Export**, then on the other manager **New server**, **From an export**. It arrives in a new folder with its name, settings, announcements and mods, the shared ones it loaded included. Ports another server there already uses are changed.
+
+## Writing plugins
+
+A plugin is a folder in `plugins/` (in Docker, the volume's `plugins/`) holding a `plugin.toml` and a `main.lua`. The folder's name is the plugin's ID. It shows on the Plugins card under **Manager** straight away, turned off; an owner turns it on, and **Reload** reads its files again after you change them.
+
+```toml
+# plugin.toml
+name = "Welcome"
+version = "1.0.0"
+api = 0                      # the plugin API it was made for
+description = "Says hello."
+servers = ["skate-3"]        # server IDs; leave it out for all of them
+```
+
+```lua
+-- main.lua
+on("player.joined", function(e)
+  log(e.name .. " joined " .. e.server)
+end)
+
+every(60, function() log("still here") end)
+```
+
+**Plugin API 0 is a preview:** it may change from one release to the next, and a plugin made for it may need changes. Once it's settled it becomes API 1, which then only grows. A plugin made for an API this manager doesn't run won't start, and its card says so.
+
+What a plugin can call:
+
+| Call | What it does |
+| --- | --- |
+| `on(event, fn)` | Calls `fn(e)` each time `event` happens on one of the plugin's servers |
+| `after(seconds, fn)` | Calls `fn()` once, that long from now; returns the timer |
+| `every(seconds, fn)` | Calls `fn()` every so many seconds, 0.1 at least; returns the timer |
+| `cancel(timer)` | Stops a timer; true if it was still going |
+| `log(...)`, `warn(...)` | Writes a line to the plugin's log: its card and `data/plugins.log`. `print` is `log` |
+| `require(name)` | Runs one of the plugin's own files once, `"lib.util"` being `lib/util.lua`, and returns what it returned |
+
+Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` is a player's SteamID64:
+
+| Event | `e` holds |
+| --- | --- |
+| `player.joined` | `id`, `name`, `admin`, `joined_at`, and `role` when they were given one |
+| `player.left` | `id`, `name`, `reason`, `joined_at`, `left_at`, `seconds` |
+| `chat` | `name`, `text`, and `id` when the name is one player's: on the server, or who left it this run |
+| `map` | `map`, when everyone has loaded it |
+| `state` | `state` and `was`: `starting`, `running`, `stopping`, `stopped`, `crashed` or `updating`; `map` once known |
+| `throwdown.placed`, `.removed`, `.joined`, `.left`, `.started`, `.quit`, `.lead`, `.scored`, `.landed`, `.missed`, `.finished` | `kind`, `mode` (`jam`, `spot_battle`, `skate`), `leader` and `player` as `{name, id}`, and by kind `points`, `round`, `best`, `turn`, `queue`, `near`, `players` or `results` (each `{name, id, place, points, quit}`, or `landed` and `missed` for S.K.A.T.E.). Needs the server's **Log player activity** on |
+
+The limits it runs under:
+
+- A plugin is Lua 5.4 and the plugin API, nothing more: the `string`, `table`, `math`, `utf8` and `coroutine` libraries, without `io`, `os`, `debug`, `package` or loading code from text or bytecode. It can't reach files outside its folder, other programs or the network.
+- One call into a plugin (an event, a timer or its `main.lua`) may run for 100 ms. One that runs over is cut off wherever it is, and the plugin starts afresh; three times in 10 minutes and it's stopped. One that fails 20 times in a minute is stopped too. A stopped plugin stays on, so **Reload** or the next start of the manager tries again.
+- A plugin may use 64 MB. Past that, Lua raises "not enough memory" in it.
+- Each plugin has its own queue of 256 events. A plugin too busy to keep up drops events, which its card counts, and never slows a server or another plugin.
+- Turning on a plugin runs its code inside the manager, as installing a mod runs it inside the game. Only owners can, and only turn on plugins you trust.
 
 ## Troubleshooting
 
@@ -267,6 +329,7 @@ ReSkateServer has no admin API, so the manager works entirely through each serve
 - **Network health:** each server's `[network]` line is kept per run. The failed, skipped and dropped sends in it are totals since the server started, so the charts count each minute's from the line before.
 - **Mods from Thunderstore:** the manager downloads a mod itself and installs it in the background while the panel follows its progress, so a big map isn't cut off by a proxy's time limit on one request (Cloudflare's is 100 s). To list a mod's maps, it reads only the zip's directory and its `reskate-levels.json` with HTTP range requests, usually a few hundred KB, from where Thunderstore stores the zip. That way looking doesn't count as a download. A few mods with long names are stored under names the manager can't work out; their maps show once installed.
 - **Orphans:** on Windows every server runs in a job object, so none outlives the manager.
+- **Plugins:** each runs in a copy of PUC Lua 5.4.8 compiled to WebAssembly and run by [wazero](https://wazero.io), on a goroutine of its own, so no cgo is needed and a plugin reaches nothing the manager doesn't hand it. Its memory is reserved outside the manager's own and capped. Running WebAssembly can't be paused from outside, so every few thousand steps (loop steps, calls, pattern-match and sort steps) and at every call of a C function, Lua asks the manager whether to go on. That's when Go's scheduler and garbage collector get their turn, and when a call that ran over ends, past any `pcall`. The servers' events reach plugins in order, through each plugin's own queue. `task lua:wasm` rebuilds `lua.wasm` from Lua's source and wasi-sdk, both pinned by checksum, in a Linux container.
 
 ## Development
 
@@ -283,6 +346,7 @@ task dev:api    # manager on :40125, data in ./dev
 task dev:web    # panel with hot reload on :5173, proxied to the manager
 task check      # go vet, go test, svelte-check
 task build      # bin/ReSkateManager(.exe) with the panel embedded
+task lua:wasm   # rebuild the plugins' Lua (needs Docker)
 ```
 
 Without Task: `cd web && pnpm install && pnpm build`, then `go build ./cmd/ReSkateManager`.
@@ -309,6 +373,8 @@ Without Task: `cd web && pnpm install && pnpm build`, then `go build ./cmd/ReSka
 | `internal/discord` | The Discord status message, which a bot posts once and then keeps up to date |
 | `internal/housekeep` | Retention for the audit log and player history; old releases in `cache/` |
 | `internal/backup` | Backups in `backups/`, restoring from them, server exports and imports |
+| `internal/plugins` | Owners' Lua plugins: finding, running and stopping them, the plugin API, events |
+| `internal/plugins/luavm` | Lua 5.4 as WebAssembly: one VM per plugin, its memory, its time limit |
 | `internal/thunderstore` | Thunderstore package list, downloads, and reading a mod's zip by ranges |
 | `internal/auth` | Users, roles and permissions, sessions, Steam OpenID |
 | `internal/adminsync` | Keeps in-game admins in step with panel roles |

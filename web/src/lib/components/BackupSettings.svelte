@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api, followJob, message, type BackupInfo, type BackupSettings } from '#lib/api.js';
 	import { attempt } from '#lib/toast.svelte.js';
-	import { backupLabel, bytes, dateTime } from '#lib/format.js';
+	import { backupLabel, bytes, dateTime, plural } from '#lib/format.js';
 	import Icon from './Icon.svelte';
 	import Loading from './Loading.svelte';
 	import LoadError from './LoadError.svelte';
@@ -79,7 +79,7 @@
 
 	function holds(b: BackupInfo) {
 		const parts: string[] = [];
-		if (b.database) parts.push('Database');
+		if (b.database) parts.push(b.plugins?.length ? `Database, ${plural(b.plugins.length, 'plugin')}` : 'Database');
 		const [only, ...more] = b.servers;
 		if (only) parts.push(more.length ? `${b.servers.length} servers` : only.name);
 		return parts.join(' + ') || 'Nothing';
@@ -95,7 +95,7 @@
 	<div class="space-y-5">
 		{#if loadError}<LoadError error={loadError} onretry={load} />{/if}
 		<p class="text-sm text-muted">
-			A backup holds the manager's database and settings, and each server's config and world layers. Server programs are left out, since they download
+			A backup holds the manager's database, settings and plugins, and each server's config and world layers. Server programs are left out, since they download
 			again, and so are mods unless you include them: one map can be gigabytes.
 		</p>
 

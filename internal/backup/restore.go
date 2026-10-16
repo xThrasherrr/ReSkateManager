@@ -344,6 +344,7 @@ type Report struct {
 	Servers []string // the servers it restored, by name
 	Moved   []string // the servers whose folder moved with the manager's
 	Shared  []string // the shared mods it put back
+	Plugins []string // the plugins it put back
 	Notes   []string // what the restored settings do that the person restoring should know
 }
 
@@ -443,7 +444,58 @@ func (s *Service) RestoreAll(ctx context.Context, zipPath string) (Report, error
 	if rep.Shared, err = r.RestoreShared(ctx, s.SharedDir, nil); err != nil {
 		return rep, fmt.Errorf("shared mods: %w", err)
 	}
+	if rep.Plugins, err = r.RestorePlugins(ctx, s.PluginsDir); err != nil {
+		return rep, fmt.Errorf("plugins: %w", err)
+	}
 	return rep, nil
+}
+
+// RestorePlugins puts back the plugins the backup holds that the plugins
+// folder lacks, and reports which. The ones it has stay as they are, and
+// whichever were on stay on: that's in the database.
+func (r *Reader) RestorePlugins(ctx context.Context, dir string) ([]string, error) {
+	if len(r.Plugins) == 0 || dir == "" {
+		return nil, nil
+	}
+	files, err := r.under(pluginsPrefix)
+	if err != nil {
+		return nil, err
+	}
+	picked := map[string]*zip.File{}
+	folders := map[string]bool{}
+	for rel, f := range files {
+		folder, _, ok := strings.Cut(rel, "/")
+		if !ok || !validPluginFolder(folder) || !slices.Contains(r.Plugins, folder) {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(dir, folder)); err == nil {
+			continue
+		}
+		picked[rel] = f
+		folders[folder] = true
+	}
+	if len(picked) == 0 {
+		return nil, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	tmp, err := os.MkdirTemp(dir, ".restore-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	if err := r.unpack(ctx, picked, tmp, nil); err != nil {
+		return nil, err
+	}
+	var done []string
+	for _, folder := range slices.Sorted(maps.Keys(folders)) {
+		if err := os.Rename(filepath.Join(tmp, folder), filepath.Join(dir, folder)); err != nil {
+			return done, err
+		}
+		done = append(done, folder)
+	}
+	return done, nil
 }
 
 // movedDir is where server folder dir goes when a backup made in manager

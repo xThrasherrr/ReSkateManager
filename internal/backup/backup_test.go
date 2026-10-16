@@ -81,18 +81,19 @@ func diffTrees(t *testing.T, what string, got, want map[string]string) {
 	}
 }
 
-// manager is a manager's folder: a database with servers in it, and the
-// shared mods.
+// manager is a manager's folder: a database with servers in it, the shared
+// mods and the plugins.
 type manager struct {
-	root, data, servers, shared string
-	st                          *store.Store
-	reg                         *instance.Registry
-	svc                         *Service
+	root, data, servers, shared, plugins string
+	st                                   *store.Store
+	reg                                  *instance.Registry
+	svc                                  *Service
 }
 
 func newManager(t *testing.T, root string) *manager {
 	t.Helper()
-	m := &manager{root: root, data: filepath.Join(root, "data"), servers: filepath.Join(root, "servers"), shared: filepath.Join(root, serverconfig.SharedName)}
+	m := &manager{root: root, data: filepath.Join(root, "data"), servers: filepath.Join(root, "servers"), shared: filepath.Join(root, serverconfig.SharedName),
+		plugins: filepath.Join(root, "plugins")}
 	if err := os.MkdirAll(m.data, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func newManager(t *testing.T, root string) *manager {
 	m.st = st
 	log := slog.New(slog.DiscardHandler)
 	m.reg = instance.NewRegistry(log)
-	m.svc = &Service{Dir: filepath.Join(root, "backups"), DataDir: m.data, Root: root, SharedDir: m.shared, Version: "test", Store: st, Reg: m.reg, Log: log}
+	m.svc = &Service{Dir: filepath.Join(root, "backups"), DataDir: m.data, Root: root, SharedDir: m.shared, PluginsDir: m.plugins, Version: "test", Store: st, Reg: m.reg, Log: log}
 	return m
 }
 
@@ -144,14 +145,20 @@ func TestBackUpWipeRestore(t *testing.T) {
 	// One kept outside servers/, as an owner can.
 	other := m.addServer(t, instance.Def{ID: "other", Name: "Other", Dir: filepath.Join(m.root, "elsewhere", "other")})
 	write(t, filepath.Join(other.Dir, "ReSkateServer.json"), `{"name":"Other"}`)
+	write(t, filepath.Join(m.plugins, "welcome", "plugin.toml"), "api = 0\n")
+	write(t, filepath.Join(m.plugins, "welcome", "main.lua"), `log("hi")`)
+	write(t, filepath.Join(m.plugins, "welcome", "lib", "cards.lua"), `return {}`)
+	write(t, filepath.Join(m.plugins, ".old", "main.lua"), `log("hidden")`)
 
 	info, err := m.svc.Create(ctx, Options{Kind: Manual, By: "owner", Database: true, Servers: []string{"lobby", "other"}, Mods: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !info.Database || len(info.Servers) != 2 || !info.SharedFiles || info.By != "owner" {
+	if !info.Database || len(info.Servers) != 2 || !info.SharedFiles || info.By != "owner" || !slices.Equal(info.Plugins, []string{"welcome"}) {
 		t.Fatalf("manifest: %+v", info.Manifest)
 	}
+	wantPlugins := tree(t, m.plugins)
+	delete(wantPlugins, ".old/main.lua")
 	wantLobby := tree(t, lobby.Dir)
 	delete(wantLobby, filepath.Base(lobby.Exe())) // downloaded again, never backed up
 	delete(wantLobby, "ReSkateServer.log")
@@ -162,21 +169,30 @@ func TestBackUpWipeRestore(t *testing.T) {
 	wantToml, _ := os.ReadFile(filepath.Join(m.data, "manager.toml"))
 
 	m.st.Close()
-	for _, d := range []string{m.data, m.servers, m.shared, filepath.Join(m.root, "elsewhere")} {
+	for _, d := range []string{m.data, m.servers, m.shared, m.plugins, filepath.Join(m.root, "elsewhere")} {
 		if err := os.RemoveAll(d); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	svc := &Service{Dir: m.svc.Dir, DataDir: m.data, Root: m.root, SharedDir: m.shared, Version: "test"}
+	svc := &Service{Dir: m.svc.Dir, DataDir: m.data, Root: m.root, SharedDir: m.shared, PluginsDir: m.plugins, Version: "test"}
 	rep, err := svc.RestoreAll(ctx, filepath.Join(m.svc.Dir, info.Name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	slices.Sort(rep.Servers)
-	if rep.Safety != "" || len(rep.Moved) != 0 || !slices.Equal(rep.Servers, []string{"Lobby", "Other"}) || !slices.Equal(rep.Shared, []string{"common"}) {
+	if rep.Safety != "" || len(rep.Moved) != 0 || !slices.Equal(rep.Servers, []string{"Lobby", "Other"}) || !slices.Equal(rep.Shared, []string{"common"}) ||
+		!slices.Equal(rep.Plugins, []string{"welcome"}) {
 		t.Errorf("report: %+v", rep)
 	}
+	diffTrees(t, "plugins", tree(t, m.plugins), wantPlugins)
+	// A plugin that's there stays as it is.
+	write(t, filepath.Join(m.plugins, "welcome", "main.lua"), `log("changed")`)
+	changed := tree(t, m.plugins)
+	if rep, err := svc.RestoreAll(ctx, filepath.Join(m.svc.Dir, info.Name)); err != nil || len(rep.Plugins) != 0 {
+		t.Fatalf("again: %+v %v", rep, err)
+	}
+	diffTrees(t, "plugins kept", tree(t, m.plugins), changed)
 	diffTrees(t, "lobby", tree(t, lobby.Dir), wantLobby)
 	diffTrees(t, "other", tree(t, other.Dir), wantOther)
 	diffTrees(t, "shared", tree(t, m.shared), wantShared)
@@ -546,11 +562,12 @@ func TestUnsafeBackups(t *testing.T) {
 
 func TestBeforeMigration(t *testing.T) {
 	m := newManager(t, t.TempDir())
+	write(t, filepath.Join(m.plugins, "welcome", "main.lua"), `log("hi")`)
 	if err := m.svc.BeforeMigration(m.st.DB, 3); err != nil {
 		t.Fatal(err)
 	}
 	list, _ := m.svc.List()
-	if len(list) != 1 || list[0].Kind != Migration || !list[0].Database || len(list[0].Servers) != 0 {
+	if len(list) != 1 || list[0].Kind != Migration || !list[0].Database || len(list[0].Servers) != 0 || len(list[0].Plugins) != 0 {
 		t.Fatalf("backups: %+v", list)
 	}
 }
