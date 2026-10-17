@@ -284,6 +284,7 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 		}
 		in.OnNotice = plugs.Notice(id)
 		in.LinkSharedMods = a.LinkSharedMods
+		in.PluginCommands = plugs.PluginCommands
 	}
 	// No server runs yet, so a visit still open is one the last run never closed.
 	if n, err := db.CloseOpenSessions(ctx, instance.LeftUnclosed); err != nil {

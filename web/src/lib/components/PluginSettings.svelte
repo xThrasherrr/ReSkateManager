@@ -179,6 +179,7 @@ end)</pre>
 				<ul class="grid gap-3 @6xl:grid-cols-2">
 					{#each info.plugins as p (p.id)}
 						{@const [color, label] = sticker[p.state]}
+					{@const listens = (p.stats.handlers ?? []).filter((h) => !h.startsWith('command:'))}
 						<li class="space-y-2 rounded-xl border-2 border-line p-3">
 							<div class="flex flex-wrap items-center gap-x-3 gap-y-2">
 								<div class="min-w-0 flex-1">
@@ -219,8 +220,13 @@ end)</pre>
 								<p class="text-xs text-faint">plugin.toml has settings that do nothing: {p.unknown.join(', ')}</p>
 							{/if}
 							<p class="text-xs text-muted">
-								{p.servers?.length ? `On ${p.servers.join(', ')}` : 'On every server'}{p.stats.handlers?.length ? ` · listens to ${p.stats.handlers.join(', ')}` : ''}
+								{p.servers?.length ? `On ${p.servers.join(', ')}` : 'On every server'}{listens.length ? ` · listens to ${listens.join(', ')}` : ''}
 							</p>
+							{#if p.commands?.length}
+								<p class="text-xs text-muted">
+									Answers {p.commands.map((w) => `/${w}`).join(', ')} in chat. A server takes a new command as it next starts.
+								</p>
+							{/if}
 							{#if p.permissions?.length}
 								<fieldset class="space-y-1.5">
 									<legend class="text-xs font-semibold text-muted">It asks to</legend>

@@ -25,7 +25,7 @@ const zee = "76561198000000001"
 func servers(t *testing.T, m *Manager, ids ...string) *instance.Registry {
 	t.Helper()
 	reg := instance.NewRegistry(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	reg.Wire = func(in *instance.Instance) { in.OnNotice = m.Notice(in.ID()) }
+	reg.Wire = func(in *instance.Instance) { in.OnNotice, in.PluginCommands = m.Notice(in.ID()), m.PluginCommands }
 	for _, id := range ids {
 		reg.Add(instance.Def{ID: id, Name: strings.ToUpper(id), Dir: t.TempDir()})
 	}

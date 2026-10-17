@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 )
 
 // API is the plugin API this manager runs. 0 is the preview, which may still
@@ -25,6 +27,7 @@ type Manifest struct {
 	Description string   `toml:"description" json:"description,omitempty"`
 	Servers     []string `toml:"servers" json:"servers,omitempty"` // IDs; none means all of them
 	Permissions []string `toml:"permissions" json:"permissions,omitempty"`
+	Commands    []string `toml:"commands" json:"commands,omitempty"` // the words players type as /word
 }
 
 // A plugin's folder name is its ID, in the panel, the audit log and the
@@ -68,6 +71,13 @@ func readManifest(dir string) (Manifest, []string, error) {
 	if slices.Contains(m.Servers, "*") {
 		m.Servers = nil
 	}
+	for _, w := range m.Commands {
+		if !serverconfig.ValidCommandName(w) {
+			return m, unknown, fmt.Errorf("Its %s asks for the chat command /%s, which can't be one: a command is 1 to 16 lowercase letters, digits, - or _, and not one of the server's own.", manifestFile, w)
+		}
+	}
+	slices.Sort(m.Commands)
+	m.Commands = slices.Compact(m.Commands)
 	return m, unknown, nil
 }
 

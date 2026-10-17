@@ -19,6 +19,12 @@ end
 -- "throwdown." and a kind ("throwdown.finished").
 function on(event, fn) call("on", event, fn) end
 
+-- command(word, fn) calls fn(e) each time a player types /word on one of the
+-- plugin's servers: e.id and e.name are theirs, e.args the words after it
+-- and e.text all of them. The word must be in commands in plugin.toml; a
+-- server takes a new one as it next starts.
+function command(word, fn) call("command", word, fn) end
+
 -- after(seconds, fn) calls fn once, that long from now; every(seconds, fn)
 -- calls it again and again. Both return the timer, for cancel.
 function after(seconds, fn) return call("after", seconds, fn) end

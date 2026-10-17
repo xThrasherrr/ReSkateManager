@@ -582,8 +582,8 @@ func TestCustomCommands(t *testing.T) {
 	if p, err = Diff(f, map[string]any{"commands": []any{map[string]any{"name": "discord", "reply": "Join us: discord.gg/x"}, rules}}, nil); err != nil || len(p.Changed) != 0 {
 		t.Errorf("the same commands planned %+v, %v", p, err)
 	}
-	if runs := CommandRuns(""); len(runs) != 0 {
-		t.Errorf("no config, runs %v", runs)
+	if runs := ChatCommands(""); len(runs) != 0 {
+		t.Errorf("no config, commands %v", runs)
 	}
 
 	cmd := func(change map[string]any) map[string]any {
@@ -623,12 +623,73 @@ func TestCustomCommands(t *testing.T) {
 	}
 }
 
-func TestCommandRuns(t *testing.T) {
+func TestChatCommands(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ReSkateServer.json")
 	os.WriteFile(path, []byte(`{"commands": [{"name": "rules", "reply": "", "command": ["say a", "say b"], "admin": false},
-		{"name": "discord", "reply": "hi", "command": [], "admin": false}]}`), 0o600)
-	if runs := CommandRuns(path); runs["rules"] != 2 || runs["discord"] != 0 || len(runs) != 2 {
-		t.Errorf("runs %v", runs)
+		{"name": "discord", "reply": "hi", "command": [], "admin": false},
+		{"name": "top", "reply": "", "command": "status plugin:boards", "admin": false}]}`), 0o600)
+	got := ChatCommands(path)
+	if len(got) != 3 || len(got["rules"].Command) != 2 || got["discord"].Reply != "hi" {
+		t.Errorf("commands %v", got)
+	}
+	if got["top"].Plugin() != "boards" || got["rules"].Plugin() != "" || got["discord"].Plugin() != "" {
+		t.Errorf("plugins: top %q, rules %q, discord %q", got["top"].Plugin(), got["rules"].Plugin(), got["discord"].Plugin())
+	}
+}
+
+// Plugins' words go in after the owner's commands, in place of the plugins'
+// from before. One the owner's has, an earlier word has, the server keeps for
+// itself, or past the server's 32 is left out, saying why. Unchanged, the
+// file isn't written.
+func TestSetPluginCommands(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ReSkateServer.json")
+	if left, err := SetPluginCommands(path, []Word{{"top", "boards"}}); err != nil || left != nil {
+		t.Fatalf("no config: %v, %v", left, err)
+	}
+	os.WriteFile(path, []byte(`{"commands": [{"name": "rules", "reply": "", "command": ["say a"], "admin": false},
+		{"name": "old", "reply": "", "command": ["status plugin:gone"], "admin": false}]}`), 0o600)
+	words := []Word{{"top", "boards"}, {"rules", "boards"}, {"top", "races"}, {"race", "races"}, {"drones", "races"}, {"Top", "x"}}
+	left, err := SetPluginCommands(path, words)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for w, why := range map[Word]string{
+		{"rules", "boards"}: "the server's own chat command /rules comes first",
+		{"top", "races"}:    "the plugin boards has it",
+		{"drones", "races"}: "it's one of the server's own commands",
+		{"Top", "x"}:        "not a name chat commands can have",
+	} {
+		if !strings.Contains(left[w], why) {
+			t.Errorf("%v left out for %q, want %q", w, left[w], why)
+		}
+	}
+	if len(left) != 4 {
+		t.Errorf("left out %v", left)
+	}
+	got := ChatCommands(path)
+	if len(got) != 3 || got["rules"].Plugin() != "" || got["top"].Plugin() != "boards" || got["race"].Plugin() != "races" {
+		t.Errorf("commands %v", got)
+	}
+	before, _ := os.ReadFile(path)
+	os.WriteFile(path, append(before, ' '), 0o600) // so a write shows
+	if _, err := SetPluginCommands(path, words); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before)+" " {
+		t.Error("the same words wrote the file again")
+	}
+
+	owner := make([]string, 31)
+	for i := range owner {
+		owner[i] = fmt.Sprintf(`{"name": "c%d", "reply": "hi"}`, i)
+	}
+	os.WriteFile(path, []byte(`{"commands": [`+strings.Join(owner, ",")+`]}`), 0o600)
+	left, err = SetPluginCommands(path, []Word{{"top", "boards"}, {"race", "races"}})
+	if err != nil || len(left) != 1 || !strings.Contains(left[Word{"race", "races"}], "32 chat commands already") {
+		t.Errorf("past 32: %v, %v", left, err)
+	}
+	if got := ChatCommands(path); len(got) != 32 || got["top"].Plugin() != "boards" {
+		t.Errorf("past 32: %d commands", len(got))
 	}
 }
 

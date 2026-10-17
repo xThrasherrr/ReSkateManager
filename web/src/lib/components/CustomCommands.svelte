@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { blankCommand, commandProblems, maxRuns, type CustomCommand } from '#lib/commands.js';
+	import { blankCommand, commandProblems, maxRuns, pluginOf, type CustomCommand } from '#lib/commands.js';
 	import Icon from './Icon.svelte';
 	import LinesInput from './LinesInput.svelte';
 	import RowList from './RowList.svelte';
@@ -38,45 +38,55 @@
 	{disabled}
 >
 	{#snippet row(c, i, set, remove)}
-		<div class="flex flex-wrap items-center gap-2">
-			<span class="font-mono text-sm text-muted">/</span>
-			<input
-				class="input w-36 font-mono"
-				placeholder="name"
-				maxlength="16"
-				spellcheck="false"
-				autocomplete="off"
-				aria-label="Name players type"
-				{disabled}
-				value={c.name}
-				oninput={(e) => set({ name: e.currentTarget.value.toLowerCase() })}
-			/>
-			<div class="ml-auto flex items-center gap-2">
-				<label class="inline-flex cursor-pointer items-center gap-2" title="Only in-game admins may use it">
-					<input type="checkbox" class="peer sr-only" {disabled} checked={c.admin} onchange={(e) => set({ admin: e.currentTarget.checked })} />
-					<span class="switch"></span>
-					<span class="text-sm text-muted">Admins only</span>
-				</label>
-				<button type="button" class="btn btn-ghost btn-sm" {disabled} aria-label="Remove /{c.name || 'this command'}" title="Remove" onclick={remove}>
-					<Icon name="trash" size={14} />
-				</button>
+		{@const plugin = pluginOf(c)}
+		{#if plugin}
+			<!-- Put in as the server starts, for the plugins that are on. -->
+			<p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+				<span class="font-mono">/{c.name}</span>
+				<span class="sticker sticker-info">Plugin</span>
+				<span class="text-muted">The plugin <span class="font-mono">{plugin}</span> answers it, while it's on under Manager.</span>
+			</p>
+		{:else}
+			<div class="flex flex-wrap items-center gap-2">
+				<span class="font-mono text-sm text-muted">/</span>
+				<input
+					class="input w-36 font-mono"
+					placeholder="name"
+					maxlength="16"
+					spellcheck="false"
+					autocomplete="off"
+					aria-label="Name players type"
+					{disabled}
+					value={c.name}
+					oninput={(e) => set({ name: e.currentTarget.value.toLowerCase() })}
+				/>
+				<div class="ml-auto flex items-center gap-2">
+					<label class="inline-flex cursor-pointer items-center gap-2" title="Only in-game admins may use it">
+						<input type="checkbox" class="peer sr-only" {disabled} checked={c.admin} onchange={(e) => set({ admin: e.currentTarget.checked })} />
+						<span class="switch"></span>
+						<span class="text-sm text-muted">Admins only</span>
+					</label>
+					<button type="button" class="btn btn-ghost btn-sm" {disabled} aria-label="Remove /{c.name || 'this command'}" title="Remove" onclick={remove}>
+						<Icon name="trash" size={14} />
+					</button>
+				</div>
 			</div>
-		</div>
-		<label class="block">
-			<span class="label">Reply</span>
-			<input class="input" placeholder="Sent back to whoever typed it" {disabled} value={c.reply} oninput={(e) => set({ reply: e.currentTarget.value })} />
-		</label>
-		<div>
-			<span class="label">Server commands, one per line</span>
-			<LinesInput
-				id="{id}-{i}-command"
-				bind:value={() => c.command, (command) => set({ command: command ?? [] })}
-				max={maxRuns}
-				maxLen={320}
-				{disabled}
-				placeholder={'announce-to {player} No griefing!'}
-			/>
-		</div>
+			<label class="block">
+				<span class="label">Reply</span>
+				<input class="input" placeholder="Sent back to whoever typed it" {disabled} value={c.reply} oninput={(e) => set({ reply: e.currentTarget.value })} />
+			</label>
+			<div>
+				<span class="label">Server commands, one per line</span>
+				<LinesInput
+					id="{id}-{i}-command"
+					bind:value={() => c.command, (command) => set({ command: command ?? [] })}
+					max={maxRuns}
+					maxLen={320}
+					{disabled}
+					placeholder={'announce-to {player} No griefing!'}
+				/>
+			</div>
+		{/if}
 	{/snippet}
 	{#snippet note()}
 		<p class="text-xs text-faint">In a command, {'{player}'} is whoever typed it, {'{map}'} the current map and {'{arg}'} the rest of what they typed.</p>

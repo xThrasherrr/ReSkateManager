@@ -14,6 +14,12 @@ export const maxRuns = 8;
 
 export const blankCommand = (): CustomCommand => ({ name: '', reply: '', command: [], admin: false });
 
+// A plugin's command runs only "status plugin:<id>", which the manager puts in
+// as the server starts (SetPluginCommands in internal/serverconfig/file.go).
+const pluginRun = 'status plugin:';
+export const pluginOf = (c: CustomCommand): string =>
+	c.reply === '' && c.command.length === 1 && c.command[0]!.startsWith(pluginRun) ? c.command[0]!.slice(pluginRun.length) : '';
+
 // The chat's own commands, and the server commands admins type as /<command>.
 const taken = [
 	'help', 'party', 'p', 'w', 'whisper', 'tell', 'poll', 'vote', 'yes', 'y', 'no', 'n', 'tp',
@@ -26,7 +32,8 @@ const taken = [
 	'tpall', 'tphere', 'tps', 'tuning', 'tuning-enforce', 'unban', 'voice', 'voice-allow', 'voice-range',
 	'vote-cancel', 'votes', 'welcome', 'world-layer-sync', 'quit', 'exit', 'stop', 'update',
 	'role', 'roles', 'board-check', 'park-mod', 'teleport', // 2.0.6
-	'kick-time' // 2.0.8
+	'kick-time', // 2.0.8
+	'drones' // 2.1.0
 ];
 
 /** What is wrong with each command, by its place in the list ('' for nothing). */

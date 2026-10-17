@@ -55,6 +55,8 @@ type Manager struct {
 	runMu   sync.Mutex                          // guards changes to running
 	running atomic.Pointer[[]*runner]           // for Notice, which can't wait on a lock
 	grants  atomic.Pointer[map[string][]string] // for the runners, as they call
+	claims  atomic.Pointer[[]claim]             // for PluginCommands, under a server's lock
+	gaps    gaps                                // between a player's commands
 }
 
 // Plugin is one folder in Dir, and what became of it.
@@ -262,6 +264,7 @@ func (m *Manager) SetEnabled(ctx context.Context, id string, on bool) error {
 		return err
 	}
 	m.enabled[id] = on
+	m.claimLocked()
 	if on {
 		p.clearStats()
 		m.startLocked(p)
@@ -283,6 +286,7 @@ func (m *Manager) Reload(id string) error {
 	m.stopLocked(p, "Reloaded.")
 	p.clearStats()
 	m.readLocked(p)
+	m.claimLocked()
 	if m.enabled[id] {
 		m.startLocked(p)
 	}
@@ -331,6 +335,7 @@ func (m *Manager) scanLocked() {
 		}
 		delete(m.plugins, id)
 	}
+	m.claimLocked()
 }
 
 // readLocked reads a plugin's plugin.toml again, and checks it has a main.lua.
@@ -438,6 +443,10 @@ func (m *Manager) Notice(server string) func(instance.Notice) {
 	return func(n instance.Notice) {
 		runners := m.running.Load()
 		if runners == nil || len(*runners) == 0 {
+			return
+		}
+		if n.Kind == instance.NoticeCommand {
+			m.command(server, n, *runners)
 			return
 		}
 		var name string

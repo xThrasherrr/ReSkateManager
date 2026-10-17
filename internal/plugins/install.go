@@ -141,6 +141,7 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 		return err
 	}
 	delete(m.plugins, id)
+	m.claimLocked()
 	m.write(id, "info", "Removed.")
 	if m.enabled[id] {
 		delete(m.enabled, id)

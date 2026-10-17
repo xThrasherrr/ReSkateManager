@@ -105,7 +105,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Plugins
 
-- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. They keep values of their own, read players' playtime, rank players on leaderboards across your servers or on one, and show players cards. Owners add them under **Manager** as a zip, or copy them into `plugins/`, and turn each one on there, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
+- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. They keep values of their own, read players' playtime, rank players on leaderboards across your servers or on one, show players cards and answer their `/commands`. Owners add them under **Manager** as a zip, or copy them into `plugins/`, and turn each one on there, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
 
 ## Getting started
 
@@ -247,6 +247,7 @@ api = 0                      # the plugin API it was made for
 description = "Says hello."
 servers = ["skate-3"]        # server IDs; leave it out for all of them
 permissions = ["players.chat"] # what it asks to do, granted on its card
+commands = ["top"]           # chat commands it answers, as /top
 ```
 
 ```lua
@@ -266,6 +267,7 @@ What a plugin can call:
 | Call | What it does |
 | --- | --- |
 | `on(event, fn)` | Calls `fn(e)` each time `event` happens on one of the plugin's servers |
+| `command(word, fn)` | Calls `fn(e)` each time a player types `/word` on one of the plugin's servers: `e.id` and `e.name` are theirs, `e.args` the words after it and `e.text` all of them. The word must be in `commands` in `plugin.toml` |
 | `after(seconds, fn)` | Calls `fn()` once, that long from now; returns the timer |
 | `every(seconds, fn)` | Calls `fn()` every so many seconds, 0.1 at least; returns the timer |
 | `cancel(timer)` | Stops a timer; true if it was still going |
@@ -298,6 +300,8 @@ A board covers all your servers: a sum adds a player's scores up from every serv
 Boards are read from a snapshot, worked out again once something is added (a read waits up to 50 ms for it, then takes the one before) or once it's 30 seconds old. A read that can't be answered returns `nil` and why: `local rows, err = stats.top("wins")`. What plugins keep is written within a second, so a crash loses that second at most. Removing a plugin keeps its store and its boards, so adding it again brings them back.
 
 A server shows one card at a time, whoever it's for, so cards wait their turn: the manager's own announcements first, then plugins' cards in the order they came, each once the card up now is down. That includes cards the server puts up itself, such as its timed announcements. A card waits a minute at most, and a plugin can have 16 waiting. Today's servers show a card as one line under their ANNOUNCEMENT title, its title and lines joined with " · " and cut at 200 bytes, for 6 to 15 seconds as it's longer, and not to a player with chat off or a menu open: a welcome is best sent some seconds after the join, with `after`.
+
+A plugin's commands are the server's own chat commands (ReSkate 2.0.3 on), which it reads as it starts: the manager puts the words of the plugins that are on in each server's config before starting it, so a new word works from a server's next start. The owner's own chat commands come first, then the plugins' by ID; a word another has already, one of the server's own, or one past the server's 32 is left out, and the plugin's log says why. **Settings** shows the plugins' words among the chat commands, locked. A player using the same command again within a second isn't heard, so nobody can make a plugin flood chat.
 
 Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` is a player's SteamID64:
 

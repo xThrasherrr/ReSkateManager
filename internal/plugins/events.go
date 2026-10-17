@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
@@ -54,6 +55,17 @@ func event(server string, n instance.Notice) (string, map[string]any) {
 	case instance.NoticeThrowdown:
 		throwdown(e, n.Throwdown)
 		return "throwdown." + n.Throwdown.Kind, e
+	case instance.NoticeCommand:
+		e["name"] = n.Player.Name
+		if n.Player.ID != "" {
+			e["id"] = n.Player.ID
+		}
+		args := []any{}
+		for _, a := range strings.Fields(n.Text) {
+			args = append(args, a)
+		}
+		e["command"], e["args"], e["text"] = n.Command, args, n.Text
+		return "command:" + n.Command, e
 	}
 	return "", nil
 }

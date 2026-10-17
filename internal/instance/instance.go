@@ -89,9 +89,11 @@ type Leave struct {
 // says which, and which fields are set.
 type Notice struct {
 	Kind      string             // NoticeJoined, NoticeLeft, ...
-	Player    Player             // joined, left and chat; a chat's ID is "" when its name could be more than one
+	Player    Player             // joined, left, chat and command; a chat's ID is "" when its name could be more than one
 	Leave     Leave              // left
-	Text      string             // chat: the message
+	Text      string             // chat: the message; command: what followed the word
+	Command   string             // command: the word a player typed, one of a plugin's
+	Plugin    string             // command: the plugin it's for
 	Map       string             // map, and state: the map loaded
 	Throwdown logparse.Throwdown // throwdown
 	State     State              // state: now, and before
@@ -106,6 +108,7 @@ const (
 	NoticeThrowdown = "throwdown"
 	NoticeMap       = "map"
 	NoticeState     = "state"
+	NoticeCommand   = "command"
 )
 
 // Why the roster let a player go when the server never said they left.
@@ -203,7 +206,7 @@ type Instance struct {
 	waiters   []*waiter
 	ranBy     string         // "vote" or "poll": the next line is a command a passed vote or poll-run ran, not a reply
 	pollRun   bool           // the open poll is the console's poll-run, whose winning answer runs a command
-	runs      map[string]int // how many commands each of the owner's chat commands runs; nil until one does
+	runs      map[string]serverconfig.CustomCommand // the server's chat commands, by name; nil until one runs
 	results   int            // results still to come of the commands a chat command runs, not replies either
 	// defaultRole is the role of everyone on the server given none (2.0.6),
 	// read as it starts.
@@ -254,6 +257,10 @@ type Instance struct {
 	// LinkSharedMods brings the server's links to the shared mods up to date
 	// before each start. It runs under the instance's lock; set before Start.
 	LinkSharedMods func(Def) error
+	// PluginCommands puts the plugins' chat commands in the server's config
+	// before each start, and says what it couldn't. It runs under the
+	// instance's lock; set before Start.
+	PluginCommands func(Def) (string, error)
 }
 
 // New makes a stopped instance, its console seeded with the end of its log.
@@ -431,6 +438,13 @@ func (in *Instance) startLocked() error {
 		in.managerLineLocked("Could not fix the server name: " + err.Error())
 	} else if msg != "" {
 		in.managerLineLocked(msg)
+	}
+	if in.PluginCommands != nil {
+		if msg, err := in.PluginCommands(in.def); err != nil {
+			in.managerLineLocked("Could not put the plugins' chat commands in: " + err.Error())
+		} else if msg != "" {
+			in.managerLineLocked(msg)
+		}
 	}
 	in.managerLineLocked("Starting " + exe)
 	p, err := supervisor.Start(supervisor.Options{Exe: exe, Dir: in.def.Dir}, in.onLine, in.onIdle)
@@ -767,9 +781,14 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		if name := e.Fields["custom"]; name != "" {
 			// The server reads its chat commands only when it starts.
 			if in.runs == nil {
-				in.runs = serverconfig.CommandRuns(in.def.ConfigPath())
+				in.runs = serverconfig.ChatCommands(in.def.ConfigPath())
 			}
-			in.results = in.runs[name]
+			c := in.runs[name]
+			in.results = len(c.Command)
+			if plugin := c.Plugin(); plugin != "" && in.OnNotice != nil {
+				args := strings.TrimSpace(strings.TrimPrefix(e.Fields["message"], "/"+name))
+				in.noticeLocked(Notice{Kind: NoticeCommand, Player: Player{ID: in.namesLocked()(e.Name), Name: e.Name}, Command: name, Plugin: plugin, Text: args})
+			}
 		}
 	case logparse.KindReady:
 		in.runs, in.results, in.pollRun, in.mapsMoved = nil, 0, false, false

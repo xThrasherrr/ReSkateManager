@@ -434,30 +434,20 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 		if !ok {
 			return nil, badArg(2, "on", "function", arg(1))
 		}
-		total := 0
-		for _, h := range r.handlers {
-			total += len(h)
+		return nil, r.addHandler(ev, fn)
+	case "command":
+		word, ok := arg(0).(string)
+		if !ok {
+			return nil, badArg(1, "command", "string", arg(0))
 		}
-		if total >= maxHandlers {
-			return nil, fmt.Errorf("a plugin may have %d handlers at most", maxHandlers)
+		if !slices.Contains(r.man.Commands, word) {
+			return nil, fmt.Errorf("bad argument #1 to 'command' (/%s isn't among the commands in its plugin.toml)", word)
 		}
-		r.vm.Keep(fn)
-		if r.handlers == nil {
-			r.handlers = map[string][]luavm.Ref{}
+		fn, ok := arg(1).(luavm.Ref)
+		if !ok {
+			return nil, badArg(2, "command", "function", arg(1))
 		}
-		r.handlers[ev] = append(r.handlers[ev], fn)
-		want := map[string]bool{}
-		names := make([]string, 0, len(r.handlers))
-		for k := range r.handlers {
-			want[k] = true
-			names = append(names, k)
-		}
-		slices.Sort(names)
-		r.want.Store(&want)
-		r.p.mu.Lock()
-		r.p.stats.Handlers = names
-		r.p.mu.Unlock()
-		return nil, nil
+		return nil, r.addHandler("command:"+word, fn)
 	case "after", "every":
 		secs, ok := number(arg(0))
 		if !ok {
@@ -548,6 +538,34 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 		return r.uiCall(name, args)
 	}
 	return nil, fmt.Errorf("no function %s", name)
+}
+
+// addHandler has fn called for ev: an event, or "command:" and a word.
+func (r *runner) addHandler(ev string, fn luavm.Ref) error {
+	total := 0
+	for _, h := range r.handlers {
+		total += len(h)
+	}
+	if total >= maxHandlers {
+		return fmt.Errorf("a plugin may have %d handlers at most", maxHandlers)
+	}
+	r.vm.Keep(fn)
+	if r.handlers == nil {
+		r.handlers = map[string][]luavm.Ref{}
+	}
+	r.handlers[ev] = append(r.handlers[ev], fn)
+	want := map[string]bool{}
+	names := make([]string, 0, len(r.handlers))
+	for k := range r.handlers {
+		want[k] = true
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	r.want.Store(&want)
+	r.p.mu.Lock()
+	r.p.stats.Handlers = names
+	r.p.mu.Unlock()
+	return nil
 }
 
 func number(v any) (float64, bool) {

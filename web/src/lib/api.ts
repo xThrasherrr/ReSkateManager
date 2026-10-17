@@ -443,6 +443,7 @@ export interface Plugin {
 	description?: string;
 	servers?: string[]; // none: all of them
 	permissions?: string[]; // what its plugin.toml asks for
+	commands?: string[]; // the chat commands it answers, as /word
 	granted: string[]; // of those, what the owner granted it
 	unknown?: string[]; // settings in plugin.toml that do nothing
 	problem?: string; // why it can't start as it is

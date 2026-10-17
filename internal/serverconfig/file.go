@@ -398,19 +398,105 @@ func (f *File) announces() bool {
 	return ok
 }
 
-// CommandRuns says how many server commands each of the owner's chat commands
-// in the config at path runs, by its name.
-func CommandRuns(path string) map[string]int {
-	out := map[string]int{}
+// ChatCommands are the chat commands in the config at path, the owner's and
+// the plugins', by name.
+func ChatCommands(path string) map[string]CustomCommand {
+	out := map[string]CustomCommand{}
 	f, err := Read(path)
 	if err != nil {
 		return out
 	}
 	list, _ := f.Values()["commands"].([]CustomCommand)
 	for _, c := range list {
-		out[c.Name] = len(c.Command)
+		out[c.Name] = c
 	}
 	return out
+}
+
+// A plugin's chat command runs status, which changes nothing and takes no
+// notice of what follows it, with the plugin named after it. The server keeps
+// it as written, so the entry says whose it is: the manager routes it, puts
+// the plugins' in place as each server starts, and the panel locks them.
+const pluginRun = "status plugin:"
+
+// PluginCommand is a plugin's word as one of the server's chat commands.
+func PluginCommand(word, plugin string) CustomCommand {
+	return CustomCommand{Name: word, Command: []string{pluginRun + plugin}}
+}
+
+// Plugin is the plugin a chat command is for, or "" for the owner's own.
+func (c CustomCommand) Plugin() string {
+	if c.Reply != "" || len(c.Command) != 1 {
+		return ""
+	}
+	id, _ := strings.CutPrefix(c.Command[0], pluginRun)
+	if id == c.Command[0] {
+		return ""
+	}
+	return id
+}
+
+func (c CustomCommand) same(o CustomCommand) bool {
+	return c.Name == o.Name && c.Reply == o.Reply && c.Admin == o.Admin && slices.Equal(c.Command, o.Command)
+}
+
+// ValidCommandName is a name a chat command may have.
+func ValidCommandName(s string) bool { return validVoteName(s) && commandNameFree(s) }
+
+// Word is a chat command a plugin asks for.
+type Word struct{ Name, Plugin string }
+
+// SetPluginCommands puts plugins' words among the chat commands of the
+// config at path, in place of the plugins' it had, after the owner's own.
+// Words the owner's took, or an earlier word, or past the server's 32, are
+// left out, each with why. A server with no config yet gets them once it has
+// written one.
+func SetPluginCommands(path string, words []Word) (left map[Word]string, err error) {
+	f, err := Read(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := f.Get("commands")
+	if !ok {
+		raw = []any{}
+	}
+	cur, err := customCommands(raw)
+	if err != nil {
+		return nil, err
+	}
+	var want []CustomCommand
+	taken := map[string]string{} // by name: the plugin it's for, "" for the owner's
+	for _, c := range cur {
+		if c.Plugin() == "" {
+			want = append(want, c)
+			taken[c.Name] = ""
+		}
+	}
+	left = map[Word]string{}
+	for _, w := range words {
+		owner, ok := taken[w.Name]
+		switch {
+		case !ValidCommandName(w.Name):
+			left[w] = "it's one of the server's own commands, or not a name chat commands can have"
+		case ok && owner == "":
+			left[w] = "the server's own chat command /" + w.Name + " comes first"
+		case ok:
+			left[w] = "the plugin " + owner + " has it"
+		case len(want) >= maxCustomCommands:
+			left[w] = fmt.Sprintf("the server has its %d chat commands already", maxCustomCommands)
+		default:
+			want = append(want, PluginCommand(w.Name, w.Plugin))
+			taken[w.Name] = w.Plugin
+		}
+	}
+	if !slices.EqualFunc(cur, want, CustomCommand.same) {
+		f.Set("commands", jsonValue(Field{Type: TypeCommands}, want))
+		err = f.Write(path)
+	}
+	return left, err
 }
 
 // Ban is one of the server's bans. Admins and bans have their own pages.
@@ -995,7 +1081,8 @@ var ReservedCommandNames = []string{"help", "party", "p", "w", "whisper", "tell"
 	"tpall", "tphere", "tps", "tuning", "tuning-enforce", "unban", "voice", "voice-allow", "voice-range",
 	"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update",
 	"role", "roles", "board-check", "park-mod", "teleport", // 2.0.6
-	"kick-time"} // 2.0.8
+	"kick-time", // 2.0.8
+	"drones"}    // 2.1.0
 
 // commandNameFree is custom_command_name_free: not one of the chat's own
 // commands, nor a server command admins type as /<command>, and not a

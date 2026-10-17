@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -118,6 +119,16 @@ func main() {
 			os.Exit(3)
 		case "emit": // test hook: a line of the server's own, as "emit [throwdown] ..."
 			log(arg)
+			log("ok")
+		case "typed": // test hook: "typed <runs> <name> /<word> [text]", a player's chat command as the server logs it
+			runs, rest, _ := strings.Cut(arg, " ")
+			name, line, _ := strings.Cut(rest, " /")
+			log("[command] " + name + ": /" + line)
+			log("[command] " + name + " /" + line)
+			n, _ := strconv.Atoi(runs)
+			for range n {
+				log("Fake | San Vansterdam | 1/16 players") // what status says
+			}
 			log("ok")
 		case "role": // "role <id> <role>|none", saved to data/roles.json like the real server
 			id, role, _ := strings.Cut(arg, " ")
