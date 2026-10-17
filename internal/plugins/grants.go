@@ -27,7 +27,7 @@ type Grant struct {
 // grants them on its card; nothing is granted until then.
 var Grants = func() []Grant {
 	g := []Grant{
-		{Key: auth.PlayersChat, Calls: []string{"server.say", "server.msg"}},
+		{Key: auth.PlayersChat, Calls: []string{"server.say", "server.msg", "ui.card"}},
 		{Key: auth.PlayersKick, Calls: []string{"server.kick"}},
 		{Key: auth.PlayersBan, Calls: []string{"server.ban", "server.unban"}},
 		{Key: auth.IngameAdmins, Calls: []string{"server.role"}},

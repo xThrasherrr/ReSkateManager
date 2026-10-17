@@ -70,7 +70,7 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 		if !ok {
 			continue
 		}
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 30*time.Second) // a card up can hold the server's for 15 s
 		if _, err := Post(cctx, in, a.Message, "announcements", !a.ChatOnly); err != nil && ctx.Err() == nil {
 			s.Log.Warn("send announcement", "instance", in.ID(), "id", a.ID, "err", err)
 		}
@@ -83,10 +83,11 @@ func (s *Scheduler) tick(ctx context.Context, now time.Time) {
 // server from ReSkate 2.0.2 on, it goes with announce, which shows it as a
 // card on every player's screen: as well as in chat on 2.0.2 (unless the
 // server's announcements.card is off), instead of it from 2.0.3. Otherwise it
-// goes with say, to chat only.
+// goes with say, to chat only. A card waits for the one up now, ahead of
+// plugins' cards.
 func Post(ctx context.Context, in *instance.Instance, msg, by string, card bool) (string, error) {
 	if card && serverconfig.Announces(in.Def().ConfigPath()) {
-		reply, err := in.Command(ctx, "announce "+msg, by)
+		reply, err := in.Announce(ctx, "", msg, by, true)
 		// A server taken back to an older release can leave the file saying
 		// otherwise.
 		if err != nil || !strings.HasPrefix(reply, "Unknown command ") {

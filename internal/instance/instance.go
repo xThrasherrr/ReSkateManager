@@ -216,6 +216,7 @@ type Instance struct {
 	// cmdSem serialises commands so replies arrive in the order they were
 	// sent; a channel, so someone waiting for their turn can give up.
 	cmdSem chan struct{}
+	cards  cards // the server's one announcement card, which Announce waits for
 	// reconciling is set while a roster check is asked for and not begun.
 	reconciling bool
 	// stops counts Stop calls, so a restart can tell another stop came.
@@ -748,6 +749,8 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 			in.pollRun = false
 		case e.Tag == "network":
 			in.networkLocked(e.Text)
+		case e.Tag == "announcement":
+			in.sawCard(e.Text)
 		case e.Tag == "throwdown" && (in.OnThrowdown != nil || in.OnNotice != nil):
 			if t, ok := logparse.ParseThrowdown(e.Text, in.namesLocked()); ok {
 				if in.OnThrowdown != nil {
@@ -770,6 +773,7 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		}
 	case logparse.KindReady:
 		in.runs, in.results, in.pollRun, in.mapsMoved = nil, 0, false, false
+		in.cards.clear()
 		in.defaultRole = serverconfig.DefaultRole(in.def.ConfigPath())
 		in.state = Running
 		in.readyAt = time.Now()

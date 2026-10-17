@@ -388,24 +388,39 @@ func (r *runner) send() {
 		ctx, cancel := context.WithTimeout(r.ctx, actionTime)
 		reply, err := a.in.Command(ctx, a.line, "plugin:"+r.p.ID)
 		cancel()
-		if err == nil && logparse.IsCommandError(reply) {
-			err = errors.New(reply)
-		}
-		r.p.mu.Lock()
-		r.p.stats.Sent++
-		r.p.mu.Unlock()
-		detail := a.detail
-		if err != nil {
-			detail += " (failed: " + err.Error() + ")"
-		}
-		if err := r.m.Store.Audit(context.Background(), store.AuditEntry{Username: "plugin:" + r.p.ID, Instance: a.server, Action: a.audit, Detail: detail}); err != nil {
-			r.m.Log.Warn("audit write failed", "err", err)
-		}
-		select {
-		case <-r.quit:
+		if !r.finish(a, reply, err) {
 			return
-		case r.jobs <- job{result: &result{action: a, reply: reply, err: err}}:
 		}
+	}
+}
+
+// finish counts and audits a command the plugin sent, then hands what came
+// of it back; false once the runner has stopped.
+func (r *runner) finish(a action, reply string, err error) bool {
+	if err == nil && logparse.IsCommandError(reply) {
+		err = errors.New(reply)
+	}
+	r.p.mu.Lock()
+	r.p.stats.Sent++
+	r.p.mu.Unlock()
+	detail := a.detail
+	if err != nil {
+		detail += " (failed: " + err.Error() + ")"
+	}
+	if err := r.m.Store.Audit(context.Background(), store.AuditEntry{Username: "plugin:" + r.p.ID, Instance: a.server, Action: a.audit, Detail: detail}); err != nil {
+		r.m.Log.Warn("audit write failed", "err", err)
+	}
+	return r.hand(a, reply, err)
+}
+
+// hand gives what came of an action back to the runner's goroutine; false
+// once the runner has stopped.
+func (r *runner) hand(a action, reply string, err error) bool {
+	select {
+	case <-r.quit:
+		return false
+	case r.jobs <- job{result: &result{action: a, reply: reply, err: err}}:
+		return true
 	}
 }
 

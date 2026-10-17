@@ -190,6 +190,14 @@ func main() {
 			}
 			log("[announcement] " + arg)
 			log("Announced.")
+		case "announce-to": // "announce-to <id> <text>", 2.0.3
+			id, text, _ := strings.Cut(arg, " ")
+			if name, on := players[id]; on && text != "" {
+				log("[announcement -> " + name + "] " + text)
+				log("Announced to " + name + ".")
+			} else {
+				log("No single connected player matches \"" + id + "\".")
+			}
 		case "kick": // "kick <id> [minutes|restart]"
 			id, _, _ := strings.Cut(arg, " ")
 			name, on := players[id]

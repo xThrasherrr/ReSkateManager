@@ -105,7 +105,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Plugins
 
-- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. They keep values of their own, read players' playtime, and rank players on leaderboards across your servers or on one. Owners add them under **Manager** as a zip, or copy them into `plugins/`, and turn each one on there, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
+- **Plugins (preview):** Lua 5.4 scripts in `plugins/` that run inside the manager and act on what happens on your servers: players joining and leaving, chat, throwdowns, map and state changes. They can read who is on, and chat, message, kick, ban, teleport and run commands with what an owner grants each one. They keep values of their own, read players' playtime, rank players on leaderboards across your servers or on one, and show players cards. Owners add them under **Manager** as a zip, or copy them into `plugins/`, and turn each one on there, where its card shows what it may do, its log, its errors and how busy it is. See [Writing plugins](#writing-plugins).
 
 ## Getting started
 
@@ -291,10 +291,13 @@ What a plugin can call:
 | `stats.top(board [, {server, period, limit}])` | A board's first players (10, or up to 100), each `{rank, id, name, value}` |
 | `stats.rank(board, steamId [, {server, period}])` | A player's rank and score on a board, or `nil` when they aren't on it |
 | `stats.around(board, steamId [, {server, period, limit}])` | The players about a player's place (5, or up to 100), theirs in the middle where there's room |
+| `ui.card(id, steamId or "all", card)` | Shows one player, or everyone, a card at the top of the screen: `card` is text, or `{title =, lines = {...}}` |
 
 A board covers all your servers: a sum adds a player's scores up from every server, a best takes their highest and a fastest their lowest. `{server = id}` reads one server's instead, and `{period = "month"}` or `{period = "week"}` this calendar month or the week from Monday (UTC) instead of all time. Players with the same score share a rank, whoever got there first listed first. Every plugin can read `playtime`, a board of everyone's time on your servers, from the panel's own record of visits. A board belongs to the plugin that defined it first: only that one adds to it, its `keep` can't change, and every plugin reads it. `public` marks a board you'd let out of the panel, for when there's a way out.
 
 Boards are read from a snapshot, worked out again once something is added (a read waits up to 50 ms for it, then takes the one before) or once it's 30 seconds old. A read that can't be answered returns `nil` and why: `local rows, err = stats.top("wins")`. What plugins keep is written within a second, so a crash loses that second at most. Removing a plugin keeps its store and its boards, so adding it again brings them back.
+
+A server shows one card at a time, whoever it's for, so cards wait their turn: the manager's own announcements first, then plugins' cards in the order they came, each once the card up now is down. That includes cards the server puts up itself, such as its timed announcements. A card waits a minute at most, and a plugin can have 16 waiting. Today's servers show a card as one line under their ANNOUNCEMENT title, its title and lines joined with " · " and cut at 200 bytes, for 6 to 15 seconds as it's longer, and not to a player with chat off or a menu open: a welcome is best sent some seconds after the join, with `after`.
 
 Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` is a player's SteamID64:
 
@@ -307,11 +310,11 @@ Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` 
 | `state` | `state` and `was`: `starting`, `running`, `stopping`, `stopped`, `crashed` or `updating`; `map` once known |
 | `throwdown.placed`, `.removed`, `.joined`, `.left`, `.started`, `.quit`, `.lead`, `.scored`, `.landed`, `.missed`, `.finished` | `kind`, `mode` (`jam`, `spot_battle`, `skate`), `leader` and `player` as `{name, id}`, and by kind `points`, `round`, `best`, `turn`, `queue`, `near`, `players` or `results` (each `{name, id, place, points, quit}`, or `landed` and `missed` for S.K.A.T.E.). Needs the server's **Log player activity** on |
 
-`server.*` calls name a server first, by its ID: an event's `e.server` is the one it happened on, and a plugin limited to some servers can't reach the others. Reading needs nothing. The other calls send a command, and each needs a permission the plugin asks for in `permissions` and an owner grants it on its card:
+`server.*` and `ui.*` calls name a server first, by its ID: an event's `e.server` is the one it happened on, and a plugin limited to some servers can't reach the others. Reading needs nothing. The other calls send a command, and each needs a permission the plugin asks for in `permissions` and an owner grants it on its card:
 
 | Permission | Calls |
 | --- | --- |
-| `players.chat` | `server.say`, `server.msg` |
+| `players.chat` | `server.say`, `server.msg`, `ui.card` |
 | `players.kick` | `server.kick` |
 | `players.ban` | `server.ban`, `server.unban` |
 | `ingame.admins.manage` | `server.role` |

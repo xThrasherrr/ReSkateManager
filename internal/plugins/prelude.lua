@@ -77,6 +77,15 @@ playtime = api("playtime", {"total", "sessions"})
 -- and value. Each returns nil and why when the board can't be read.
 stats = api("stats", {"define", "add", "top", "rank", "around"})
 
+-- ui.card(server, steamId or "all", card [, fn]) shows a card at the top of
+-- one player's screen, or everyone's: card is text, or {title =, lines =
+-- {...}}. A server shows one card at a time, so it waits its turn, a minute
+-- at most; it needs players.chat, and fn hears whether it went up, as with
+-- server.say. Today's servers show it as one line, the title and lines
+-- joined with " · ", for 6 to 15 seconds, and not while the player has chat
+-- off or a menu open.
+ui = api("ui", {"card"})
+
 -- require(name) runs one of the plugin's own files once and returns what it
 -- returned: "lib.util" is lib/util.lua in the plugin's folder.
 local loaded = {}

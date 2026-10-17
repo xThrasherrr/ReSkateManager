@@ -80,6 +80,11 @@ type runner struct {
 	sent    chan struct{}                   // closed once send has returned
 	want    atomic.Pointer[map[string]bool] // the events it has handlers for
 
+	cards        sync.WaitGroup     // the cards waiting their turn (uiCall)
+	cardsWaiting atomic.Int32       // how many
+	cardCtx      context.Context    // done once its Lua starts afresh, dropping them
+	cardCancel   context.CancelFunc // ends cardCtx
+
 	vmMu sync.Mutex // guards vm, which stop reads from another goroutine
 	vm   *luavm.VM
 
@@ -99,6 +104,7 @@ func newRunner(m *Manager, p *Plugin, man Manifest, rt *luavm.Runtime) *runner {
 		sent: make(chan struct{}), tokens: logBurst, tokensAt: time.Now()}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.quit = r.ctx.Done()
+	r.cardCtx, r.cardCancel = context.WithCancel(r.ctx)
 	if len(man.Servers) > 0 {
 		r.servers = map[string]bool{}
 		for _, s := range man.Servers {
@@ -148,7 +154,8 @@ func (r *runner) stop() {
 func (r *runner) loop() {
 	defer close(r.done)
 	defer func() { <-r.sent }()
-	defer r.cancel() // ends send when the plugin ends on its own
+	defer r.cards.Wait()
+	defer r.cancel() // ends send and the cards waiting when the plugin ends on its own
 	defer r.m.unlist(r)
 	defer r.reset()
 	go r.send()
@@ -218,8 +225,10 @@ func (r *runner) start() bool {
 }
 
 // reset ends the plugin's Lua: its timers stop, its handlers go, and so do
-// the commands it hasn't sent.
+// the commands it hasn't sent and the cards still waiting.
 func (r *runner) reset() {
+	r.cardCancel()
+	r.cardCtx, r.cardCancel = context.WithCancel(r.ctx)
 	for _, t := range r.timers {
 		t.cancel()
 	}
@@ -535,6 +544,8 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 		return r.serverCall(name, args)
 	case "store", "playtime", "stats":
 		return r.dataCall(name, args)
+	case "ui":
+		return r.uiCall(name, args)
 	}
 	return nil, fmt.Errorf("no function %s", name)
 }

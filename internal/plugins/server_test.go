@@ -99,6 +99,8 @@ var callPerms = []struct{ lua, perms string }{
 	{`server.command(S, "password hunter2")`, "console.exec+settings.edit"},
 	{`server.command(S, "maps reload")`, "console.exec+settings.edit"},
 	{`server.command(S, "frobnicate")`, "console.exec+settings.edit"}, // unknown: maybe a newer server's setting
+	{`ui.card(S, P, "hi")`, "players.chat"},
+	{`ui.card(S, "all", {title = "Hi", lines = {"there"}})`, "players.chat"},
 }
 
 // Every call is refused without each permission it needs, and only then:
@@ -115,12 +117,14 @@ func TestCallPermissions(t *testing.T) {
 -- Each command gets a function to call, so one that fails on the stopped
 -- server isn't logged among the results.
 local quiet = function() end
-for _, name in ipairs({"say", "msg", "kick", "ban", "unban", "teleport", "role", "command"}) do
-  local f = server[name]
-  server[name] = function(...)
-    local args = table.pack(...)
-    args[args.n + 1] = quiet
-    return f(table.unpack(args, 1, args.n + 1))
+for t, names in pairs({[server] = {"say", "msg", "kick", "ban", "unban", "teleport", "role", "command"}, [ui] = {"card"}}) do
+  for _, name in ipairs(names) do
+    local f = t[name]
+    t[name] = function(...)
+      local args = table.pack(...)
+      args[args.n + 1] = quiet
+      return f(table.unpack(args, 1, args.n + 1))
+    end
   end
 end
 for i, f in ipairs(calls) do
@@ -178,22 +182,25 @@ end
 	}
 }
 
-// The table covers every server.* call the prelude makes, and every grant.
+// The table covers every server.* and ui.* call the prelude makes, and every
+// grant.
 func TestCallPermissionsCoverEveryCall(t *testing.T) {
-	m := regexp.MustCompile(`server = api\("server", \{([^}]*)\}\)`).FindStringSubmatch(prelude)
-	if m == nil {
-		t.Fatal("no server.* list in the prelude")
-	}
 	covered, granted := map[string]bool{}, map[string]bool{}
 	for _, c := range callPerms {
-		covered[regexp.MustCompile(`^server\.(\w+)\(`).FindStringSubmatch(c.lua)[1]] = true
+		covered[regexp.MustCompile(`^(\w+\.\w+)\(`).FindStringSubmatch(c.lua)[1]] = true
 		for _, p := range strings.Split(c.perms, "+") {
 			granted[p] = true
 		}
 	}
-	for _, q := range strings.Split(m[1], ",") {
-		if name := strings.Trim(strings.TrimSpace(q), `"`); !covered[name] {
-			t.Errorf("server.%s isn't in callPerms", name)
+	for _, table := range []string{"server", "ui"} {
+		m := regexp.MustCompile(table + ` = api\("` + table + `", \{([^}]*)\}\)`).FindStringSubmatch(prelude)
+		if m == nil {
+			t.Fatalf("no %s.* list in the prelude", table)
+		}
+		for _, q := range strings.Split(m[1], ",") {
+			if name := table + "." + strings.Trim(strings.TrimSpace(q), `"`); !covered[name] {
+				t.Errorf("%s isn't in callPerms", name)
+			}
 		}
 	}
 	for _, g := range Grants {
@@ -201,7 +208,7 @@ func TestCallPermissionsCoverEveryCall(t *testing.T) {
 			t.Errorf("no call in callPerms needs %s", g.Key)
 		}
 		for _, c := range g.Calls {
-			if !covered[strings.TrimPrefix(c, "server.")] {
+			if !covered[c] {
 				t.Errorf("%s opens %s, which isn't in callPerms", g.Key, c)
 			}
 		}
