@@ -34,6 +34,7 @@ const (
 	DiskLow        = "diskLow"        // a drive the manager keeps things on is running out of space, or has room again
 	MemoryHigh     = "memoryHigh"     // memory has stayed high, or is back down
 	Test           = "test"           // the panel's test button; always sent
+	Plugin         = "plugin"         // a plugin's discord.post, to the plugin's own webhook
 )
 
 // Kinds lists the kinds that can be turned off, in the panel's order.
@@ -161,25 +162,28 @@ func (n *Notifier) Send(a Alert) {
 	}
 }
 
-// deliver posts an alert to the webhook set now, trying again a few times
-// while Discord limits the rate or is unavailable.
+// deliver posts an alert to the webhook set now.
 func (n *Notifier) deliver(ctx context.Context, a Alert) {
 	set, err := Load(ctx, n.Store)
 	if err != nil || set.Webhook == "" {
 		return
 	}
+	if err := n.Deliver(ctx, set.Webhook, a); err != nil && ctx.Err() == nil {
+		n.Log.Warn("alert not delivered", "title", a.Title, "err", err)
+	}
+}
+
+// Deliver posts a to webhook, trying again a few times while Discord limits
+// the rate or is unavailable.
+func (n *Notifier) Deliver(ctx context.Context, webhook string, a Alert) error {
 	for try := 1; ; try++ {
-		wait, err := n.post(ctx, set.Webhook, a)
-		if err == nil {
-			return
-		}
-		if wait == 0 || try == 4 {
-			n.Log.Warn("alert not delivered", "title", a.Title, "err", err)
-			return
+		wait, err := n.post(ctx, webhook, a)
+		if err == nil || wait == 0 || try == 4 {
+			return err
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-time.After(wait):
 		}
 	}
@@ -235,6 +239,7 @@ var colors = map[string]int{
 	Updated:        discord.Green,
 	ManagerUpdated: discord.Green,
 	Test:           discord.Blue,
+	Plugin:         discord.Blue,
 }
 
 // message is the webhook's JSON for a. Text from a server, such as a player's
@@ -246,11 +251,16 @@ func (n *Notifier) message(a Alert) map[string]any {
 		desc += "\n```\n" + strings.ReplaceAll(discord.Truncate(line, 900), "```", "ˋˋˋ") + "\n```"
 	}
 	embed := map[string]any{
-		"title":       discord.Truncate(a.Title, 250),
-		"description": discord.Truncate(desc, 4000),
-		"color":       colors[a.Kind],
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"footer":      map[string]string{"text": "ReSkateManager " + n.Version},
+		"color":     colors[a.Kind],
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"footer":    map[string]string{"text": "ReSkateManager " + n.Version},
+	}
+	// A plugin's post may have only one of them.
+	if a.Title != "" {
+		embed["title"] = discord.Truncate(a.Title, 250)
+	}
+	if desc != "" {
+		embed["description"] = discord.Truncate(desc, 4000)
 	}
 	if a.Clear {
 		embed["color"] = colors[Updated]

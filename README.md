@@ -294,6 +294,7 @@ What a plugin can call:
 | `stats.rank(board, steamId [, {server, period}])` | A player's rank and score on a board, or `nil` when they aren't on it |
 | `stats.around(board, steamId [, {server, period, limit}])` | The players about a player's place (5, or up to 100), theirs in the middle where there's room |
 | `ui.card(id, steamId or "all", card)` | Shows one player, or everyone, a card at the top of the screen: `card` is text, or `{title =, lines = {...}}` |
+| `discord.post(webhook, card)` | Posts a card to a Discord channel through one of its webhooks, as a message with the title on top and each line under it |
 
 A board covers all your servers: a sum adds a player's scores up from every server, a best takes their highest and a fastest their lowest. `{server = id}` reads one server's instead, and `{period = "month"}` or `{period = "week"}` this calendar month or the week from Monday (UTC) instead of all time. Players with the same score share a rank, whoever got there first listed first. Every plugin can read `playtime`, a board of everyone's time on your servers, from the panel's own record of visits. A board belongs to the plugin that defined it first: only that one adds to it, its `keep` can't change, and every plugin reads it. `public` marks a board you'd let out of the panel, for when there's a way out.
 
@@ -324,14 +325,17 @@ Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` 
 | `ingame.admins.manage` | `server.role` |
 | `console.exec` | `server.teleport`, `server.command` |
 | `settings.edit` | `server.command` for lines that change settings |
+| `discord.post` | `discord.post` |
 
 `server.command` needs what the panel's console asks of the person typing the line: `console.exec`, and for a line that kicks, bans, chats, gives roles or changes settings, that permission as well. Plugins can't run `poll-run`, `quit` or `update`. A call the plugin wasn't granted raises an error that says what to grant.
+
+`discord.post` is the one permission that isn't the panel's own: it's a plugin's only way out to the network, and only to a Discord webhook's address (`https://discord.com/api/webhooks/...`), which the plugin names. Its lines show as written, with Discord's formatting escaped; its title isn't escaped, so put what players typed in the lines. It pings nobody, `@everyone` included. Posts go one at a time in the order made, waiting out Discord's rate, with up to 16 waiting; a function given last hears `fn(true, "Posted.")` or `fn(false, why)`. Each shows in the audit log as `plugin:<ID>`'s `plugin.discord`, without the webhook.
 
 Commands are sent after the call returns, in the order made, with the panel's: the call returns `true` once it's queued, or `false` and why when too many are waiting. A function given last is called with what came of it, `fn(ok, reply)`: `ok` is false when the server didn't get it, wasn't running or didn't know the command, and `reply` is the server's answer (which may say it couldn't, as "No single connected player matches ...") or why it failed. Without one, a command that failed goes in the plugin's log. Each command shows in the server's console and the audit log as `plugin:<ID>`'s.
 
 The limits it runs under:
 
-- A plugin is Lua 5.4 and the plugin API, nothing more: the `string`, `table`, `math`, `utf8` and `coroutine` libraries, without `io`, `os`, `debug`, `package` or loading code from text or bytecode. It can't reach files outside its folder, other programs or the network.
+- A plugin is Lua 5.4 and the plugin API, nothing more: the `string`, `table`, `math`, `utf8` and `coroutine` libraries, without `io`, `os`, `debug`, `package` or loading code from text or bytecode. It can't reach files outside its folder, other programs or the network, other than Discord webhooks through `discord.post`.
 - One call into a plugin (an event, a timer or its `main.lua`) may run for 100 ms. One that runs over is cut off wherever it is, and the plugin starts afresh; three times in 10 minutes and it's stopped. One that fails 20 times in a minute is stopped too. A stopped plugin stays on, so **Reload** or the next start of the manager tries again.
 - A plugin may use 64 MB. Past that, Lua raises "not enough memory" in it.
 - Each plugin has its own queue of 256 events. A plugin too busy to keep up drops events, which its card counts, and never slows a server or another plugin.

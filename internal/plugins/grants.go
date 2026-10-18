@@ -22,9 +22,13 @@ type Grant struct {
 	Calls []string `json:"calls"`
 }
 
+// DiscordPost is the one grant that isn't a panel permission: it lets a
+// plugin post to Discord webhooks it names, its only way to the network.
+const DiscordPost = "discord.post"
+
 // Grants are the panel's own permissions that plugins can be given, on the
-// servers they run on. A plugin's plugin.toml asks for them, and the owner
-// grants them on its card; nothing is granted until then.
+// servers they run on, and DiscordPost. A plugin's plugin.toml asks for them,
+// and the owner grants them on its card; nothing is granted until then.
 var Grants = func() []Grant {
 	g := []Grant{
 		{Key: auth.PlayersChat, Calls: []string{"server.say", "server.msg", "ui.card"}},
@@ -34,15 +38,25 @@ var Grants = func() []Grant {
 		{Key: auth.ConsoleExec, Calls: []string{"server.teleport", "server.command"}},
 		// server.command's lines need what the panel's console asks of them.
 		{Key: auth.SettingsEdit, Calls: []string{"server.command"}},
+		{Key: DiscordPost, Label: "Post to Discord webhooks", Calls: []string{"discord.post"}},
 	}
 	for i := range g {
-		g[i].Label = auth.PermLabel(g[i].Key)
+		if g[i].Label == "" {
+			g[i].Label = auth.PermLabel(g[i].Key)
+		}
 	}
 	return g
 }()
 
 func grantable(key string) bool {
 	return slices.ContainsFunc(Grants, func(g Grant) bool { return g.Key == key })
+}
+
+func grantLabel(key string) string {
+	if i := slices.IndexFunc(Grants, func(g Grant) bool { return g.Key == key }); i >= 0 {
+		return Grants[i].Label
+	}
+	return auth.PermLabel(key)
 }
 
 // ErrBadGrant is a grant the plugin can't be given.

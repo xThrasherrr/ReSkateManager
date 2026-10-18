@@ -85,6 +85,10 @@ type runner struct {
 	cardCtx      context.Context    // done once its Lua starts afresh, dropping them
 	cardCancel   context.CancelFunc // ends cardCtx
 
+	posts    chan post      // its discord.post calls waiting (discordCall)
+	posting  sync.WaitGroup // postLoop, which sends them in order
+	postOnce sync.Once      // starts postLoop
+
 	vmMu sync.Mutex // guards vm, which stop reads from another goroutine
 	vm   *luavm.VM
 
@@ -100,7 +104,7 @@ type runner struct {
 }
 
 func newRunner(m *Manager, p *Plugin, man Manifest, rt *luavm.Runtime) *runner {
-	r := &runner{m: m, p: p, man: man, rt: rt, jobs: make(chan job, queueSize), acts: make(chan action, actionQueue), done: make(chan struct{}),
+	r := &runner{m: m, p: p, man: man, rt: rt, jobs: make(chan job, queueSize), acts: make(chan action, actionQueue), posts: make(chan post, maxPosts), done: make(chan struct{}),
 		sent: make(chan struct{}), tokens: logBurst, tokensAt: time.Now()}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.quit = r.ctx.Done()
@@ -155,6 +159,7 @@ func (r *runner) loop() {
 	defer close(r.done)
 	defer func() { <-r.sent }()
 	defer r.cards.Wait()
+	defer r.posting.Wait()
 	defer r.cancel() // ends send and the cards waiting when the plugin ends on its own
 	defer r.m.unlist(r)
 	defer r.reset()
@@ -536,6 +541,8 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 		return r.dataCall(name, args)
 	case "ui":
 		return r.uiCall(name, args)
+	case "discord":
+		return r.discordCall(name, args)
 	}
 	return nil, fmt.Errorf("no function %s", name)
 }

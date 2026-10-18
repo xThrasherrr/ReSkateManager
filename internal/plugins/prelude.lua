@@ -92,6 +92,13 @@ stats = api("stats", {"define", "add", "top", "rank", "around"})
 -- off or a menu open.
 ui = api("ui", {"card"})
 
+-- discord.post(webhook, card [, fn]) posts card to a Discord channel through
+-- one of its webhooks: card is text, or {title =, lines = {...}}, shown as
+-- written and pinging nobody. Posts go one at a time, waiting out Discord's
+-- rate, 16 at most; it needs discord.post, and fn hears whether it went, as
+-- with server.say.
+discord = api("discord", {"post"})
+
 -- require(name) runs one of the plugin's own files once and returns what it
 -- returned: "lib.util" is lib/util.lua in the plugin's folder.
 local loaded = {}

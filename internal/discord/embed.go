@@ -153,7 +153,7 @@ var stateLabel = map[instance.State]string{
 // serverField is one server's state, and while it runs its players, map,
 // join code, release, uptime and next restart.
 func serverField(s server, set Settings) field {
-	f := field{Name: Truncate(stateEmoji[s.State]+" "+escape(s.Def.Name), 256)}
+	f := field{Name: Truncate(stateEmoji[s.State]+" "+Escape(s.Def.Name), 256)}
 	label := stateLabel[s.State]
 	if label == "" {
 		label = string(s.State)
@@ -169,7 +169,7 @@ func serverField(s server, set Settings) field {
 		line += plural(s.Players, "player")
 	}
 	if s.Info.Map != "" {
-		line += " · " + escape(Truncate(s.Info.Map, 100))
+		line += " · " + Escape(Truncate(s.Info.Map, 100))
 	}
 	lines := []string{line}
 
@@ -186,7 +186,7 @@ func serverField(s server, set Settings) field {
 
 	var run []string
 	if s.Release != "" {
-		run = append(run, "ReSkate "+escape(s.Release))
+		run = append(run, "ReSkate "+Escape(s.Release))
 	}
 	if s.ReadyAt > 0 {
 		run = append(run, fmt.Sprintf("started <t:%d:R>", s.ReadyAt/1000))
@@ -202,11 +202,11 @@ func serverField(s server, set Settings) field {
 	return f
 }
 
-// markdown escapes what would format a name or a map's title in Discord, or
-// make it a mention or a timestamp.
 var markdown = strings.NewReplacer(`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`", "|", `\|`, "[", `\[`, "<", `\<`, ">", `\>`, "#", `\#`)
 
-func escape(s string) string { return markdown.Replace(s) }
+// Escape escapes what would format a name, a map's title or a plugin's post
+// in Discord, or make it a mention or a timestamp.
+func Escape(s string) string { return markdown.Replace(s) }
 
 func plural(n int, noun string) string {
 	if n == 1 {

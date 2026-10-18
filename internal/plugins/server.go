@@ -226,7 +226,7 @@ func (r *runner) need(call, perm, server string) error {
 	if !slices.Contains(r.man.Permissions, perm) {
 		how = fmt.Sprintf("add %q to permissions in its plugin.toml and reload it, then grant it on its card", perm)
 	}
-	return fmt.Errorf("%s needs %s (%s), which this plugin wasn't granted: %s", call, perm, auth.PermLabel(perm), how)
+	return fmt.Errorf("%s needs %s (%s), which this plugin wasn't granted: %s", call, perm, grantLabel(perm), how)
 }
 
 // server is the server a call names as its argument n, if the plugin runs
@@ -431,7 +431,9 @@ func (r *runner) answered(res *result) bool {
 		return true
 	}
 	if !res.hasFn {
-		if res.err != nil {
+		if res.err != nil && res.server == "" { // discord.post
+			r.log("warn", fmt.Sprintf("%s: %v", res.call, res.err))
+		} else if res.err != nil {
 			r.log("warn", fmt.Sprintf("%s on %s: %v", res.call, res.server, res.err))
 		}
 		return true

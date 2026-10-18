@@ -101,6 +101,7 @@ var callPerms = []struct{ lua, perms string }{
 	{`server.command(S, "frobnicate")`, "console.exec+settings.edit"}, // unknown: maybe a newer server's setting
 	{`ui.card(S, P, "hi")`, "players.chat"},
 	{`ui.card(S, "all", {title = "Hi", lines = {"there"}})`, "players.chat"},
+	{`discord.post(H, "hi")`, "discord.post"},
 }
 
 // Every call is refused without each permission it needs, and only then:
@@ -109,7 +110,7 @@ func TestCallPermissions(t *testing.T) {
 	m := newManager(t)
 	servers(t, m, "s1")
 	var main strings.Builder
-	main.WriteString("local S, P = \"s1\", \"" + zee + "\"\nlocal calls = {\n")
+	main.WriteString("local S, P, H = \"s1\", \"" + zee + "\", \"" + hook + "\"\nlocal calls = {\n")
 	for _, c := range callPerms {
 		main.WriteString("  function() return " + c.lua + " end,\n")
 	}
@@ -117,7 +118,7 @@ func TestCallPermissions(t *testing.T) {
 -- Each command gets a function to call, so one that fails on the stopped
 -- server isn't logged among the results.
 local quiet = function() end
-for t, names in pairs({[server] = {"say", "msg", "kick", "ban", "unban", "teleport", "role", "command"}, [ui] = {"card"}}) do
+for t, names in pairs({[server] = {"say", "msg", "kick", "ban", "unban", "teleport", "role", "command"}, [ui] = {"card"}, [discord] = {"post"}}) do
   for _, name in ipairs(names) do
     local f = t[name]
     t[name] = function(...)
@@ -182,8 +183,8 @@ end
 	}
 }
 
-// The table covers every server.* and ui.* call the prelude makes, and every
-// grant.
+// The table covers every server.*, ui.* and discord.* call the prelude
+// makes, and every grant.
 func TestCallPermissionsCoverEveryCall(t *testing.T) {
 	covered, granted := map[string]bool{}, map[string]bool{}
 	for _, c := range callPerms {
@@ -192,7 +193,7 @@ func TestCallPermissionsCoverEveryCall(t *testing.T) {
 			granted[p] = true
 		}
 	}
-	for _, table := range []string{"server", "ui"} {
+	for _, table := range []string{"server", "ui", "discord"} {
 		m := regexp.MustCompile(table + ` = api\("` + table + `", \{([^}]*)\}\)`).FindStringSubmatch(prelude)
 		if m == nil {
 			t.Fatalf("no %s.* list in the prelude", table)

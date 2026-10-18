@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,49 +94,57 @@ func (r *runner) uiCall(name string, args []any) ([]any, error) {
 	return []any{true}, nil
 }
 
-// cardText is a card as text: a string, or {title =, lines = {...}}, its
-// parts joined with " · " and cut where the server cuts chat.
+// cardText is a card as text: its title and lines joined with " · " and cut
+// where the server cuts chat.
 func cardText(call string, v any) (string, error) {
-	var parts []string
+	title, lines, err := cardParts(call, 3, v)
+	if err != nil {
+		return "", err
+	}
+	if title != "" {
+		lines = append([]string{title}, lines...)
+	}
+	return chat(call, 3, strings.Join(lines, " · "))
+}
+
+// cardParts reads a card, argument n: a string, which is one line, or
+// {title =, lines = {...}}. Each part is one line, and empty ones are dropped.
+func cardParts(call string, n int, v any) (title string, lines []string, err error) {
+	clean := func(s string) string { return strings.TrimSpace(supervisor.CleanText(s)) }
 	if s, ok := v.(string); ok {
-		parts = append(parts, s)
+		lines = []string{clean(s)}
 	} else {
 		if _, ok := v.(*luavm.Table); !ok {
-			return "", badArg(3, call, "string or card", v)
+			return "", nil, badArg(n, call, "string or card", v)
 		}
-		opts, err := options(call, 3, v, "title", "lines")
+		opts, err := options(call, n, v, "title", "lines")
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 		if t, ok := opts["title"]; ok {
 			s, ok := t.(string)
 			if !ok {
-				return "", fmt.Errorf("bad argument #3 to '%s' (title is a string)", call)
+				return "", nil, fmt.Errorf("bad argument #%d to '%s' (title is a string)", n, call)
 			}
-			parts = append(parts, s)
+			title = clean(s)
 		}
 		if l, ok := opts["lines"]; ok {
-			lines, ok := l.(*luavm.Table)
+			list, ok := l.(*luavm.Table)
 			if !ok {
-				return "", fmt.Errorf("bad argument #3 to '%s' (lines is a list of strings)", call)
+				return "", nil, fmt.Errorf("bad argument #%d to '%s' (lines is a list of strings)", n, call)
 			}
-			for _, line := range lines.List() {
+			for _, line := range list.List() {
 				s, ok := line.(string)
 				if !ok {
-					return "", fmt.Errorf("bad argument #3 to '%s' (lines is a list of strings)", call)
+					return "", nil, fmt.Errorf("bad argument #%d to '%s' (lines is a list of strings)", n, call)
 				}
-				parts = append(parts, s)
+				lines = append(lines, clean(s))
 			}
 		}
 	}
-	var kept []string
-	for _, p := range parts {
-		if p = strings.TrimSpace(supervisor.CleanText(p)); p != "" {
-			kept = append(kept, p)
-		}
+	lines = slices.DeleteFunc(lines, func(s string) bool { return s == "" })
+	if title == "" && len(lines) == 0 {
+		return "", nil, fmt.Errorf("bad argument #%d to '%s' (no text to show)", n, call)
 	}
-	if len(kept) == 0 {
-		return "", fmt.Errorf("bad argument #3 to '%s' (no text to show)", call)
-	}
-	return chat(call, 3, strings.Join(kept, " · "))
+	return title, lines, nil
 }

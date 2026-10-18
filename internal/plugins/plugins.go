@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/alerts"
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/logfile"
 	"github.com/xThrasherrr/ReSkateManager/internal/plugins/luavm"
@@ -43,6 +44,8 @@ type Manager struct {
 	Log     *slog.Logger // the manager's log
 	LogPath string       // where plugins' log lines go, as data/plugins.log
 	Servers Servers      // the servers plugins read and act on; nil for none
+	// Discord posts a plugin's discord.post to its webhook; nil for none.
+	Discord func(ctx context.Context, webhook string, a alerts.Alert) error
 
 	mu      sync.Mutex // guards what follows, and starting and stopping runners
 	plugins map[string]*Plugin
