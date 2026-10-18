@@ -82,6 +82,10 @@ var parkLayouts = func() map[string][]string {
 
 var checkModes = []string{"off", "warn", "kick"}
 
+// LockTools are the tools ReSkate 2.1.0 can lock for single players and a
+// throwdown's players (lock_tools_text), in its order.
+var LockTools = []string{"noclip", "nobail", "boosts", "tuning"}
+
 // A vote's own length and cooldown, from ReSkate 2.0.2; 0 is the votes' own.
 const (
 	votesOwnSeconds  = "0 is the vote length above; otherwise 10 to 300."
@@ -177,6 +181,7 @@ var Fields = []Field{
 	{Key: "bone_scale_limit", Label: "Resized body parts, at most (times)", Group: "Gameplay", Type: TypeNumber, Min: 0, Max: 8, Help: "How far a mod may resize part of a skater for the others. 0 is no limit.", Default: 2.0},
 	{Key: "bone_reach_limit", Label: "Stretched body parts, at most (m)", Group: "Gameplay", Type: TypeNumber, Min: 0, Max: 20, Help: "How far a bone may be from the one it hangs from, for the others. 0 is no limit; otherwise 0.5 to 20.", Default: 1.0},
 	{Key: "sync_effects", Label: "Players see each other's skater effects", Group: "Gameplay", Type: TypeBool, Help: "Sparks, dust, and the trails and fire of costumes and boards.", Default: true},
+	{Key: "sync_drones", Label: "Players see each other's drones", Group: "Gameplay", Type: TypeBool, Help: "Where a player flying ReSkate's FPV drone has it.", Default: true},
 	{Key: "noclip", Label: "Players may noclip and teleport", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "no_bail", Label: "Players may use No Bail", Group: "Gameplay", Type: TypeBool, Default: true},
 	{Key: "boosts", Label: "Players may use boosts", Group: "Gameplay", Type: TypeBool, Default: true},
@@ -186,6 +191,7 @@ var Fields = []Field{
 	{Key: "afk_kick_minutes", Label: "Remove players away for (min)", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1440, Help: "They're warned a minute before. 0 is never. Admins are never removed.", Default: 0.0},
 	{Key: "kick_minutes", Label: "Kicked players stay out for (min)", Group: "Gameplay", Type: TypeInt, Min: 0, Max: 1440, Help: "0 is until the server restarts. One kick can be given its own time.", Default: 0.0},
 	{Key: "announce_throwdowns", Label: "Announce throwdowns in chat", Group: "Gameplay", Type: TypeBool, Default: true},
+	{Key: "throwdown_locks", Label: "Locked for throwdown players", Group: "Gameplay", Type: TypeList, Options: LockTools, Help: "Taken from a throwdown's players while it runs, for fair games.", Default: []string{}},
 	{Key: "activity_log", Label: "Log player activity", Group: "Gameplay", Type: TypeBool, Default: true},
 
 	{Key: "parks.construction", Label: "Construction site / Hedgemont", Group: "Parks", Type: TypeEnum, Options: parkLayouts["construction"], Default: "skatepark_01"},

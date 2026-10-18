@@ -341,6 +341,22 @@
 											<CustomCommands id={f.key} bind:value={values[f.key]} max={f.max} disabled={locked} />
 										{:else if f.type === 'parkmods'}
 											<ParkMods id={f.key} bind:value={values[f.key]} max={f.max} folders={modFolders} maps={mapNames} disabled={locked} />
+										{:else if f.type === 'list' && f.options}
+											<!-- A list from fixed choices (throwdown_locks), kept in their order. -->
+											<div id={f.key} role="group" aria-label={f.label} class="flex flex-wrap gap-x-4 gap-y-1">
+												{#each f.options as o (o)}
+													{@const picked = (values[f.key] as string[] | undefined) ?? []}
+													<label class="flex items-center gap-1.5 text-sm">
+														<input
+															type="checkbox"
+															disabled={locked}
+															checked={picked.includes(o)}
+															onchange={(e) => (values[f.key] = f.options!.filter((x) => (x === o ? e.currentTarget.checked : picked.includes(x))))}
+														/>
+														{o}
+													</label>
+												{/each}
+											</div>
 										{:else if f.type === 'list'}
 											<textarea
 												id={f.key}

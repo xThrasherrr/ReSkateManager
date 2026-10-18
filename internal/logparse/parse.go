@@ -60,7 +60,7 @@ var (
 	pmRe    = regexp.MustCompile(`(?i)\bp\.? ?m\b`)
 	amRe    = regexp.MustCompile(`(?i)\ba\.? ?m\b`)
 	// Since 2.0.3 a tag can name the one player a line was for: "[announcement -> Bob] ...".
-	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk|parks|teleport)(?: -> (.+?))?\] (.*)$`)
+	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk|parks|teleport|lock)(?: -> (.+?))?\] (.*)$`)
 	// One of the owner's chat commands running (2.0.3): "<name> /<command>[ <text>]".
 	customCommandRe = regexp.MustCompile(`^(.+?) /([a-z0-9_-]{1,16})(?: .*)?$`)
 	// ", admin" before 2.0.6; then the player's role, which is everyone's
@@ -344,4 +344,48 @@ func ParseMaps(text string) ([]string, bool) {
 		}
 	}
 	return out, true
+}
+
+// LocksHeadRe is the first line of the reply to `locks` (ReSkate 2.1.0).
+var LocksHeadRe = regexp.MustCompile(`^(\d+) players? ha(?:s|ve) locked tools\b`)
+
+// Lock is a player whose tools are locked, as `locks` lists them.
+type Lock struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Here      bool     `json:"here"`
+	Tools     []string `json:"tools"`     // an admin's lock, kept when they leave
+	Throwdown []string `json:"throwdown"` // their throwdown's, while it runs
+}
+
+// The tools as lock_tools_text lists them; only these, so a name with ": "
+// in it still ends where they start.
+const lockToolsRe = `((?:noclip|nobail|boosts|tuning)(?:, (?:noclip|nobail|boosts|tuning))*)`
+
+var lockLineRe = regexp.MustCompile(`^(\d+)  (.*?)( \(not here\))?: ` + lockToolsRe + `? ?(?:\(throwdown: ` + lockToolsRe + `\))?$`)
+
+// ParseLocks reads the reply to `locks`:
+//
+//	N players have locked tools[ (throwdown-locks: <tools>)]
+//	  <SteamID64>  <name>[ (not here)]: [<tools>][ (throwdown: <tools>)]
+func ParseLocks(text string) ([]Lock, bool) {
+	lines := strings.Split(text, "\n")
+	m := LocksHeadRe.FindStringSubmatch(lines[0])
+	if m == nil {
+		return nil, false
+	}
+	want, _ := strconv.Atoi(m[1])
+	tools := func(s string) []string {
+		if s == "" {
+			return []string{}
+		}
+		return strings.Split(s, ", ")
+	}
+	out := make([]Lock, 0, want)
+	for _, l := range lines[1:] {
+		if m := lockLineRe.FindStringSubmatch(strings.TrimPrefix(l, "  ")); m != nil {
+			out = append(out, Lock{ID: m[1], Name: m[2], Here: m[3] == "", Tools: tools(m[4]), Throwdown: tools(m[5])})
+		}
+	}
+	return out, len(out) == want
 }

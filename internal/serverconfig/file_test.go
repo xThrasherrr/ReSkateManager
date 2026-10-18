@@ -244,6 +244,9 @@ func TestSettingVerbsCoverDiff(t *testing.T) {
 			}
 		case []string:
 			tries = []any{[]any{"00000000000000cc"}, []any{"Isle of Grom"}, []any{"76561198000000003"}}
+			for _, o := range fd.Options {
+				tries = append(tries, []any{o})
+			}
 		case []CustomVote:
 			// Only a vote the server has changes live.
 			f.Set(fd.Key, []any{map[string]any{"name": "restart", "command": "map {map}"}})

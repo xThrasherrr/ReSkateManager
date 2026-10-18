@@ -543,8 +543,13 @@ func walk(r io.Reader, kind string, fn func(name string, mode os.FileMode, body 
 }
 
 // Protected files are the host's own: a release creates them when missing but never replaces them.
+// Not world-layers.json: from ReSkate 2.1.0 the server turns layer sync off with one that isn't
+// its release's game build, so the release's copy replaces it.
 func protected(rel string) bool {
 	rel = filepath.ToSlash(rel)
+	if strings.EqualFold(rel, "world-layers.json") {
+		return false
+	}
 	return slices.ContainsFunc(serverconfig.HostFiles, func(f string) bool { return strings.EqualFold(f, rel) })
 }
 

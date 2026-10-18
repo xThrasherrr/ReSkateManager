@@ -55,7 +55,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Players and server control
 
-- **Player management:** see who's online and who has played, with each player's role from ReSkate 2.0.6, their playtime, and the throwdowns they played and won (a quit counts for nothing; counted while the server's player activity log is on), on that server and on all of yours. Kick (from 2.0.8 for as long as you pick, or the server's own kick time), ban, unban and manage in-game admins, which from 2.0.6 are the players with the server's `admin` role.
+- **Player management:** see who's online and who has played, with each player's role from ReSkate 2.0.6, their playtime, and the throwdowns they played and won (a quit counts for nothing; counted while the server's player activity log is on), on that server and on all of yours. Kick (from 2.0.8 for as long as you pick, or the server's own kick time), ban, unban and manage in-game admins, which from 2.0.6 are the players with the server's `admin` role. From 2.1.0, lock noclip, No Bail, the boosts or physics tuning for one player, also one who left, and see whose tools are locked.
 - **Crash recovery:** a crashed server restarts automatically, with backoff, up to five tries in a row.
 - **Scheduled restarts:** restart a server at set times of day, or after so many hours up. Players get a warning in chat 10, 5 and 1 minute before; a server with nobody on restarts straight away.
 
@@ -69,7 +69,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 - **Settings editor:** a form for every `ReSkateServer.json` setting. Most changes apply live through the server's own console commands. A few with no command (`max_players`, ports, `steam_token`, `global_bans`) go through a safe stop → write → start instead. Only owners can see or change a server's `steam_token`, its custom votes or its chat commands (ReSkate 2.0.3's own `/discord`, `/rules` and the like), which run server commands. ReSkate 2.0.6's park mods (parks built in the game's Park Editor, spawned for everyone) are set up live too.
 - **Map pool and rotation:** pick which maps players can vote for and how long the server stays on each, and from ReSkate 2.0.7 whether players vote for the next map and can vote to stay longer. Edits apply live, admin changes included. The manager warns before you disable or delete a mod whose map is in a pool, since the server won't start without it.
-- **World controls:** time of day and every world layer per map, applied live or saved for the next start (needs `world-layers.json` next to the server).
+- **World controls:** time of day and every world layer per map, applied live or saved for the next start (needs `world-layers.json` next to the server, which comes with the server's release and is replaced by each update).
 
 ### Mods
 

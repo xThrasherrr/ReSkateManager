@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// A config as ReSkate 2.0.8 writes it (layout in Server/server_config.cpp), in
+// A config as ReSkate 2.1.0 writes it (layout in Server/server_config.cpp), in
 // the sections of 1.1.7 and later, with the admins an older one listed: the
 // server moves them into data/roles.json when it starts.
 const sectionedConfig = `{
@@ -26,8 +26,8 @@ const sectionedConfig = `{
     "layers": {"grom_tod_1_night": "on"}, "park_mods": [], "park_limits": {"parks": 3, "objects": 512}},
   "players": {"allow_boosts": false, "allow_no_bail": true, "allow_noclip": false, "allow_parties": true, "party_size": 4,
     "afk_kick_minutes": 5, "allow_voice_chat": true, "voice_range": 30, "object_placement": "admins", "object_limit": 10,
-    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false, "kick_minutes": 0, "word_warnings": 3,
-    "use_global_word_filter": true},
+    "allow_object_scaling": true, "sync_effects": true, "sync_drones": true, "announce_throwdowns": false,
+    "throwdown_locks": ["nobail", "boosts"], "kick_minutes": 0, "word_warnings": 3, "use_global_word_filter": true},
   "anti_cheat": {"speed_hack": "kick", "pinned_board": "warn", "modified_scoring": "off", "allowed_scoring_mods": ["00000000deadbeef"],
     "enforce_tuning": true, "bone_scale_limit": 2, "bone_reach_limit": 1.0},
   "network": {"use_steam_relay": true, "send_rate": 48, "crowd_budget": 0, "pack_ms": 10, "threads": 0, "finger_distance": 25,
@@ -338,6 +338,36 @@ func TestKickTimes(t *testing.T) {
 		if _, err := Diff(f, bad, nil); err == nil {
 			t.Errorf("%v accepted", bad)
 		}
+	}
+}
+
+// 2.1.0's drones and throwdown locks change live. The locks are read as the
+// server reads them, and kept in its order.
+func TestDronesAndThrowdownLocks(t *testing.T) {
+	f, _ := readSectioned(t)
+	if v := f.Values(); v["sync_drones"] != true || !slices.Equal(v["throwdown_locks"].([]string), []string{"nobail", "boosts"}) {
+		t.Errorf("read %v %v", v["sync_drones"], v["throwdown_locks"])
+	}
+	p, err := Diff(f, map[string]any{"sync_drones": false, "throwdown_locks": []any{"Tuning", "teleport, boosts"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"drones off", "throwdown-locks noclip,boosts,tuning"}; !slices.Equal(p.Commands, want) || len(p.Restart) != 0 {
+		t.Fatalf("planned %+v, want %q", p, want)
+	}
+	f.ApplyOffline(p.Changed)
+	if got, _ := f.at("players.throwdown_locks"); fmt.Sprint(got) != "[noclip boosts tuning]" {
+		t.Errorf("wrote %v", got)
+	}
+	want := []string{"throwdown-locks off"}
+	if p, err = Diff(f, map[string]any{"throwdown_locks": []any{}}, nil); err != nil || !slices.Equal(p.Commands, want) {
+		t.Errorf("planned %+v (%v), want %q", p, err, want)
+	}
+	if p, err = Diff(f, map[string]any{"throwdown_locks": []any{"all"}}, nil); err != nil || !slices.Equal(p.Commands, []string{"throwdown-locks noclip,nobail,boosts,tuning"}) {
+		t.Errorf("all planned %+v (%v)", p, err)
+	}
+	if _, err := Diff(f, map[string]any{"throwdown_locks": []any{"flying"}}, nil); err == nil {
+		t.Error("an unknown tool accepted")
 	}
 }
 

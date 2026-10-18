@@ -266,6 +266,23 @@ export interface Player {
 	joinedAt?: number;
 }
 
+/** The tools ReSkate 2.1.0 can take from one player, in its order. */
+export const lockTools = [
+	{ key: 'noclip', label: 'Noclip and teleporting' },
+	{ key: 'nobail', label: 'No Bail' },
+	{ key: 'boosts', label: 'Boosts' },
+	{ key: 'tuning', label: 'Their own physics tuning' }
+] as const;
+
+/** A player whose tools are locked, as the server's locks lists them. */
+export interface Lock {
+	id: string;
+	name: string;
+	here: boolean;
+	tools: string[]; // an admin's lock, kept when they leave
+	throwdown: string[]; // their throwdown's, while it runs
+}
+
 // An in-game admin, or a player given one of the server's roles.
 export interface Admin {
 	id: string;

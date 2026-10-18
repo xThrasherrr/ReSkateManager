@@ -530,6 +530,58 @@ func (a *API) kick(w http.ResponseWriter, r *http.Request) {
 	a.answerReply(w, r, reply, err)
 }
 
+// lock takes tools from one player (ReSkate 2.1.0), or with unlock gives them
+// back: the tools named, every one when none are. A player who left is locked
+// by their SteamID64, and stays locked until unlocked or the server restarts.
+func (a *API) lock(verb string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		in := inst(r)
+		id, ok := steamParam(w, r)
+		if !ok {
+			return
+		}
+		var req struct {
+			Tools []string `json:"tools"`
+		}
+		if r.ContentLength != 0 && !readJSON(w, r, &req) {
+			return
+		}
+		for _, t := range req.Tools {
+			if !slices.Contains(serverconfig.LockTools, t) {
+				writeErr(w, 400, "the tools are "+strings.Join(serverconfig.LockTools, ", "))
+				return
+			}
+		}
+		// An older server has no locks, and would say so.
+		if v := a.Builds.Version(in.Def().Exe()); serverconfig.NewerVersion("2.1.0", v) {
+			writeErr(w, http.StatusConflict, "ReSkate 2.1.0 locks players' tools; update this server first")
+			return
+		}
+		tools := strings.Join(req.Tools, ",")
+		if tools == "" {
+			tools = "all"
+		}
+		reply, err := in.Command(r.Context(), verb+" "+id+" "+tools, from(r).user.Username)
+		a.auditOutcome(r, in.ID(), "player."+verb, id+" "+tools, err)
+		a.answerReply(w, r, reply, err)
+	}
+}
+
+// locks lists the players whose tools are locked (ReSkate 2.1.0).
+func (a *API) locks(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	if v := a.Builds.Version(in.Def().Exe()); serverconfig.NewerVersion("2.1.0", v) {
+		writeErr(w, http.StatusConflict, "ReSkate 2.1.0 locks players' tools; update this server first")
+		return
+	}
+	list, err := in.Locks(r.Context())
+	if err != nil {
+		a.answerReply(w, r, "", err)
+		return
+	}
+	writeJSON(w, 200, list)
+}
+
 func (a *API) bans(w http.ResponseWriter, r *http.Request) {
 	f, ok := readConfig(w, inst(r))
 	if !ok {

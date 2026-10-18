@@ -359,6 +359,46 @@ func TestKickMinutes(t *testing.T) {
 	}
 }
 
+// Tool locks (ReSkate 2.1.0) name only the server's tools, and a server
+// known to be older is told it has none.
+func TestToolLocks(t *testing.T) {
+	servers, builds := t.TempDir(), &updater.Builds{}
+	p := newPanel(t, func(a *API) {
+		a.Reg = instance.NewRegistry(a.Log)
+		a.ServersDir = servers
+		a.Builds = builds
+	})
+	p.post("/api/auth/login", `{"username":"owner","password":"`+testPassword+`"}`)
+	if code, b := p.do("POST", "/api/instances", `{"name":"a"}`); code != 201 {
+		t.Fatalf("create: %d %s", code, b)
+	}
+	exe := instance.Def{Dir: filepath.Join(servers, "a")}.Exe()
+	writeFile(t, exe, "a server")
+	sum, err := updater.FileSHA256(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{"lock": `{"tools":["nobail","boosts"]}`, "unlock": ""} {
+		code, b := p.do("POST", "/api/instances/a/players/76561198000000001/"+path, body)
+		if code != 400 || !strings.Contains(string(b), "not running") {
+			t.Errorf("%s: %d %s, want 400 for the stopped server", path, code, b)
+		}
+	}
+	if code, b := p.do("POST", "/api/instances/a/players/76561198000000001/lock", `{"tools":["all"]}`); code != 400 || strings.Contains(string(b), "not running") {
+		t.Errorf("an unknown tool: %d %s, want 400", code, b)
+	}
+	if code, b := p.do("GET", "/api/instances/a/locks", ""); code != 400 || !strings.Contains(string(b), "not running") {
+		t.Errorf("locks: %d %s, want 400 for the stopped server", code, b)
+	}
+	builds.Learn(&updater.Release{Version: "2.0.7", ExeSHA256: sum})
+	if code, b := p.do("POST", "/api/instances/a/players/76561198000000001/lock", `{}`); code != http.StatusConflict {
+		t.Errorf("a lock on 2.0.7: %d %s, want 409", code, b)
+	}
+	if code, b := p.do("GET", "/api/instances/a/locks", ""); code != http.StatusConflict {
+		t.Errorf("locks on 2.0.7: %d %s, want 409", code, b)
+	}
+}
+
 // Someone who may only manage servers sees every one, so they can edit,
 // export and remove the servers they create.
 func TestInstancesManageSeesServers(t *testing.T) {

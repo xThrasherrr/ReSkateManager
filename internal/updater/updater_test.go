@@ -43,6 +43,7 @@ func TestDownloadAndInstall(t *testing.T) {
 		exe:                  "new server",
 		"steam_api64.dll":    "dll",
 		"ReSkateServer.json": "{\"should\":\"not overwrite\"}",
+		"world-layers.json":  "release layers",
 		"Mods/x/readme.txt":  "no",
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +72,7 @@ func TestDownloadAndInstall(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, exe), []byte("old server"), 0o755)
 	os.WriteFile(filepath.Join(dir, "ReSkateServer.json"), []byte("{\"mine\":true}"), 0o644)
+	os.WriteFile(filepath.Join(dir, "world-layers.json"), []byte("another build's layers"), 0o644)
 	if cur, _ := FileSHA256(filepath.Join(dir, exe)); cur == r.ExeSHA256 {
 		t.Fatal("old exe already current")
 	}
@@ -83,11 +85,15 @@ func TestDownloadAndInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(installed) != 2 {
+	if len(installed) != 3 {
 		t.Errorf("installed %v", installed)
 	}
 	if cur, _ := FileSHA256(filepath.Join(dir, exe)); cur != r.ExeSHA256 {
 		t.Error("exe not replaced")
+	}
+	// 2.1.0 turns layer sync off with layers from another game build.
+	if b, _ := os.ReadFile(filepath.Join(dir, "world-layers.json")); string(b) != "release layers" {
+		t.Errorf("world-layers.json kept: %s", b)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "ReSkateServer.json")); string(b) != "{\"mine\":true}" {
 		t.Errorf("config overwritten: %s", b)
@@ -317,7 +323,8 @@ func TestInstallKeepsHostFilesWhateverTheirSpelling(t *testing.T) {
 	}
 }
 
-// Every file a backup holds as the host's own is kept through an update too.
+// Every file a backup holds as the host's own is kept through an update too,
+// but world-layers.json: the release's replaces it (ReSkate 2.1.0).
 func TestInstallKeepsEveryHostFile(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "data"), 0o755)
@@ -332,6 +339,9 @@ func TestInstallKeepsEveryHostFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, f := range serverconfig.HostFiles {
+		if f == "world-layers.json" {
+			continue
+		}
 		if got, _ := os.ReadFile(filepath.Join(dir, f)); string(got) != "mine" {
 			t.Errorf("%s was replaced: %s", f, got)
 		}

@@ -50,7 +50,8 @@ const BansFile = "data/bans.json"
 
 // HostFiles are the files in a server's folder that are the host's own: what
 // it can't download again, apart from its mods. A server update creates them
-// when missing but never replaces them, and a backup holds them. Servers from
+// when missing but never replaces them (world-layers.json aside, which it
+// does from the release), and a backup holds them. Servers from
 // ReSkate 1.1.7 on keep their bans in data/, and from 2.0.6 their roles (the
 // admins among them) and chat words too.
 var HostFiles = []string{"ReSkateServer.json", "world-layers.json", BansFile, RolesFile,
@@ -195,6 +196,7 @@ var sections = map[string]string{
 	"object_limit": "players.object_limit", "announce_throwdowns": "players.announce_throwdowns",
 	"afk_kick_minutes": "players.afk_kick_minutes", "allow_object_scaling": "players.allow_object_scaling", "sync_effects": "players.sync_effects",
 	"word_warnings": "players.word_warnings", "use_global_word_filter": "players.use_global_word_filter", "kick_minutes": "players.kick_minutes",
+	"sync_drones": "players.sync_drones", "throwdown_locks": "players.throwdown_locks",
 
 	"speed_check": "anti_cheat.speed_hack", "score_check": "anti_cheat.modified_scoring",
 	"score_allow": "anti_cheat.allowed_scoring_mods", "enforce_tuning": "anti_cheat.enforce_tuning",
@@ -760,6 +762,9 @@ func normalize(fd Field, raw any) (any, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s must be a list", fd.Label)
 		}
+		if fd.Key == "throwdown_locks" {
+			return lockTools(fd, items)
+		}
 		out := []string{}
 		for _, x := range items {
 			it := strings.ToLower(strings.TrimSpace(fmt.Sprint(x)))
@@ -828,6 +833,28 @@ func normalize(fd Field, raw any) (any, error) {
 		return parkMods(raw)
 	}
 	return nil, errors.New("unknown field type")
+}
+
+// lockTools reads tool names as parse_lock_tools does (ReSkate 2.1.0):
+// several to an item with commas, teleport for noclip and all for every one.
+// They're kept in the server's order, as it writes them.
+func lockTools(fd Field, items []any) ([]string, error) {
+	var named []string
+	for _, x := range items {
+		for name := range strings.SplitSeq(fmt.Sprint(x), ",") {
+			switch name = strings.ToLower(strings.TrimSpace(name)); {
+			case name == "all":
+				named = append(named, LockTools...)
+			case name == "teleport":
+				named = append(named, "noclip")
+			case slices.Contains(LockTools, name):
+				named = append(named, name)
+			default:
+				return nil, fmt.Errorf("%s: %q is not one of %s", fd.Label, name, strings.Join(LockTools, ", "))
+			}
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(LockTools), func(t string) bool { return !slices.Contains(named, t) }), nil
 }
 
 // asNumber reads a number as JSON, the panel or a hand-written file gives it.
@@ -1448,6 +1475,12 @@ func Diff(cur *File, want map[string]any, known []string) (*Plan, error) {
 		case "score_allow":
 			old, _ := curVals[fd.Key].([]string)
 			p.Commands = append(p.Commands, setCommands(old, v.([]string), withArg("score-allow remove "), withArg("score-allow "))...)
+		case "throwdown_locks":
+			tools := strings.Join(v.([]string), ",")
+			if tools == "" {
+				tools = "off"
+			}
+			p.Commands = append(p.Commands, "throwdown-locks "+tools)
 		default:
 			cmd, ok := settingCommand(fd, v)
 			if !ok {
@@ -1469,7 +1502,7 @@ var commandVerbs = map[string]string{
 	"latest_versions": "maps latest", "latest_check_minutes": "maps latest every",
 	"voice_chat": "voice", "voice_range": "voice-range",
 	"object_placement": "placement", "object_limit": "objects", "allow_object_scaling": "object-scaling",
-	"bone_scale_limit": "bone-scale", "bone_reach_limit": "bone-reach", "sync_effects": "effects",
+	"bone_scale_limit": "bone-scale", "bone_reach_limit": "bone-reach", "sync_effects": "effects", "sync_drones": "drones",
 	"noclip": "noclip", "no_bail": "nobail", "boosts": "boosts", "enforce_tuning": "tuning",
 	"parties": "parties", "party_size": "party-size", "afk_kick_minutes": "afk-kick", "kick_minutes": "kick-time",
 	"announce_throwdowns": "announce-throwdowns", "activity_log": "activity-log",
@@ -1525,7 +1558,7 @@ func settingCommand(fd Field, v any) (string, bool) {
 // need the same permission as the settings pages.
 var SettingVerbs = func() []string {
 	// What Diff plans besides commandVerbs, then the others.
-	out := []string{"map-pool", "password", "welcome", "chat-color", "distances", "park-mod", "score-allow",
+	out := []string{"map-pool", "password", "welcome", "chat-color", "distances", "park-mod", "score-allow", "throwdown-locks",
 		"tps", "tod", "layers", "layer", "chat-colour",
 		"voice-allow", "object-placement", "object-limit", "world-layer-sync", "noclip-allow", "nobail-allow", "boosts-allow", "tuning-enforce"}
 	for _, verb := range commandVerbs {

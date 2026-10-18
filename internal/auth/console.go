@@ -13,8 +13,8 @@ import (
 
 // consoleOnly are the console commands console.exec alone may run: they only
 // read, or act on players in a way no finer permission covers. Of maps, only
-// the list (see ConsolePerm).
-var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "teleport", "vote-cancel", "clear-objects"}
+// the list (see ConsolePerm). locks (2.1.0) lists the players with locked tools.
+var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "teleport", "vote-cancel", "clear-objects", "locks"}
 
 // consolePerms are the console commands that do what a finer permission
 // grants, and need it too. The verbs are the server's own (Host::command in
@@ -24,7 +24,8 @@ var consolePerms = func() map[string]string {
 	// are one of them; "roles reload" takes in an edit of the file.
 	m := map[string]string{"admin": IngameAdmins, "admins": IngameAdmins, "role": IngameAdmins, "roles": IngameAdmins,
 		"ban": PlayersBan, "unban": PlayersBan,
-		"kick": PlayersKick, "say": PlayersChat, "announce": PlayersChat, "announce-to": PlayersChat,
+		// Taking a player's tools away (2.1.0) is a moderator's, as a kick is.
+		"kick": PlayersKick, "lock": PlayersKick, "unlock": PlayersKick, "say": PlayersChat, "announce": PlayersChat, "announce-to": PlayersChat,
 		"msg": PlayersChat, "msg-party": PlayersChat, "msg-admins": PlayersChat, "poll": PlayersChat,
 		// The console starts votes too (2.0.3): they change what their
 		// settings would, and a kick vote (ConsolePerm) kicks.

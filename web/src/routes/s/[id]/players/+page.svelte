@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import { api, message, type Player, type RoleList } from '#lib/api.js';
+	import { api, lockTools, message, type Lock, type Player, type RoleList } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
 	import { instances } from '#lib/instances.svelte.js';
 	import { newerVersion } from '#lib/thunderstore.svelte.js';
@@ -117,6 +117,55 @@
 		{ value: '1440', label: '24 hours' },
 		{ value: '0', label: 'Until the server restarts' }
 	];
+	// ReSkate 2.1.0 locks tools for one player, kept when they leave, so the
+	// list is the server's own (locks), asked again after each [lock] line.
+	const toolLocks = $derived(running && !(serverVersion && newerVersion('2.1.0', serverVersion)));
+	let locks = $state.raw<Lock[]>([]);
+	const lockOf = (id: string) => locks.find((l) => l.id === id);
+	const toolNames = (keys: string[]) => keys.map((k) => lockTools.find((t) => t.key === k)?.label ?? k).join(', ');
+	const beginLocks = newest();
+	async function loadLocks() {
+		const current = beginLocks();
+		const r = await api.get<Lock[]>(`/instances/${ctx.id}/locks`).catch(() => null);
+		if (current()) locks = r ?? [];
+	}
+	$effect(() => {
+		if (toolLocks) untrack(loadLocks);
+		else locks = [];
+	});
+	onLine(ctx.live, /^\[lock\] /, () => {
+		if (toolLocks) loadLocks();
+	});
+	let lockTarget = $state.raw<{ id: string; name: string } | null>(null);
+	let lockOpen = $state(false);
+	let lockPick = $state<string[]>([]);
+	function askLock(id: string, name: string) {
+		lockTarget = { id, name };
+		lockPick = [...(lockOf(id)?.tools ?? [])];
+		lockOpen = true;
+	}
+	// What's ticked is what stays locked: the newly ticked are locked, the
+	// unticked given back.
+	async function saveLock() {
+		if (!lockTarget) return;
+		const t = lockTarget;
+		const had = lockOf(t.id)?.tools ?? [];
+		const add = lockPick.filter((k) => !had.includes(k));
+		const back = had.filter((k) => !lockPick.includes(k));
+		lockOpen = false;
+		const post = (verb: string, tools: string[]) =>
+			attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/players/${t.id}/${verb}`, { tools }), (r) => r.reply);
+		await busy.run(`lock:${t.id}`, async () => {
+			if (add.length) await post('lock', add);
+			if (back.length) await post('unlock', back);
+		});
+		loadLocks();
+	}
+	async function unlock(l: Lock) {
+		await busy.run(`lock:${l.id}`, () => attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/players/${l.id}/unlock`, {}), (r) => r.reply));
+		loadLocks();
+	}
+
 	let kickTarget = $state.raw<Player | null>(null);
 	let kickOpen = $state(false);
 	let kickFor = $state('');
@@ -182,9 +231,11 @@
 					</thead>
 					<tbody>
 						{#each online.shown as p (p.id)}
+							{@const lk = lockOf(p.id)}
 							<tr>
 								<td>
 									<span class="font-medium">{p.name}</span>
+									{#if lk}<span class="sticker sticker-pink ml-2" title="Locked: {toolNames([...lk.tools, ...lk.throwdown])}">locked</span>{/if}
 									{#if !withRoles}
 										{#if p.admin}<span class="sticker sticker-warn ml-2">Admin</span>{:else if p.role}<span class="sticker sticker-info ml-2">{p.role}</span>{/if}
 									{/if}
@@ -197,6 +248,9 @@
 									<div class="flex justify-end gap-1">
 										{#if manage && roles && !roles.hasRoles && !p.admin}
 											<button class="btn btn-sm btn-ghost" onclick={() => askAdmin(p)} title="Make in-game admin" aria-label="Make {p.name} an in-game admin"><Icon name="shield" size={14} /></button>
+										{/if}
+										{#if ctx.can('players.kick') && toolLocks}
+											<button class="btn btn-sm btn-ghost" disabled={busy.is()} onclick={() => askLock(p.id, p.name)} title="Lock tools" aria-label="Lock tools for {p.name}"><Icon name="lock" size={14} /></button>
 										{/if}
 										{#if ctx.can('players.kick')}
 											<button class="btn btn-sm" disabled={busy.is()} onclick={() => askKick(p)} aria-label="Kick {p.name}"><Icon name="kick" size={14} /> <span class="hidden sm:inline">Kick</span></button>
@@ -216,6 +270,46 @@
 			<p class="px-4 py-8 text-center font-marker text-faint">nobody's skating right now.</p>
 		{/if}
 	</section>
+
+	{#if locks.length}
+		<section class="card">
+			<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b-2 border-line px-4 py-3">
+				<h2 class="flex items-center gap-2">Locked tools <span class="sticker sticker-pink">{locks.length}</span></h2>
+				<span class="text-xs text-faint">Kept until unlocked or the server restarts, also for players who left.</span>
+			</div>
+			<div class="overflow-x-auto">
+				<table class="table">
+					<thead>
+						<tr><th>Player</th><th class="hidden md:table-cell">SteamID64</th><th>Locked</th><th class="text-right">Actions</th></tr>
+					</thead>
+					<tbody>
+						{#each locks as l (l.id)}
+							<tr>
+								<td>
+									<span class="font-medium">{l.name}</span>
+									{#if !l.here}<span class="sticker ml-2">not here</span>{/if}
+									<SteamId id={l.id} small class="md:hidden" />
+								</td>
+								<td class="hidden md:table-cell"><SteamId id={l.id} /></td>
+								<td class="text-sm">
+									{#if l.tools.length}{toolNames(l.tools)}{/if}
+									{#if l.throwdown.length}<span class="block text-xs text-muted">In their throwdown: {toolNames(l.throwdown)}</span>{/if}
+								</td>
+								<td>
+									{#if ctx.can('players.kick')}
+										<div class="flex justify-end gap-1">
+											<button class="btn btn-sm btn-ghost" disabled={busy.is()} onclick={() => askLock(l.id, l.name)} title="Change" aria-label="Change what's locked for {l.name}"><Icon name="pencil" size={14} /></button>
+											<button class="btn btn-sm" disabled={busy.is()} onclick={() => unlock(l)} aria-label="Unlock every tool for {l.name}"><Icon name="check" size={14} /> <span class="hidden sm:inline">Unlock</span></button>
+										</div>
+									{/if}
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		</section>
+	{/if}
 
 	<section class="card">
 		<div class="flex flex-wrap items-center gap-3 border-b-2 border-line px-4 py-3">
@@ -274,10 +368,15 @@
 										<span class="block text-xs text-faint" title="On every server whose players you can see">{throwdowns(h.throwdownsAll, h.winsAll ?? 0)} on all servers</span>
 									{/if}
 								</td>
-								<td class="text-right">
-									{#if ctx.can('players.ban')}
-										<button class="btn btn-sm btn-danger" onclick={() => askBan(h.id, h.name)} aria-label="Ban {h.name}"><Icon name="ban" size={14} /> <span class="hidden sm:inline">Ban</span></button>
-									{/if}
+								<td>
+									<div class="flex justify-end gap-1">
+										{#if ctx.can('players.kick') && toolLocks}
+											<button class="btn btn-sm btn-ghost" disabled={busy.is()} onclick={() => askLock(h.id, h.name)} title="Lock tools" aria-label="Lock tools for {h.name}"><Icon name="lock" size={14} /></button>
+										{/if}
+										{#if ctx.can('players.ban')}
+											<button class="btn btn-sm btn-danger" onclick={() => askBan(h.id, h.name)} aria-label="Ban {h.name}"><Icon name="ban" size={14} /> <span class="hidden sm:inline">Ban</span></button>
+										{/if}
+									</div>
 								</td>
 							</tr>
 						{/each}
@@ -311,6 +410,28 @@
 	{#snippet actions()}
 		<button class="btn" onclick={() => (kickOpen = false)}>Cancel</button>
 		<button class="btn btn-danger" onclick={kick}><Icon name="kick" size={14} /> Kick</button>
+	{/snippet}
+</Modal>
+
+<Modal bind:open={lockOpen} title="Lock tools for {lockTarget?.name || lockTarget?.id}">
+	<p class="text-sm text-muted">
+		Ticked tools are taken from them alone, at once, and stay taken if they leave and join again, until unlocked or the server restarts. Their role
+		can't give one back.
+	</p>
+	<div class="mt-3 space-y-2">
+		{#each lockTools as t (t.key)}
+			<label class="flex cursor-pointer items-center gap-2 text-sm">
+				<input type="checkbox" value={t.key} bind:group={lockPick} />
+				{t.label}
+			</label>
+		{/each}
+	</div>
+	{#if lockTarget && lockOf(lockTarget.id)?.throwdown.length}
+		<p class="mt-3 text-xs text-faint">Their throwdown also has {toolNames(lockOf(lockTarget.id)!.throwdown)} locked while it runs.</p>
+	{/if}
+	{#snippet actions()}
+		<button class="btn" onclick={() => (lockOpen = false)}>Cancel</button>
+		<button class="btn btn-primary" onclick={saveLock}><Icon name="lock" size={14} /> Save</button>
 	{/snippet}
 </Modal>
 

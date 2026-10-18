@@ -1,6 +1,7 @@
 package logparse
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,8 @@ func TestClassify(t *testing.T) {
 		{"[steam] No longer signed in to Steam: players already on stay, but nobody can join until it is back.", KindTagged, "", "", nil},
 		{"[direct] Steam: connection closed", KindTagged, "", "", nil},
 		{"[afk] Thrasher was removed after 15 min away.", KindTagged, "", "", nil}, // 2.0.0
+		// 2.1.0: logged before the reply to the lock that took them.
+		{"[lock] Thrasher (76561198000000001): nobail, boosts locked by console", KindTagged, "", "", nil},
 		// 2.0.2: an announcement is logged before the reply to the announce that posted it.
 		{"[announcement] Join our Discord", KindTagged, "", "", nil},
 		{"[poll] Thrasher started a poll: Next map? Grom | Stadium", KindTagged, "", "", nil},
@@ -214,6 +217,36 @@ func TestParseMaps(t *testing.T) {
 	}
 	if _, ok := ParseMaps("Unknown command"); ok {
 		t.Error("parsed a non-maps reply")
+	}
+}
+
+// The reply to 2.1.0's locks, as Host::command words it.
+func TestParseLocks(t *testing.T) {
+	got, ok := ParseLocks("3 players have locked tools (throwdown-locks: nobail, boosts)\n" +
+		"  76561198000000001  Thrasher: noclip, tuning (throwdown: nobail, boosts)\n" +
+		"  76561198000000002  Al: Bert (not here): noclip, nobail, boosts, tuning\n" +
+		"  76561198000000003  Mo: (throwdown: boosts)")
+	if !ok || len(got) != 3 {
+		t.Fatalf("%+v %v", got, ok)
+	}
+	want := []string{
+		"{76561198000000001 Thrasher true [noclip tuning] [nobail boosts]}",
+		"{76561198000000002 Al: Bert false [noclip nobail boosts tuning] []}",
+		"{76561198000000003 Mo true [] [boosts]}",
+	}
+	for i := range want {
+		if s := fmt.Sprint(got[i]); s != want[i] {
+			t.Errorf("row %d = %s, want %s", i, s, want[i])
+		}
+	}
+	if got, ok := ParseLocks("0 players have locked tools"); !ok || len(got) != 0 {
+		t.Errorf("none: %+v %v", got, ok)
+	}
+	if _, ok := ParseLocks("1 player has locked tools\n  76561198000000001  Thrasher: flying"); ok {
+		t.Error("parsed an unknown tool")
+	}
+	if _, ok := ParseLocks("Unknown command"); ok {
+		t.Error("parsed a non-locks reply")
 	}
 }
 

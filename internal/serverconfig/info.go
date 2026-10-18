@@ -108,6 +108,7 @@ var fieldInfo = map[string]string{
 	"bone_scale_limit":     "The most a mod may scale one part of a skater, such as a big-head mod, as others see it: 1 to 8 times, or 0 for no limit. The default is 2: the game's own skater height is a bone scale, so at 1 every skater shows at one height. The player with the mod still sees it on their own screen. Needs ReSkate 1.1.6.",
 	"bone_reach_limit":     "How far, in metres, a bone of a skater's body or board may be from the one it hangs from, as others see it: 0.5 to 20, or 0 for no limit. The game never moves them (the longest, a thigh, is 0.44), so the default of 1 changes nothing for an ordinary player and stops a hacked game from stretching its skater across the map. Each player's own game also holds what it's shown to 2. Needs ReSkate 2.0.3.",
 	"sync_effects":         "Lets players see each other's skater effects: sparks and dust where a skater touches the world, and the trails and fire of costumes and skateboards. Off, the server passes none of them on, which saves a little traffic and drawing on a busy server. Effects already showing stay until that player's skater is shown again. Needs ReSkate 2.0.0.",
+	"sync_drones":          "Lets players see each other's FPV drones: the marker where a player flying ReSkate's drone has it. Off, the server passes none on, and players' games neither send their own drone nor show anyone else's. Needs ReSkate 2.1.0.",
 	"noclip":               "Lets players fly with noclip and teleport to others with /tp. Admins always can.",
 	"no_bail":              "Lets players turn on No Bail, which stops them wiping out. Admins always can.",
 	"boosts":               "Lets players use the forward and up boosts. Admins always can.",
@@ -117,6 +118,7 @@ var fieldInfo = map[string]string{
 	"afk_kick_minutes":     "Removes a player who hasn't moved, spoken, typed in chat or changed their objects for this many minutes, 1 to 1440. They're warned in chat a minute before, and can join again straight away. Admins are never removed, and nor is anyone still loading the map. 0 never removes anyone. Needs ReSkate 2.0.0.",
 	"kick_minutes":         "How long a player kicked by an admin (from the console, the Players page or in the game) is kept out, 1 to 1440 minutes. They're told how long when they're kicked and when they try to join. A kick keeps the time it was given, so a change is for later kicks. The Players page and the console's kick <player> <minutes> can give one kick its own time. 0 keeps them out until the server restarts, as every kick did before 2.0.8. A ban is still for good, and kick votes have their own time. Needs ReSkate 2.0.8.",
 	"announce_throwdowns":  "Tells everyone in chat when a throwdown drop is placed.",
+	"throwdown_locks":      "Tools taken from a throwdown's players while it runs, for fair games on a server that allows them for free skating: noclip (with teleporting), nobail, boosts and tuning (their own physics tuning). They're locked when the throwdown starts and given back when the player quits it, it ends (the server hears nothing more of it for a minute or so) or they leave. A change while one runs changes only the tools that differ, and a role can't give a locked tool back. The Players page locks tools for one player. Needs ReSkate 2.1.0.",
 	"activity_log":         "Writes console lines for throwdowns (drops placed, joins, starts, turns and results), objects placed or removed, and how long players take to load. The Players tab counts throwdowns played and won from them.",
 
 	"votes.map.enabled":         "Lets players start /vote map <map>. They can pick from the map pool only, or from all the server's maps while the pool is empty.",
@@ -171,7 +173,7 @@ var fieldInfo = map[string]string{
 	"score_allow": "For a server that runs on a scoring mod everyone installs: fingerprints listed here count as the game's own. A flagged player's fingerprint is printed in the console.",
 
 	"world_layer_sync": "On: every player sees the server's world layers (time of day and the rest, set on the World page) and can't change them. Off: players choose their own.\n" +
-		"Needs world-layers.json next to the server. Copy it from a player's %LOCALAPPDATA%\\ReSkate\\cache folder, from the same game build. Time of day votes need this on.",
+		"Needs world-layers.json next to the server. ReSkate's server release has one, and the manager puts the release's in place on every update: from ReSkate 2.1.0 the server turns world layer sync off with one from another game build. Time of day votes need this on.",
 }
 
 func init() {
