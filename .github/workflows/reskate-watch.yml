@@ -48,9 +48,11 @@ jobs:
         run: |
           latest=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
           artifacts="repos/$GITHUB_REPOSITORY/actions/artifacts"
-          # When the release was last checked, and when its files were last uploaded.
+          # When the release was last checked, and when its server files were last uploaded:
+          # the launcher's go up again alone (2.0.7's did for a pre-release).
           checked=$(gh api "$artifacts?name=reskate-watch-$latest" --jq '[.artifacts[].created_at] | max // ""')
-          uploaded=$(gh api "repos/$UPSTREAM/releases/tags/$latest" --jq '[.assets[].updated_at] | max // ""')
+          uploaded=$(gh api "repos/$UPSTREAM/releases/tags/$latest" \
+            --jq '[.assets[] | select(.name | startswith("ReSkateServer")) | .updated_at] | max // ""')
           reported=$(gh issue list --label reskate --state all --limit 1 --json body --jq '.[0].body // ""' |
             sed -n 's/^<!-- reskate-watch \(.*\) -->$/\1/p')
           was=

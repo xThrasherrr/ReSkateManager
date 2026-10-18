@@ -1,6 +1,10 @@
 package main
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -67,6 +71,25 @@ func TestBuiltFrom(t *testing.T) {
 		if got, err := builtFrom(dir, "v1", when); err != nil || got != want {
 			t.Errorf("built by %s: %q (%v), want %q", at, got, err, want)
 		}
+	}
+}
+
+// A release is dated by its server's files: 2.0.7's launcher went up again
+// alone, three days after its server.
+func TestUploaded(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"assets":[{"name":"launcher.json","updated_at":"2026-10-15T19:40:16Z"},
+			{"name":"ReSkateServer-2.0.7.zip","updated_at":"2026-10-12T02:24:18Z"},
+			{"name":"ReSkateServer-Linux-2.0.7.tar.gz","updated_at":"2026-10-12T02:25:04Z"},
+			{"name":"ReSkateLauncher.exe","updated_at":"2026-10-15T19:40:29Z"}]}`)
+	}))
+	defer srv.Close()
+	old := githubAPI
+	githubAPI = srv.URL
+	defer func() { githubAPI = old }()
+	got, err := uploaded(context.Background(), "o/r", "v2.0.7")
+	if want := time.Date(2026, 10, 12, 2, 25, 4, 0, time.UTC); err != nil || !got.Equal(want) {
+		t.Errorf("uploaded = %v (%v), want %v", got, err, want)
 	}
 }
 

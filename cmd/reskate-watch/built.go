@@ -55,7 +55,9 @@ var errNoRelease = errors.New("not a release")
 // githubAPI is GitHub's API root, which tests replace.
 var githubAPI = "https://api.github.com"
 
-// uploaded is when a release's files were last uploaded.
+// uploaded is when a release's server files were last uploaded. Not the
+// launcher's: those can go up again alone, as 2.0.7's did for 2.1.0's
+// pre-release, which says nothing of what the server was built from.
 func uploaded(ctx context.Context, repo, tag string) (time.Time, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -78,6 +80,7 @@ func uploaded(ctx context.Context, repo, tag string) (time.Time, error) {
 	}
 	var rel struct {
 		Assets []struct {
+			Name      string    `json:"name"`
 			UpdatedAt time.Time `json:"updated_at"`
 		} `json:"assets"`
 	}
@@ -86,12 +89,12 @@ func uploaded(ctx context.Context, repo, tag string) (time.Time, error) {
 	}
 	var last time.Time
 	for _, a := range rel.Assets {
-		if a.UpdatedAt.After(last) {
+		if strings.HasPrefix(a.Name, "ReSkateServer") && a.UpdatedAt.After(last) {
 			last = a.UpdatedAt
 		}
 	}
 	if last.IsZero() {
-		return time.Time{}, errors.New("the release has no files")
+		return time.Time{}, errors.New("the release has no server files")
 	}
 	return last, nil
 }
