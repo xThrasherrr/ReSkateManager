@@ -150,6 +150,11 @@ func main() {
 				time.Sleep(time.Second)
 			}
 			log(reply)
+		case "given": // test hook: "given <id> <role>", a role an admin gave in game, answered to them alone
+			id, role, _ := strings.Cut(arg, " ")
+			roles["players"].(map[string]any)[id] = role
+			log("[admin] Alice: role " + id + " " + role)
+			log("ok")
 		case "admin": // "admin add|remove <id>", saved to ReSkateServer.json like the real server
 			if roles != nil {
 				log("Admins are a role now: roles lists them, and role <player or SteamID64> admin makes one (role ... none takes it away).")

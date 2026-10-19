@@ -777,7 +777,13 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 		if in.OnNotice != nil && e.IsEvent() && e.Fields != nil {
 			in.noticeLocked(Notice{Kind: NoticeChat, Player: Player{ID: in.namesLocked()(e.Name), Name: e.Name}, Text: e.Fields["message"]})
 		}
-	case logparse.KindCommand:
+	case logparse.KindCommand, logparse.KindAdmin:
+		// A role given in game is answered to the admin alone, so the roster
+		// asks the server who has which role instead.
+		verb, rest, _ := strings.Cut(strings.ToLower(strings.TrimPrefix(e.Fields["message"], "/")), " ")
+		if verb == "role" || verb == "roles" && strings.TrimSpace(rest) == "reload" {
+			in.reconcileLocked()
+		}
 		if name := e.Fields["custom"]; name != "" {
 			// The server reads its chat commands only when it starts.
 			if in.runs == nil {

@@ -178,6 +178,14 @@ func TestRosterRoles(t *testing.T) {
 	if ps := run("status"); len(ps) != 2 || ps["Alice"].Role != "admin" || ps["Bob"].Role != "" || ps["Bob"].Name != "Bob" {
 		t.Errorf("after a check %+v", ps)
 	}
+	// A role given in game: the reply is the admin's, so the roster asks.
+	run("given 76561198000000002 vip")
+	for deadline := time.Now().Add(5 * time.Second); run("status")["Bob"].Role != "vip"; {
+		if time.Now().After(deadline) {
+			t.Fatalf("after a role given in game: %+v", in.Players())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // park-mod's reply (2.0.6) is a [parks] line, which is otherwise the server's
