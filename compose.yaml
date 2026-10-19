@@ -8,7 +8,8 @@ services:
     # SIGTERM makes the manager send "quit" to every server; give them time to log off Steam.
     stop_grace_period: 45s
     # Behind Cloudflare (Tunnel included) or another reverse proxy, and the
-    # time zone scheduled restarts follow (UTC otherwise):
+    # time zone scheduled restarts and boards' weeks and months follow (UTC
+    # otherwise):
     # environment:
     #   RSM_PROXY: cloudflare            # or "forwarded" for nginx, Caddy, Traefik...
     #   RSM_PUBLIC_URL: https://panel.example.com

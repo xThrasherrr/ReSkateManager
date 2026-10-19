@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 	// The Docker image has no zone files; with these, TZ still sets the clock
-	// that scheduled restarts follow.
+	// that scheduled restarts and boards' periods follow.
 	_ "time/tzdata"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/adminsync"

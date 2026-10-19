@@ -746,10 +746,11 @@ const PlaytimeBoard = "playtime"
 var Periods = []string{"all", "month", "week"}
 
 // PeriodStart is when the period holding t began, in unix seconds: 0 for all
-// time, else the 1st of its month or the Monday of its week, UTC.
+// time, else midnight on the 1st of its month or the Monday of its week, on
+// the manager's clock (TZ), as scheduled restarts are.
 func PeriodStart(period string, t time.Time) int64 {
-	t = t.UTC()
-	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+	t = t.In(time.Local)
+	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
 	switch period {
 	case "month":
 		return day.AddDate(0, 0, 1-t.Day()).Unix()

@@ -93,9 +93,22 @@ func TestBoardKeeps(t *testing.T) {
 	}
 }
 
-// Months begin on the 1st and weeks on Monday, both at midnight UTC, and a
-// score counts in the period it was given in.
+// onClock sets the manager's clock for one test, as TZ would.
+func onClock(t *testing.T, zone string) *time.Location {
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Local
+	t.Cleanup(func() { time.Local = old })
+	time.Local = loc
+	return loc
+}
+
+// Months begin on the 1st and weeks on Monday, both at midnight on the
+// manager's clock, and a score counts in the period it was given in.
 func TestBoardPeriods(t *testing.T) {
+	onClock(t, "UTC")
 	ctx := context.Background()
 	s := openTemp(t)
 	day := func(m time.Month, d, h, min, sec int) time.Time {
@@ -122,6 +135,28 @@ func TestBoardPeriods(t *testing.T) {
 			t.Errorf("%s of %s: %s, want %s", c.period, c.t, time.Unix(got, 0).UTC(), c.want)
 		}
 	}
+	// On another clock its midnights count, through the clocks going back
+	// (1 November 2026 in Chicago).
+	central := onClock(t, "America/Chicago")
+	cday := func(m time.Month, d, h int) time.Time { return time.Date(2026, m, d, h, 0, 0, 0, central) }
+	for _, c := range []struct {
+		period string
+		t      time.Time
+		want   time.Time
+	}{
+		{"week", day(10, 12, 4, 0, 0), cday(10, 5, 0)}, // Monday in UTC, Sunday night in Chicago
+		{"week", cday(10, 12, 0), cday(10, 12, 0)},
+		{"week", cday(11, 1, 12), cday(10, 26, 0)},
+		{"week", cday(11, 4, 12), cday(11, 2, 0)},
+		{"month", cday(11, 1, 3), cday(11, 1, 0)},
+		{"month", day(11, 1, 3, 0, 0), cday(10, 1, 0)},
+	} {
+		if got := PeriodStart(c.period, c.t); got != c.want.Unix() {
+			t.Errorf("Chicago %s of %s: %s, want %s", c.period, c.t, time.Unix(got, 0).In(central), c.want)
+		}
+	}
+	onClock(t, "UTC")
+
 	b := defineBoard(t, s, "wins", KeepSum)
 	var list []Score
 	for id, at := range map[string]time.Time{
@@ -150,6 +185,7 @@ func TestBoardPeriods(t *testing.T) {
 // its part in the period, one going on counts up to now, and the servers'
 // add up.
 func TestPlaytimeBoard(t *testing.T) {
+	onClock(t, "UTC")
 	ctx := context.Background()
 	s := openTemp(t)
 	at := func(d, h int) int64 { return time.Date(2026, 10, d, h, 0, 0, 0, time.UTC).Unix() }

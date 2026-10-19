@@ -79,8 +79,9 @@ playtime = api("playtime", {"total", "sessions"})
 -- steamId [, {server =, period =}]) and stats.around(board, steamId [,
 -- {server =, period =, limit =}]) read any board, "playtime" too: all the
 -- servers unless one is named, over "all" time, the "month" or the "week"
--- (UTC, from Monday). Rows are {rank, id, name, value}; rank returns rank
--- and value. Each returns nil and why when the board can't be read.
+-- (from Monday, on the manager's clock). Rows are {rank, id, name, value};
+-- rank returns rank and value. Each returns nil and why when the board
+-- can't be read.
 stats = api("stats", {"define", "add", "top", "rank", "around"})
 
 -- ui.card(server, steamId or "all", card [, fn]) shows a card at the top of

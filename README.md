@@ -146,7 +146,7 @@ docker compose logs manager      # the setup PIN is printed here
 - UDP `27015-27024` covers five servers. Host and container port numbers must match.
 - The manager doesn't update itself in a container. To update, run `docker compose pull && docker compose up -d`.
 - `docker stop` lets each server log off Steam. The compose file allows 45 s for that.
-- Scheduled restart times follow the container's clock, which is UTC unless you set `TZ` in `compose.yaml`, such as `TZ: Europe/Berlin`.
+- Scheduled restart times, and when plugins' boards start a new week and month, follow the container's clock, which is UTC unless you set `TZ` in `compose.yaml`, such as `TZ: Europe/Berlin`.
 
 ## Configuration
 
@@ -296,7 +296,7 @@ What a plugin can call:
 | `ui.card(id, steamId or "all", card)` | Shows one player, or everyone, a card at the top of the screen: `card` is text, or `{title =, lines = {...}}` |
 | `discord.post(webhook, card)` | Posts a card to a Discord channel through one of its webhooks, as a message with the title on top and each line under it |
 
-A board covers all your servers: a sum adds a player's scores up from every server, a best takes their highest and a fastest their lowest. `{server = id}` reads one server's instead, and `{period = "month"}` or `{period = "week"}` this calendar month or the week from Monday (UTC) instead of all time. Players with the same score share a rank, whoever got there first listed first. Every plugin can read `playtime`, a board of everyone's time on your servers, from the panel's own record of visits. A board belongs to the plugin that defined it first: only that one adds to it, its `keep` can't change, and every plugin reads it. `public` marks a board you'd let out of the panel, for when there's a way out.
+A board covers all your servers: a sum adds a player's scores up from every server, a best takes their highest and a fastest their lowest. `{server = id}` reads one server's instead, and `{period = "month"}` or `{period = "week"}` this calendar month or the week from Monday instead of all time, each from midnight on the manager's clock (in Docker, UTC unless `TZ` is set). Players with the same score share a rank, whoever got there first listed first. Every plugin can read `playtime`, a board of everyone's time on your servers, from the panel's own record of visits. A board belongs to the plugin that defined it first: only that one adds to it, its `keep` can't change, and every plugin reads it. `public` marks a board you'd let out of the panel, for when there's a way out.
 
 Boards are read from a snapshot, worked out again once something is added (a read waits up to 50 ms for it, then takes the one before) or once it's 30 seconds old. A read that can't be answered returns `nil` and why: `local rows, err = stats.top("wins")`. What plugins keep is written within a second, so a crash loses that second at most. Removing a plugin keeps its store and its boards, so adding it again brings them back.
 
