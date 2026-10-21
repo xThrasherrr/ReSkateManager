@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/plugins"
 )
 
@@ -24,6 +25,7 @@ func TestPlugins(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "hello", "plugin.toml"), []byte("api = 0\nname = \"Hello\"\nversion = \"0.1.0\"\npermissions = [\"players.chat\", \"audit.view\"]"), 0o644)
 	os.WriteFile(filepath.Join(dir, "hello", "main.lua"), []byte(`log("hi")`), 0o644)
 	p := newPanel(t, func(a *API) {
+		a.Reg = instance.NewRegistry(a.Log)
 		a.Plugins = &plugins.Manager{Dir: dir, Store: a.Store, Log: a.Log, LogPath: filepath.Join(dir, "plugins.log")}
 		if err := a.Plugins.Start(context.Background()); err != nil {
 			t.Fatal(err)
@@ -74,6 +76,10 @@ func TestPlugins(t *testing.T) {
 		{"PATCH", "/api/manager/plugins/hello", `{"granted":["audit.view"]}`, http.StatusBadRequest},
 		{"PATCH", "/api/manager/plugins/hello", `{"granted":["players.ban"]}`, http.StatusBadRequest},
 		{"PATCH", "/api/manager/plugins/nope", `{"granted":[]}`, http.StatusNotFound},
+		{"GET", "/api/boards?period=week&limit=100", "", http.StatusOK},
+		{"GET", "/api/boards?server=nope", "", http.StatusNotFound},
+		{"GET", "/api/boards?period=year", "", http.StatusBadRequest},
+		{"GET", "/api/boards?limit=0", "", http.StatusBadRequest},
 	} {
 		if code, b := p.do(c.method, c.path, c.body); code != c.want {
 			t.Errorf("%s %s: %d %s, want %d", c.method, c.path, code, b, c.want)

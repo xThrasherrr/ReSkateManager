@@ -17,10 +17,16 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
-// boards is playtime and the boards plugins marked public, network-wide, for
-// a website: ?period=all|month|week (all) and ?limit= (10, up to 100).
+// boards is playtime and the boards plugins marked public, for a website:
+// ?server= (every server), ?period=all|month|week (all) and ?limit= (10, up
+// to 100).
 func (a *API) boards(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	server := q.Get("server")
+	if _, ok := a.Reg.Get(server); server != "" && !ok {
+		writeErr(w, http.StatusNotFound, "no such server")
+		return
+	}
 	period := cmp.Or(q.Get("period"), "all")
 	if !slices.Contains(store.Periods, period) {
 		writeErr(w, http.StatusBadRequest, `period is "all", "month" or "week"`)
@@ -35,7 +41,7 @@ func (a *API) boards(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	list := a.Plugins.PublicBoards(period, limit)
+	list := a.Plugins.PublicBoards(server, period, limit)
 	if list == nil {
 		list = []plugins.Top{}
 	}

@@ -192,10 +192,15 @@ log(3, show(stats.top("wins")))
 		"3 1:1:Zee=3 1:2:Bea=3",
 	})
 	// The panel reads playtime and the public boards, network-wide, without SteamIDs.
-	got, _ := json.Marshal(m.PublicBoards("all", 1))
+	got, _ := json.Marshal(m.PublicBoards("", "all", 1))
 	if want := `[{"id":"playtime","title":"Playtime","unit":"seconds","keep":"sum","rows":[{"rank":1,"name":"Zee","value":3000}]},` +
 		`{"id":"lap","title":"Fastest lap","unit":"s","keep":"fastest","rows":[{"rank":1,"name":"Zee","value":61.25}]}]`; string(got) != want {
 		t.Errorf("public boards:\n%s\nwant\n%s", got, want)
+	}
+	// Or one server's: on s2, Bea's the only one.
+	if s2 := m.PublicBoards("s2", "all", 1); len(s2) != 2 || len(s2[0].Rows) != 1 || s2[0].Rows[0].Name != "Bea" ||
+		fmt.Sprint(s2[1].Rows) != "[{1 Bea 61.25}]" {
+		t.Errorf("s2's public boards: %+v", s2)
 	}
 	// What they defined outlives the manager.
 	m.Close()

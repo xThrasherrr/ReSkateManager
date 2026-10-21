@@ -514,9 +514,9 @@ type TopRow struct {
 }
 
 // PublicBoards is playtime and every board a plugin marked public, by ID,
-// each with its first limit players on all servers over period. Nil while
-// plugins aren't running.
-func (m *Manager) PublicBoards(period string, limit int) []Top {
+// each with its first limit players on server ("" for all of them) over
+// period. Nil while plugins aren't running.
+func (m *Manager) PublicBoards(server, period string, limit int) []Top {
 	m.mu.Lock()
 	d := m.data
 	m.mu.Unlock()
@@ -535,7 +535,7 @@ func (m *Manager) PublicBoards(period string, limit int) []Top {
 	out := make([]Top, len(list))
 	for i, b := range list {
 		out[i] = Top{ID: b.ID, Title: b.Title, Unit: b.Unit, Keep: b.Keep, Rows: []TopRow{}}
-		rk, err := d.ranking(b, "", period, panelWait)
+		rk, err := d.ranking(b, server, period, panelWait)
 		if err != nil {
 			out[i].Error = busy(err)
 			continue
