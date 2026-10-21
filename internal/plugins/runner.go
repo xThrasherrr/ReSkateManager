@@ -164,6 +164,7 @@ func (r *runner) loop() {
 	defer r.m.unlist(r)
 	defer r.reset()
 	go r.send()
+	r.take()
 	if err := r.m.data.load(r.p.ID); err != nil {
 		r.fail(Failed, "Its store didn't load: "+err.Error())
 		return

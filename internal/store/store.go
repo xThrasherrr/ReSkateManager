@@ -728,6 +728,34 @@ func (s *Store) SavePluginStore(ctx context.Context, plugin string, changed map[
 	return tx.Commit()
 }
 
+// MovePluginStore moves every key of plugin from's store into to's, each
+// with prefix before it, and from's boards too, and is how many keys moved.
+// If to has one of them already, nothing moves.
+func (s *Store) MovePluginStore(ctx context.Context, from, to, prefix string) (int, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var clash string
+	err = tx.QueryRowContext(ctx, "SELECT b.key FROM plugin_store a JOIN plugin_store b ON b.plugin = ? AND b.key = ? || a.key WHERE a.plugin = ? LIMIT 1", to, prefix, from).Scan(&clash)
+	switch {
+	case err == nil:
+		return 0, fmt.Errorf("this one's store has %s already", clash)
+	case !errors.Is(err, sql.ErrNoRows):
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, "UPDATE plugin_store SET plugin = ?, key = ? || key WHERE plugin = ?", to, prefix, from)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if _, err := tx.ExecContext(ctx, "UPDATE boards SET plugin = ? WHERE plugin = ?", to, from); err != nil {
+		return 0, err
+	}
+	return int(n), tx.Commit()
+}
+
 // ---- boards ----
 
 // How a board keeps a player's score: adding up what they're given, or the

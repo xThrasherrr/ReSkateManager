@@ -382,6 +382,9 @@ func (m *Manager) startLocked(p *Plugin) {
 	p.mu.Lock()
 	problem, man := p.problem, p.manifest
 	p.mu.Unlock()
+	if problem == "" {
+		problem = m.takingLocked(man)
+	}
 	if problem != "" {
 		p.setState(Failed, problem)
 		return

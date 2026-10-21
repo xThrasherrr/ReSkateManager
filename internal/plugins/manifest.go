@@ -28,6 +28,9 @@ type Manifest struct {
 	Servers     []string `toml:"servers" json:"servers,omitempty"` // IDs; none means all of them
 	Permissions []string `toml:"permissions" json:"permissions,omitempty"`
 	Commands    []string `toml:"commands" json:"commands,omitempty"` // the words players type as /word
+	// Takes is the plugins this one replaces, each ID with the prefix its
+	// store's keys get here: their stores move into this one's (see take).
+	Takes map[string]string `toml:"takes" json:"takes,omitempty"`
 }
 
 // A plugin's folder name is its ID, in the panel, the audit log and the
@@ -78,6 +81,11 @@ func readManifest(dir string) (Manifest, []string, error) {
 	}
 	slices.Sort(m.Commands)
 	m.Commands = slices.Compact(m.Commands)
+	for id, prefix := range m.Takes {
+		if !idRe.MatchString(id) || id == filepath.Base(dir) || len(prefix) > 64 {
+			return m, unknown, fmt.Errorf("Its %s takes the store of %q with the prefix %q: name another plugin by its ID, with a prefix of 64 bytes at most.", manifestFile, id, prefix)
+		}
+	}
 	return m, unknown, nil
 }
 
