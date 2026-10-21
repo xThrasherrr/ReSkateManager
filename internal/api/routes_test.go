@@ -72,6 +72,7 @@ var routePerms = map[string]string{
 	"GET /api/audit":                                     "audit.view",
 	"GET /api/backups/":                                  "owner",
 	"GET /api/backups/{name}":                            "owner",
+	"GET /api/boards":                                    "players.view",
 	"GET /api/host":                                      "host.view",
 	"GET /api/host/disk":                                 "host.view",
 	"GET /api/instances/{id}/admins":                     "ingame.admins.manage",

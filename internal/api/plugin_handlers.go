@@ -1,17 +1,46 @@
 package api
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/plugins"
 	"github.com/xThrasherrr/ReSkateManager/internal/plugins/luavm"
+	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
+
+// boards is playtime and the boards plugins marked public, network-wide, for
+// a website: ?period=all|month|week (all) and ?limit= (10, up to 100).
+func (a *API) boards(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	period := cmp.Or(q.Get("period"), "all")
+	if !slices.Contains(store.Periods, period) {
+		writeErr(w, http.StatusBadRequest, `period is "all", "month" or "week"`)
+		return
+	}
+	limit := 10
+	if s := q.Get("limit"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > 100 {
+			writeErr(w, http.StatusBadRequest, "limit is 1 to 100")
+			return
+		}
+		limit = n
+	}
+	list := a.Plugins.PublicBoards(period, limit)
+	if list == nil {
+		list = []plugins.Top{}
+	}
+	writeJSON(w, http.StatusOK, list)
+}
 
 // pluginsOn turns the plugins' routes away when the manager runs without them.
 func (a *API) pluginsOn(next http.Handler) http.Handler {

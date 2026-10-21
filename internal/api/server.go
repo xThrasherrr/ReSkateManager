@@ -193,6 +193,8 @@ func (a *API) Handler() http.Handler {
 
 			// A message to every running server takes chat on all of them.
 			r.With(a.global(auth.PlayersChat)).Post("/say", a.sayEverywhere)
+			// Boards rank players on every server, so reading them takes players.view on all.
+			r.With(a.global(auth.PlayersView), a.pluginsOn).Get("/boards", a.boards)
 			r.Get("/instances", a.listInstances)
 			r.With(a.global(auth.InstancesManage)).Post("/instances", a.createInstance)
 			r.Route("/instances/{id}", func(r chi.Router) {

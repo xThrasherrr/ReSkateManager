@@ -400,10 +400,10 @@ func merge(s *store.Score, n store.Score) {
 }
 
 // ranking is a board's players in order, from its snapshot. One added to
-// since is worked out afresh, waiting up to readWait for it and making do
-// with the one before past that; one that's only old is worked out again in
-// the background.
-func (d *data) ranking(b store.Board, server, period string) (*ranking, error) {
+// since is worked out afresh, waiting up to wait for it and making do with
+// the one before past that; one that's only old is worked out again in the
+// background.
+func (d *data) ranking(b store.Board, server, period string, wait time.Duration) (*ranking, error) {
 	now := time.Now()
 	k := snapKey{b.ID, server, period, store.PeriodStart(period, now)}
 	d.mu.Lock()
@@ -435,7 +435,7 @@ func (d *data) ranking(b store.Board, server, period string) (*ranking, error) {
 	}
 	select {
 	case <-ready:
-	case <-time.After(readWait):
+	case <-time.After(wait):
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -488,6 +488,63 @@ func (d *data) evictLocked() {
 	if oldest != nil {
 		delete(d.snaps, *oldest)
 	}
+}
+
+// ---- the panel's read ----
+
+// panelWait is the longest the panel waits on a board: a request has longer
+// than a plugin call, and a big board's first snapshot can take 200 ms.
+const panelWait = 2 * time.Second
+
+// Top is a board and its first players, as the panel gives it.
+type Top struct {
+	ID    string   `json:"id"`
+	Title string   `json:"title"`
+	Unit  string   `json:"unit"`
+	Keep  string   `json:"keep"`
+	Rows  []TopRow `json:"rows"`
+	Error string   `json:"error,omitempty"` // why its rows couldn't be read
+}
+
+// TopRow is a player's place on a board, without their SteamID.
+type TopRow struct {
+	Rank  int    `json:"rank"`
+	Name  string `json:"name"`
+	Value any    `json:"value"`
+}
+
+// PublicBoards is playtime and every board a plugin marked public, by ID,
+// each with its first limit players on all servers over period. Nil while
+// plugins aren't running.
+func (m *Manager) PublicBoards(period string, limit int) []Top {
+	m.mu.Lock()
+	d := m.data
+	m.mu.Unlock()
+	if d == nil {
+		return nil
+	}
+	pt, _ := d.board(store.PlaytimeBoard)
+	list := []store.Board{pt}
+	d.mu.Lock()
+	for _, id := range slices.Sorted(maps.Keys(d.boards)) {
+		if d.boards[id].Public {
+			list = append(list, d.boards[id])
+		}
+	}
+	d.mu.Unlock()
+	out := make([]Top, len(list))
+	for i, b := range list {
+		out[i] = Top{ID: b.ID, Title: b.Title, Unit: b.Unit, Keep: b.Keep, Rows: []TopRow{}}
+		rk, err := d.ranking(b, "", period, panelWait)
+		if err != nil {
+			out[i].Error = busy(err)
+			continue
+		}
+		for _, x := range rk.list[:min(limit, len(rk.list))] {
+			out[i].Rows = append(out[i].Rows, TopRow{x.Rank, x.Name, x.Value})
+		}
+	}
+	return out
 }
 
 // ---- the plugin's calls ----
@@ -688,7 +745,7 @@ func (r *runner) dataCall(name string, args []any) ([]any, error) {
 		if limit, err = limitArg(name, n, opts["limit"], limit); err != nil {
 			return nil, err
 		}
-		rk, err := d.ranking(b, server, period)
+		rk, err := d.ranking(b, server, period, readWait)
 		if err != nil {
 			return []any{nil, busy(err)}, nil
 		}

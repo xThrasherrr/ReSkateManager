@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -190,6 +191,12 @@ log(3, show(stats.top("wins")))
 		`bad argument #1 to 'stats.add' (board "wins" is plugin "a"'s)`,
 		"3 1:1:Zee=3 1:2:Bea=3",
 	})
+	// The panel reads playtime and the public boards, network-wide, without SteamIDs.
+	got, _ := json.Marshal(m.PublicBoards("all", 1))
+	if want := `[{"id":"playtime","title":"Playtime","unit":"seconds","keep":"sum","rows":[{"rank":1,"name":"Zee","value":3000}]},` +
+		`{"id":"lap","title":"Fastest lap","unit":"s","keep":"fastest","rows":[{"rank":1,"name":"Zee","value":61.25}]}]`; string(got) != want {
+		t.Errorf("public boards:\n%s\nwant\n%s", got, want)
+	}
 	// What they defined outlives the manager.
 	m.Close()
 	list, err := m.Store.Boards(ctx)
@@ -322,7 +329,7 @@ func TestSnapshots(t *testing.T) {
 	m := newManager(t)
 	d := m.data
 	b, _ := d.board(store.PlaytimeBoard)
-	first, err := d.ranking(b, "", "all")
+	first, err := d.ranking(b, "", "all", readWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +337,7 @@ func TestSnapshots(t *testing.T) {
 	d.mu.Lock()
 	d.snaps[k].at = time.Now().Add(-snapAge)
 	d.mu.Unlock()
-	if again, err := d.ranking(b, "", "all"); err != nil || again != first {
+	if again, err := d.ranking(b, "", "all", readWait); err != nil || again != first {
 		t.Fatalf("an old snapshot: %p, %v, want the one there, %p", again, err, first)
 	}
 	waitFor(t, func() bool {
