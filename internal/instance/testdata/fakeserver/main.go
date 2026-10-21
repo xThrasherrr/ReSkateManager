@@ -184,6 +184,14 @@ func main() {
 				time.Sleep(time.Second)
 			}
 			log(reply)
+		case "roles": // "roles reload": data/roles.json read again, as an owner's edit
+			if data, err := os.ReadFile(rolesPath); err == nil && json.Unmarshal(data, &roles) == nil {
+				list, _ := roles["roles"].([]any)
+				players, _ := roles["players"].(map[string]any)
+				log(fmt.Sprintf("Roles reloaded: %d roles, %d players with one.", len(list), len(players)))
+			} else {
+				log("data/roles.json was not loaded: it can't be read.")
+			}
 		case "words": // 2.0.6
 			log("Chat words: the ReSkate team's lists are " + map[bool]string{true: "off", false: "used"}[arg == "global off"] + ".")
 		case "park-mod": // 2.0.6: the console's reply is the line logged for an admin in the game

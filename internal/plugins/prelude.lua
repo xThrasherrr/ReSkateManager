@@ -49,16 +49,19 @@ end
 
 -- server.* reads and acts on the plugin's servers, each call naming one by
 -- its ID first: an event's e.server is the server it happened on.
--- server.list(), server.info(id) and server.players(id) read. The rest are
--- commands, sent a few a second after the call returns, and each needs a
--- permission the owner granted the plugin on its card: server.say(id,
--- text), server.msg(id, steamId, text), server.kick(id, steamId [,
--- minutes]), server.ban(id, steamId), server.unban(id, steamId),
--- server.teleport(id, steamIds, steamId or {x =, y =, z =}),
--- server.role(id, steamId, role or "none") and server.command(id, line).
+-- server.list(), server.info(id), server.players(id) and server.roles(id)
+-- read; server.roles is each of the server's roles as {name, tag, color,
+-- rank}, or nil and why. The rest are commands, sent a few a second after
+-- the call returns, and each needs a permission the owner granted the plugin
+-- on its card: server.say(id, text), server.msg(id, steamId, text),
+-- server.kick(id, steamId [, minutes]), server.ban(id, steamId),
+-- server.unban(id, steamId), server.teleport(id, steamIds, steamId or {x =,
+-- y =, z =}), server.role(id, steamId, role or "none"),
+-- server.makerole(id, {name =, tag =, color =, rank =}), which adds the role
+-- or sets what's given of an existing one, and server.command(id, line).
 -- Each returns true once queued, and calls a function given last with
 -- whether it went through and the server's reply.
-server = api("server", {"list", "info", "players", "say", "msg", "kick", "ban", "unban", "teleport", "role", "command"})
+server = api("server", {"list", "info", "players", "roles", "say", "msg", "kick", "ban", "unban", "teleport", "role", "makerole", "command"})
 
 -- store.* keeps the plugin's own values, through restarts: store.get(key),
 -- store.set(key, value) (nil deletes it), store.delete(key), true when it

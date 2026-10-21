@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -83,6 +84,8 @@ var callPerms = []struct{ lua, perms string }{
 	{`server.unban(S, P)`, "players.ban"},
 	{`server.role(S, P, "vip")`, "ingame.admins.manage"},
 	{`server.role(S, P, "none")`, "ingame.admins.manage"},
+	{`server.roles(S)`, ""},
+	{`server.makerole(S, {name = "grom", tag = "Grom", color = "#C9CED6", rank = 1})`, "ingame.admins.manage"},
 	{`server.teleport(S, {P}, {x = 1, y = 2, z = 3})`, "console.exec"},
 	{`server.teleport(S, P, P)`, "console.exec"},
 	{`server.command(S, "status")`, "console.exec"},
@@ -118,7 +121,7 @@ func TestCallPermissions(t *testing.T) {
 -- Each command gets a function to call, so one that fails on the stopped
 -- server isn't logged among the results.
 local quiet = function() end
-for t, names in pairs({[server] = {"say", "msg", "kick", "ban", "unban", "teleport", "role", "command"}, [ui] = {"card"}, [discord] = {"post"}}) do
+for t, names in pairs({[server] = {"say", "msg", "kick", "ban", "unban", "teleport", "role", "makerole", "command"}, [ui] = {"card"}, [discord] = {"post"}}) do
   for _, name in ipairs(names) do
     local f = t[name]
     t[name] = function(...)
@@ -493,5 +496,92 @@ end)
 	}
 	if !hasLine(m, "spin", "starts afresh") {
 		t.Errorf("no fresh start: %q", lines(m, "spin"))
+	}
+}
+
+// server.makerole adds a role, or sets what's given of one, in data/roles.json
+// as the panel's roles editor does: a running server reads it again at once,
+// and a stopped one has it from its next start.
+func TestMakeRole(t *testing.T) {
+	m := newManager(t)
+	reg := servers(t, m, "s1", "s2")
+	const vip = `{"name": "vip", "tag": "VIP", "color": "#FFD700", "rank": 40, "inherit": true, "commands": ["kick"], "permissions": []}`
+	for _, id := range []string{"s1", "s2"} {
+		in, _ := reg.Get(id)
+		dir := filepath.Dir(in.Def().ConfigPath())
+		os.MkdirAll(filepath.Join(dir, "data"), 0o755)
+		os.WriteFile(in.Def().ConfigPath(), []byte(`{}`), 0o644)
+		os.WriteFile(filepath.Join(dir, "data", "roles.json"), []byte(`{"default_role": "", "roles": [`+vip+`], "players": {}}`), 0o644)
+	}
+	in := fakeServer(t, reg, "s1")
+	addPlugin(t, m, "roles", "api = 0\npermissions = [\"ingame.admins.manage\"]", `
+local function said(what)
+  return function(ok, reply) log(what, ok, reply) end
+end
+local function show(id)
+  local out = {}
+  for _, r in ipairs(server.roles(id)) do out[#out + 1] = r.name .. "/" .. r.tag .. "/" .. r.color .. "/" .. r.rank end
+  return table.concat(out, " ")
+end
+server.makerole("s1", {name = "Grom", tag = "Grom", color = "#c9ced6", rank = 1}, said("add"))
+server.makerole("s1", {name = "vip", color = "#00FF00"}, said("edit"))
+server.makerole("s1", {name = "x", color = "pink"}, said("colour"))
+for i, bad in ipairs({{}, {name = "No Way"}, {name = "none"}, {name = "x", rank = 1.5}, {name = "x", tag = 5}, {name = "x", colour = "#FFF"}}) do
+  log("bad", i, select(2, pcall(server.makerole, "s1", bad)))
+end
+server.makerole("s2", {name = "grom", tag = "Grom", rank = 1}, function(ok, reply)
+  log("offline", ok, reply)
+  log("s1", show("s1"))
+  log("s2", show("s2"))
+end)
+`)
+	grant(t, m, "roles", "ingame.admins.manage")
+	enable(t, m, "roles")
+	waitFor(t, func() bool { return hasLine(m, "roles", "s2 ") })
+	for _, w := range []string{
+		"add true Added the grom role.",
+		"edit true Saved the vip role.",
+		"colour false a tag's colour is like #FF74C6",
+		"bad 1 bad argument #2 to 'server.makerole' (name is 1 to 24 of a-z, 0-9, - and _, and not none)",
+		"bad 2 bad argument #2 to 'server.makerole' (name is",
+		"bad 3 bad argument #2 to 'server.makerole' (name is",
+		"bad 4 bad argument #2 to 'server.makerole' (rank is a whole number from 0 to 1000)",
+		"bad 5 bad argument #2 to 'server.makerole' (tag is a string)",
+		"bad 6 bad argument #2 to 'server.makerole' (no option colour; it takes name, tag, color, rank)",
+		"offline true Added the grom role.",
+		"s1 vip/VIP/#00FF00/40 grom/Grom/#C9CED6/1",
+		"s2 vip/VIP/#FFD700/40 grom/Grom/#FFFFFF/1",
+	} {
+		if !hasLine(m, "roles", w) {
+			t.Errorf("no %q in %q", w, lines(m, "roles"))
+		}
+	}
+	// The edit kept what the panel doesn't set, and the running server read the file again.
+	data, _ := os.ReadFile(filepath.Join(filepath.Dir(in.Def().ConfigPath()), "data", "roles.json"))
+	if !strings.Contains(string(data), `"kick"`) {
+		t.Errorf("vip lost its commands: %s", data)
+	}
+	reloads := 0
+	for _, e := range in.Console() {
+		if e.Kind == logparse.KindInput && e.Text == "roles reload" && e.Name == "plugin:roles" {
+			reloads++
+		}
+	}
+	if reloads != 2 { // grom and vip; the colour was refused before anything was written
+		t.Errorf("%d roles reloads, want 2", reloads)
+	}
+	entries, err := m.Store.AuditLog(context.Background(), "", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var audited []string
+	for _, e := range entries {
+		if e.Username == "plugin:roles" {
+			audited = append(audited, e.Instance+" "+e.Action)
+		}
+	}
+	slices.Sort(audited)
+	if want := []string{"s1 role.create", "s1 role.create", "s1 role.edit", "s2 role.create"}; !slices.Equal(audited, want) { // the refused colour too, as the panel audits it
+		t.Errorf("audited %q, want %q", audited, want)
 	}
 }

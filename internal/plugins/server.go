@@ -56,6 +56,9 @@ type action struct {
 	detail string
 	fn     luavm.Ref // called with what came of it, when hasFn
 	hasFn  bool
+	// roles, for server.makerole, changes data/roles.json in place of line;
+	// it says what it did, and what the audit log calls it.
+	roles func(*serverconfig.File) (reply, audit string, err error)
 }
 
 // result is what came of an action, back on the runner's goroutine.
@@ -94,6 +97,20 @@ func (r *runner) serverCall(name string, args []any) ([]any, error) {
 		return []any{info(in)}, nil
 	case "players":
 		return []any{players(in)}, nil
+	case "roles":
+		f, err := serverconfig.Read(in.Def().ConfigPath())
+		switch {
+		case err != nil:
+			return []any{nil, err.Error()}, nil
+		case !f.HasRoles():
+			return []any{nil, serverconfig.ErrNoRoles.Error()}, nil
+		}
+		list, _, _ := f.Roles()
+		out := make([]any, len(list))
+		for i, role := range list {
+			out[i] = map[string]any{"name": role.Name, "tag": role.Tag, "color": role.Color, "rank": role.Rank}
+		}
+		return []any{out}, nil
 	}
 	a.server, a.in, a.call = in.ID(), in, name
 	var perm string
@@ -161,6 +178,33 @@ func (r *runner) serverCall(name string, args []any) ([]any, error) {
 		a.audit = "role.give"
 		if role == "none" {
 			a.audit = "role.take"
+		}
+	case "makerole":
+		look, given, err := roleLook(name, arg(1))
+		if err != nil {
+			return nil, err
+		}
+		// a.roles names the audit entry once it reads the roles; if it never
+		// does, it still has one.
+		perm, a.detail, a.audit = auth.IngameAdmins, look.Name, "role.edit"
+		a.roles = func(f *serverconfig.File) (string, string, error) {
+			list, _, _ := f.Roles()
+			i := slices.IndexFunc(list, func(r serverconfig.Role) bool { return r.Name == look.Name })
+			if i < 0 {
+				return "Added the " + look.Name + " role.", "role.create", f.AddRole(look)
+			}
+			// What the call leaves out stays as the role has it.
+			l := serverconfig.RoleLook{Tag: list[i].Tag, Color: list[i].Color, Rank: list[i].Rank}
+			if given["tag"] {
+				l.Tag = look.Tag
+			}
+			if given["color"] {
+				l.Color = look.Color
+			}
+			if given["rank"] {
+				l.Rank = look.Rank
+			}
+			return "Saved the " + look.Name + " role.", "role.edit", f.EditRole(look.Name, l)
 		}
 	case "teleport":
 		movers, err := teleportWho(name, arg(1))
@@ -386,12 +430,61 @@ func (r *runner) send() {
 		}
 		tokens--
 		ctx, cancel := context.WithTimeout(r.ctx, actionTime)
-		reply, err := a.in.Command(ctx, a.line, "plugin:"+r.p.ID)
+		var reply string
+		var err error
+		if a.roles != nil {
+			reply, err = a.in.ChangeRoles(ctx, "plugin:"+r.p.ID, func(f *serverconfig.File) (string, error) {
+				reply, audit, err := a.roles(f)
+				a.audit = audit
+				return reply, err
+			})
+		} else {
+			reply, err = a.in.Command(ctx, a.line, "plugin:"+r.p.ID)
+		}
 		cancel()
 		if !r.finish(a, reply, err) {
 			return
 		}
 	}
+}
+
+// roleLook is server.makerole's {name =, tag =, color =, rank =}, and which
+// of tag, color and rank it gave.
+func roleLook(call string, v any) (serverconfig.RoleLook, map[string]bool, error) {
+	var l serverconfig.RoleLook
+	opts, err := options(call, 2, v, "name", "tag", "color", "rank")
+	if err != nil {
+		return l, nil, err
+	}
+	l.Name, _ = opts["name"].(string)
+	if l.Name = strings.ToLower(l.Name); !serverconfig.RoleNameRe.MatchString(l.Name) || l.Name == "none" {
+		return l, nil, fmt.Errorf("bad argument #2 to '%s' (name is 1 to 24 of a-z, 0-9, - and _, and not none)", call)
+	}
+	given := map[string]bool{}
+	for _, k := range []string{"tag", "color"} {
+		x, ok := opts[k]
+		if !ok {
+			continue
+		}
+		s, ok := x.(string)
+		if !ok {
+			return l, nil, fmt.Errorf("bad argument #2 to '%s' (%s is a string)", call, k)
+		}
+		if k == "tag" {
+			l.Tag = s
+		} else {
+			l.Color = s
+		}
+		given[k] = true
+	}
+	if x, ok := opts["rank"]; ok {
+		n, ok := number(x)
+		if !ok || n != math.Trunc(n) || n < 0 || n > 1000 {
+			return l, nil, fmt.Errorf("bad argument #2 to '%s' (rank is a whole number from 0 to 1000)", call)
+		}
+		l.Rank, given["rank"] = int(n), true
+	}
+	return l, given, nil
 }
 
 // finish counts and audits a command the plugin sent, then hands what came

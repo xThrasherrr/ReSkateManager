@@ -282,6 +282,8 @@ What a plugin can call:
 | `server.ban(id, steamId)`, `server.unban(id, steamId)` | Bans or unbans a SteamID64, on the server or not |
 | `server.teleport(id, steamIds, to)` | Teleports a player or a list of up to 64 to a player (a SteamID64) or a place, `{x =, y =, z =}` with `y` up. Several stand in a ring round it |
 | `server.role(id, steamId, role)` | Gives a player one of the server's roles, or `"none"` |
+| `server.roles(id)` | The server's roles, each `{name, tag, color, rank}`, or `nil` and why on a server without roles |
+| `server.makerole(id, {name, tag, color, rank})` | Adds a role with what the default role has, or sets the tag, colour (`"#RRGGBB"`) and rank given of one there is, as **Add role** and **Edit role** do on the Players page. A running server reads its roles again at once |
 | `server.command(id, line)` | Runs a console line |
 | `store.get(key)`, `store.set(key, value)` | Reads or keeps one of the plugin's own values, which outlive restarts: `nil`, a boolean, a number, a string, or a table of those. Setting `nil` deletes it |
 | `store.delete(key)` | Deletes a value; true if it was there |

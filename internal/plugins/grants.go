@@ -34,7 +34,7 @@ var Grants = func() []Grant {
 		{Key: auth.PlayersChat, Calls: []string{"server.say", "server.msg", "ui.card"}},
 		{Key: auth.PlayersKick, Calls: []string{"server.kick"}},
 		{Key: auth.PlayersBan, Calls: []string{"server.ban", "server.unban"}},
-		{Key: auth.IngameAdmins, Calls: []string{"server.role"}},
+		{Key: auth.IngameAdmins, Calls: []string{"server.role", "server.makerole"}},
 		{Key: auth.ConsoleExec, Calls: []string{"server.teleport", "server.command"}},
 		// server.command's lines need what the panel's console asks of them.
 		{Key: auth.SettingsEdit, Calls: []string{"server.command"}},
