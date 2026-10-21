@@ -172,6 +172,55 @@ func (a *API) reloadPlugin(w http.ResponseWriter, r *http.Request) {
 	a.writePlugin(w, r, id)
 }
 
+// pluginFiles lists a plugin's files for its editor.
+func (a *API) pluginFiles(w http.ResponseWriter, r *http.Request) {
+	files, err := a.Plugins.Files(chi.URLParam(r, "pid"))
+	if err != nil {
+		a.pluginErr(w, r, err)
+		return
+	}
+	if files == nil {
+		files = []plugins.File{}
+	}
+	writeJSON(w, http.StatusOK, files)
+}
+
+// pluginFile is one of a plugin's files, ?path= in its folder, as text.
+func (a *API) pluginFile(w http.ResponseWriter, r *http.Request) {
+	text, hash, err := a.Plugins.ReadFile(chi.URLParam(r, "pid"), r.URL.Query().Get("path"))
+	if err != nil {
+		a.pluginErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"text": text, "hash": hash})
+}
+
+// savePluginFile writes one of a plugin's files from its editor: the body
+// is its text, ?path= where it goes, and ?hash= what reading it gave, none
+// for a new file. A file that changed since is a 409 with its hash now.
+func (a *API) savePluginFile(w http.ResponseWriter, r *http.Request) {
+	id, q := chi.URLParam(r, "pid"), r.URL.Query()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, plugins.MaxUpload))
+	if _, tooBig := errors.AsType[*http.MaxBytesError](err); tooBig {
+		writeErr(w, http.StatusRequestEntityTooLarge, "a plugin's file can be 1 MB at most")
+		return
+	} else if err != nil {
+		writeErr(w, http.StatusBadRequest, "the upload was cut off")
+		return
+	}
+	hash, err := a.Plugins.WriteFile(id, q.Get("path"), string(body), q.Get("hash"))
+	if errors.Is(err, plugins.ErrChanged) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": q.Get("path") + " changed since it was opened", "hash": hash})
+		return
+	}
+	if err != nil {
+		a.pluginErr(w, r, err)
+		return
+	}
+	a.audit(r, "", "manager.plugins", "edited "+id+"/"+q.Get("path"))
+	writeJSON(w, http.StatusOK, map[string]string{"hash": hash})
+}
+
 func (a *API) writePlugin(w http.ResponseWriter, r *http.Request, id string) {
 	s, err := a.Plugins.Get(id)
 	if err != nil {
@@ -188,6 +237,9 @@ func (a *API) pluginErr(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	case errors.Is(err, plugins.ErrBadGrant):
 		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	case errors.Is(err, plugins.ErrBadFile):
+		writeErr(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), plugins.ErrBadFile.Error()+": "))
 		return
 	}
 	a.internalErr(w, r, err)

@@ -100,6 +100,8 @@ var routePerms = map[string]string{
 	"GET /api/manager/discord":                           "owner",
 	"GET /api/manager/retention":                         "owner",
 	"GET /api/manager/plugins":                           "owner",
+	"GET /api/manager/plugins/{pid}/file":                "owner",
+	"GET /api/manager/plugins/{pid}/files":               "owner",
 	"GET /api/manager/settings":                          "owner",
 	"GET /api/roles":                                     "panel.users.manage",
 	"GET /api/shared-mods/":                              "settings.view",
@@ -163,6 +165,7 @@ var routePerms = map[string]string{
 	"POST /api/shared-mods/uploads":                      "settings.edit",
 	"POST /api/users":                                    "panel.users.manage",
 	"PUT /api/imports/{uid}":                             "instances.manage",
+	"PUT /api/manager/plugins/{pid}/file":                "owner",
 	"PUT /api/instances/{id}/mods/uploads/{uid}":         "settings.edit",
 	"PUT /api/shared-mods/uploads/{uid}":                 "settings.edit",
 }

@@ -502,6 +502,12 @@ export interface PluginGrant {
 	calls: string[]; // what it lets a plugin call
 }
 
+// One of a plugin's files, as its editor lists them.
+export interface PluginFile {
+	path: string; // in its folder, with slashes
+	size: number;
+}
+
 // When scheduled backups run, and how many of each kind of automatic backup are kept.
 export interface BackupSettings {
 	every: number; // hours; 0 is off

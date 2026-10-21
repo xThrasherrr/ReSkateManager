@@ -6,6 +6,12 @@
 		tabs: { href: string; label: string; icon: IconName }[];
 	}
 	let { tabs }: Props = $props();
+	// The tab whose page this is, or holds it: /manager/plugins/x is under Plugins.
+	const current = $derived(
+		tabs
+			.filter((t) => page.url.pathname === t.href || page.url.pathname.startsWith(t.href + '/'))
+			.reduce<string | undefined>((best, t) => (t.href.length > (best?.length ?? -1) ? t.href : best), undefined)
+	);
 
 	// Keep the open tab in view when the strip scrolls sideways on a phone.
 	let strip: HTMLElement | undefined = $state();
@@ -18,7 +24,7 @@
 
 <nav bind:this={strip} class="no-scrollbar mt-3 flex gap-1 overflow-x-auto px-4 pb-3 text-sm sm:mt-4 sm:gap-1.5 sm:px-6 md:flex-wrap md:overflow-visible">
 	{#each tabs as t (t.href)}
-		{@const active = page.url.pathname === t.href}
+		{@const active = current === t.href}
 		<a
 			href={t.href}
 			aria-current={active ? 'page' : undefined}

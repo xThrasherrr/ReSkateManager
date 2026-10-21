@@ -1,6 +1,21 @@
+<script module lang="ts">
+	import type { PluginLine, PluginState } from '#lib/api.js';
+
+	export { pluginLog };
+	export const sticker: Record<PluginState, [string, string]> = {
+		off: ['', 'Off'],
+		starting: ['sticker-info', 'Starting'],
+		running: ['sticker-accent', 'Running'],
+		failed: ['sticker-pink', 'Failed'],
+		stopped: ['sticker-warn', 'Stopped']
+	};
+	const levelColor = { info: 'text-muted', warn: 'text-warn', error: 'text-bad' };
+	const time = (ms: number) => new Date(ms).toLocaleTimeString();
+</script>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, ApiError, message, sleep, upload, type Plugin, type PluginsInfo, type PluginState } from '#lib/api.js';
+	import { api, ApiError, message, sleep, upload, type Plugin, type PluginsInfo } from '#lib/api.js';
 	import { ask } from '#lib/ask.svelte.js';
 	import { attempt, toast } from '#lib/toast.svelte.js';
 	import { bytes, duration, plural } from '#lib/format.js';
@@ -99,17 +114,20 @@
 		busy = null;
 	}
 
-	const sticker: Record<PluginState, [string, string]> = {
-		off: ['', 'Off'],
-		starting: ['sticker-info', 'Starting'],
-		running: ['sticker-accent', 'Running'],
-		failed: ['sticker-pink', 'Failed'],
-		stopped: ['sticker-warn', 'Stopped']
-	};
-	const levelColor = { info: 'text-muted', warn: 'text-warn', error: 'text-bad' };
-	const time = (ms: number) => new Date(ms).toLocaleTimeString();
 	const ms = (v: number) => (v < 0.1 ? '<0.1' : v < 10 ? v.toFixed(1) : String(Math.round(v)));
 </script>
+
+<!-- A plugin's log, the newest first. -->
+{#snippet pluginLog(lines: PluginLine[])}
+	<ol class="max-h-64 space-y-0.5 overflow-auto rounded-lg bg-sunken p-2 font-mono text-xs">
+		{#each lines.toReversed() as l, i (i)}
+			<li class="flex gap-2">
+				<span class="shrink-0 text-faint">{time(l.at)}</span>
+				<span class="min-w-0 break-words whitespace-pre-wrap {levelColor[l.level]}">{l.text}</span>
+			</li>
+		{/each}
+	</ol>
+{/snippet}
 
 {#if !info}
 	{#if loadError}<LoadError error={loadError} onretry={load} />{:else}<Loading />{/if}
@@ -145,7 +163,7 @@
 				</div>
 				<FolderPath label="Plugins folder" folder={info.dir} />
 				<p class="text-xs text-faint">
-					Each plugin is a folder there with a <code>plugin.toml</code> and a <code>main.lua</code>, added above or copied in. A call into a plugin may run for {info.callMs} ms, and a plugin may use
+					Each plugin is a folder there with a <code>plugin.toml</code> and a <code>main.lua</code>, added above or copied in, and changed with its Edit button. A call into a plugin may run for {info.callMs} ms, and a plugin may use
 					{info.memoryMB} MB. One that keeps failing or running over is stopped. Its log is on its card and in <code>data/plugins.log</code>.
 				</p>
 				<details class="rounded-xl border-2 border-line px-3 py-2 text-sm">
@@ -191,6 +209,9 @@ end)</pre>
 									{#if p.name !== p.id}<div class="truncate font-mono text-xs text-faint">{p.id}</div>{/if}
 								</div>
 								<div class="flex items-center gap-2">
+									<a class="btn btn-ghost btn-sm" href="/manager/plugins/{encodeURIComponent(p.id)}" title="Read and change its files">
+										<Icon name="pencil" size={14} /> Edit
+									</a>
 									<button class="btn btn-ghost btn-sm" disabled={busy !== null} title="Read its files again and start it afresh" onclick={() => reload(p)}>
 										<Icon name="restart" size={14} /> Reload
 									</button>
@@ -262,15 +283,8 @@ end)</pre>
 							{/if}
 							{#if p.recent.length}
 								<details>
-									<summary class="cursor-pointer text-xs font-semibold text-muted">Log ({p.recent.length})</summary>
-									<ol class="mt-2 max-h-64 space-y-0.5 overflow-auto rounded-lg bg-sunken p-2 font-mono text-xs">
-										{#each p.recent.toReversed() as l, i (i)}
-											<li class="flex gap-2">
-												<span class="shrink-0 text-faint">{time(l.at)}</span>
-												<span class="min-w-0 break-words whitespace-pre-wrap {levelColor[l.level]}">{l.text}</span>
-											</li>
-										{/each}
-									</ol>
+									<summary class="mb-2 cursor-pointer text-xs font-semibold text-muted">Log ({p.recent.length})</summary>
+									{@render pluginLog(p.recent)}
 								</details>
 							{/if}
 						</li>
