@@ -59,8 +59,17 @@ const (
 
 func serverPrefix(id string) string { return "servers/" + id + "/" }
 
-// ConfigFiles are the files in a server's folder that a backup holds.
+// ConfigFiles are the files in a server's folder that a backup holds, besides
+// its plugins' storage.
 var ConfigFiles = serverconfig.HostFiles
+
+// pluginStorage reports whether name, in a server's folder, is where one of
+// its plugins keeps what it stores, such as a game mode's scores.
+func pluginStorage(name string) bool {
+	folder, ok := strings.CutPrefix(name, "data/plugins/")
+	folder, ok2 := strings.CutSuffix(folder, "/storage.json")
+	return ok && ok2 && serverconfig.ValidModFolder(folder)
+}
 
 // modDirs are a server's folders of mods, enabled and disabled.
 var modDirs = []string{"Mods", "DisabledMods"}
@@ -102,7 +111,7 @@ type Manifest struct {
 // its files it holds.
 type Server struct {
 	instance.Def
-	Files []string `json:"files"` // of ConfigFiles
+	Files []string `json:"files"` // of ConfigFiles, and plugins' storage
 	Mods  []Mod    `json:"mods"`  // every mod it had
 	// ModFiles: it holds the files of the server's own mods. An export holds
 	// the shared mods it loaded too, as its own.
@@ -365,9 +374,16 @@ func collectServer(def instance.Def, mods, export bool) (Server, []entry, error)
 	srv := Server{Def: def, Files: []string{}, Mods: []Mod{}, ModFiles: mods}
 	prefix := serverPrefix(def.ID)
 	var entries []entry
-	for _, name := range ConfigFiles {
+	names := slices.Clone(ConfigFiles)
+	stores, _ := os.ReadDir(filepath.Join(def.Dir, "data", "plugins"))
+	for _, e := range stores {
+		if name := "data/plugins/" + e.Name() + "/storage.json"; pluginStorage(name) {
+			names = append(names, name)
+		}
+	}
+	for _, name := range names {
 		n := len(entries)
-		if entries = appendFile(entries, prefix+name, filepath.Join(def.Dir, name), false); len(entries) > n {
+		if entries = appendFile(entries, prefix+name, filepath.Join(def.Dir, filepath.FromSlash(name)), false); len(entries) > n {
 			srv.Files = append(srv.Files, name)
 		}
 	}

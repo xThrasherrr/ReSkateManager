@@ -186,6 +186,8 @@ func (a *API) installUploaded(dir, zipPath, name string, shared bool, audit func
 	if err == nil && shared {
 		swapped = a.adopt(servers, folder)
 		a.relink(servers)
+	} else if err == nil {
+		a.syncPlugins(dir)
 	}
 	a.modMu.Unlock()
 	if err != nil {

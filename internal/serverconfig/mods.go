@@ -41,6 +41,8 @@ type Mod struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// A link to the shared mods, where it is updated and deleted.
 	Shared bool `json:"shared,omitempty"`
+	// It has a plugin the server runs too (see SyncPlugins).
+	ServerPlugin bool `json:"serverPlugin,omitempty"`
 
 	manifestName string
 	// The Thunderstore package it came from as Namespace-Name, when the
@@ -94,7 +96,7 @@ func ReadMods(dir string) ([]Mod, error) {
 				}
 				shared = isSharedLink(path)
 			}
-			m := Mod{Folder: e.Name(), Title: e.Name(), Maps: []ModMap{}, Disabled: disabled, Shared: shared}
+			m := Mod{Folder: e.Name(), Title: e.Name(), Maps: []ModMap{}, Disabled: disabled, Shared: shared, ServerPlugin: serverPlugin(path)}
 			readModInfo(path, &m)
 			levels, err := readLevels(filepath.Join(path, "reskate-levels.json"))
 			if err != nil {
@@ -162,6 +164,21 @@ func readModInfo(path string, m *Mod) {
 		}
 		return
 	}
+}
+
+// serverPlugin reports whether the mod at path has a plugin the server runs:
+// a reskate-plugin.json whose side isn't the default, client.
+func serverPlugin(path string) bool {
+	data, err := readCapped(filepath.Join(path, "reskate-plugin.json"), maxModJSON)
+	if err != nil {
+		return false
+	}
+	var p struct {
+		Side any `json:"side"`
+	}
+	// A broken one goes to the server too, which logs what's wrong with it.
+	err = json.Unmarshal(bytes.TrimPrefix(data, utf8BOM), &p)
+	return err != nil || (p.Side != nil && p.Side != "client")
 }
 
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}

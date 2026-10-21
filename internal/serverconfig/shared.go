@@ -124,7 +124,7 @@ func SyncShared(dir, shared string, use SharedUse) error {
 		}
 		errs = append(errs, link(filepath.Join(lib, name), filepath.Join(arrive, name)))
 	}
-	return errors.Join(errs...)
+	return errors.Join(append(errs, SyncPlugins(dir))...)
 }
 
 // link and unlink make and remove a link, taking one that is already there,

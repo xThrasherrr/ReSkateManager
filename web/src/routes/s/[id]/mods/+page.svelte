@@ -141,6 +141,7 @@
 {#snippet credits(mod: Mod)}
 	<ModCredits {mod} up={updates[mod.folder]}>
 		{#if mod.shared}<span class="sticker sticker-info" title="Linked from the shared mods, which update and delete it">Shared</span>{/if}
+		{#if mod.serverPlugin}<span class="sticker sticker-accent" title="The server runs its plugin too, while the mod is enabled (ReSkate's plugins)">Server plugin</span>{/if}
 		{#if mod.disabled}<span class="sticker">Disabled</span>{/if}
 	</ModCredits>
 {/snippet}
@@ -320,7 +321,9 @@
 		{#if otherMods.length}
 			<section class="card">
 				<h2 class="border-b-2 border-line px-4 py-3">Other mods</h2>
-				<p class="px-4 pt-3 text-xs text-faint">These have no reskate-levels.json, so the server ignores them. Only players' games use them.</p>
+				<p class="px-4 pt-3 text-xs text-faint">
+					These have no reskate-levels.json, so they add no maps. Only players' games use them, apart from server plugins, which the server runs too.
+				</p>
 				<ul class="divide-y divide-line/60 px-1 py-1.5">
 					{#each otherMods as mod (mod.folder)}
 						<li class="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2">

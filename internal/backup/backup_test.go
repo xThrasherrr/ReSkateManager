@@ -134,6 +134,7 @@ func TestBackUpWipeRestore(t *testing.T) {
 	write(t, filepath.Join(lobby.Dir, "ReSkateServer.json"), `{"name":"Lobby","port":27015}`)
 	write(t, filepath.Join(lobby.Dir, "world-layers.json"), `{"rows":[]}`)
 	write(t, filepath.Join(lobby.Dir, "data", "bans.json"), `[{"id":"76561198000000001","name":"A","added":1}]`) // ReSkate 1.1.7
+	write(t, filepath.Join(lobby.Dir, "data", "plugins", "referee", "storage.json"), `{"round":2}`)              // the plugins release
 	write(t, lobby.Exe(), "a server program")
 	write(t, filepath.Join(lobby.Dir, "ReSkateServer.log"), "a log")
 	writeMod(t, filepath.Join(lobby.Dir, "Mods", "own"), "1.0.0")
@@ -535,13 +536,14 @@ func TestUnsafeBackups(t *testing.T) {
 	}
 	// Files outside the known places are left out.
 	r, err := OpenFile(zipOf("extra.zip", map[string]string{"backup.json": manifest, "servers/a/ReSkateServer.exe": "program",
-		"servers/a/ReSkateServer.json": "{}", "servers/a/Mods/m/x.txt": "x", "servers/a/Mods/loose.txt": "x"}))
+		"servers/a/ReSkateServer.json": "{}", "servers/a/Mods/m/x.txt": "x", "servers/a/Mods/loose.txt": "x",
+		"servers/a/data/plugins/p/storage.json": "{}", "servers/a/data/plugins/p/notes.txt": "x", "servers/a/data/plugins/storage.json": "{}"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
 	only := func(what string, got map[string]string) {
-		if len(got) != 2 || got["ReSkateServer.json"] == "" || got["Mods/m/x.txt"] == "" {
+		if len(got) != 3 || got["ReSkateServer.json"] == "" || got["Mods/m/x.txt"] == "" || got["data/plugins/p/storage.json"] == "" {
 			t.Errorf("%s %v", what, got)
 		}
 	}

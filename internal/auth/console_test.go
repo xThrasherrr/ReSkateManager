@@ -11,6 +11,14 @@ func TestConsolePermLocks(t *testing.T) {
 		"locks":                    "",
 		"throwdown-locks off":      SettingsEdit,
 		"drones on":                SettingsEdit,
+		// The plugins release: plugin lists, and reload, off and on change
+		// what runs; a plugin's own command is one the manager doesn't know.
+		"plugin":                "",
+		"plugin list":           "",
+		"PLUGIN commands":       "",
+		"plugin reload referee": SettingsEdit,
+		"plugin off referee":    SettingsEdit,
+		"trickrace reset":       SettingsEdit,
 	} {
 		if got := ConsolePerm(line); got != want {
 			t.Errorf("%q needs %q, want %q", line, got, want)

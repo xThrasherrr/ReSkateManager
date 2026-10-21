@@ -14,7 +14,8 @@ import (
 // consoleOnly are the console commands console.exec alone may run: they only
 // read, or act on players in a way no finer permission covers. Of maps, only
 // the list (see ConsolePerm). locks (2.1.0) lists the players with locked tools.
-var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "teleport", "vote-cancel", "clear-objects", "locks"}
+// Of plugin (ReSkate's plugins release), only list and commands.
+var consoleOnly = []string{"help", "status", "net", "players", "bans", "maps", "tpall", "tphere", "teleport", "vote-cancel", "clear-objects", "locks", "plugin"}
 
 // consolePerms are the console commands that do what a finer permission
 // grants, and need it too. The verbs are the server's own (Host::command in
@@ -52,6 +53,11 @@ func ConsolePerm(line string) string {
 	// "maps" lists the maps, but 2.0.7's maps reload reads Mods again, and
 	// maps update and maps latest change the mods' versions and a setting.
 	if verb == "maps" && len(fields) > 1 {
+		return SettingsEdit
+	}
+	// plugin reload, off and on change what the server runs. A plugin's own
+	// commands are ones the manager doesn't know, so they need settings.edit.
+	if verb == "plugin" && len(fields) > 1 && fields[1] != "list" && fields[1] != "commands" {
 		return SettingsEdit
 	}
 	if slices.Contains(consoleOnly, verb) {

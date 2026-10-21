@@ -135,6 +135,9 @@ func (a *API) deleteMod(w http.ResponseWriter, r *http.Request) {
 			a.Log.Warn("shared mods", "instance", d.ID, "err", lerr)
 		}
 	}
+	if err == nil {
+		a.syncPlugins(d.Dir)
+	}
 	a.modMu.Unlock()
 	if err != nil {
 		a.modErr(w, r, err)

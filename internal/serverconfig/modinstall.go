@@ -277,6 +277,9 @@ func SetModEnabled(dir, folder string, enabled bool) error {
 	if err := os.Rename(from, to); err != nil {
 		return fmt.Errorf("cannot move %s (a running server may be using it): %w", folder, err)
 	}
+	if err := SyncPlugins(dir); err != nil {
+		return fmt.Errorf("moved %s, but the server's Plugins folder couldn't follow: %w", folder, err)
+	}
 	return nil
 }
 

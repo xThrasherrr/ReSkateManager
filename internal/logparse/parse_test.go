@@ -57,6 +57,10 @@ func TestClassify(t *testing.T) {
 		{"[afk] Thrasher was removed after 15 min away.", KindTagged, "", "", nil}, // 2.0.0
 		// 2.1.0: logged before the reply to the lock that took them.
 		{"[lock] Thrasher (76561198000000001): nobail, boosts locked by console", KindTagged, "", "", nil},
+		// The plugins release: whatever the server's plugins log, whenever they run.
+		{"[Plugins] Plugin Trick_Race loaded (console, server, session.read).", KindTagged, "", "", nil},
+		{"[Plugins] [Trick_Race] round 2 starts", KindTagged, "", "", nil},
+		{"[Plugins] warning: Plugin broken was not loaded: \"side\" must be \"client\", \"server\" or \"both\"", KindTagged, "", "", nil},
 		// 2.0.2: an announcement is logged before the reply to the announce that posted it.
 		{"[announcement] Join our Discord", KindTagged, "", "", nil},
 		{"[poll] Thrasher started a poll: Next map? Grom | Stadium", KindTagged, "", "", nil},

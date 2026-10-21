@@ -38,6 +38,14 @@ func (a *API) relink(servers []sharedServer) {
 	}
 }
 
+// syncPlugins links a server's mods with a server plugin into its Plugins
+// folder, after its own mods changed. The caller holds modMu.
+func (a *API) syncPlugins(dir string) {
+	if err := serverconfig.SyncPlugins(dir); err != nil {
+		a.Log.Warn("server plugins", "dir", dir, "err", err)
+	}
+}
+
 // adopt swaps the copies of shared mod folder on servers that use the shared
 // mods for links, where they are the same version, and names those servers.
 // The caller holds modMu.

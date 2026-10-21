@@ -434,6 +434,9 @@ func (in *Instance) startLocked() error {
 			in.managerLineLocked("Could not link the shared mods: " + err.Error())
 		}
 	}
+	if err := serverconfig.SyncPlugins(in.def.Dir); err != nil {
+		in.managerLineLocked("Could not link the mods' plugins into Plugins: " + err.Error())
+	}
 	if msg, err := fixServerName(in.def.ConfigPath()); err != nil {
 		in.managerLineLocked("Could not fix the server name: " + err.Error())
 	} else if msg != "" {

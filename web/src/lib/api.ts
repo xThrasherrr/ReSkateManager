@@ -597,6 +597,7 @@ export interface Mod {
 	problem?: string;
 	disabled?: boolean; // moved to DisabledMods, where the server does not look
 	shared?: boolean; // a link to the shared mods, which update and delete it
+	serverPlugin?: boolean; // has a plugin the server runs too, linked into its Plugins folder
 	package?: string; // the Thunderstore package, Namespace-Name
 }
 

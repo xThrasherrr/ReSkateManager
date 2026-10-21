@@ -155,6 +155,9 @@ func (a *API) fetchMod(ctx context.Context, j *modJob, m modInstall) (string, er
 	a.modMu.Lock()
 	defer a.modMu.Unlock()
 	folder, _, err := un.Install(m.replace)
+	if !shared && folder != "" {
+		a.syncPlugins(m.dir)
+	}
 	if (err != nil && folder == "") || !shared {
 		return folder, err
 	}

@@ -121,15 +121,21 @@ func (r *Reader) Server(id string) (*Server, bool) {
 	return nil, false
 }
 
-// RestoreConfig writes server id's config files from the backup into dir,
-// each replaced in one step, and reports which it wrote. One the backup
-// lacks is left as it is.
+// RestoreConfig writes server id's config files and its plugins' storage
+// from the backup into dir, each replaced in one step, and reports which it
+// wrote. One the backup lacks is left as it is.
 func (r *Reader) RestoreConfig(id, dir string) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	var done []string
-	for _, name := range ConfigFiles {
+	names := slices.Clone(ConfigFiles)
+	for key := range r.files {
+		if name, ok := strings.CutPrefix(key, serverPrefix(id)); ok && pluginStorage(name) {
+			names = append(names, name)
+		}
+	}
+	for _, name := range names {
 		f := r.files[serverPrefix(id)+name]
 		if f == nil {
 			continue
@@ -316,7 +322,7 @@ func (r *Reader) ImportServer(ctx context.Context, dir string, fn func(done, tot
 	}
 	picked := map[string]*zip.File{}
 	for rel, f := range files {
-		if _, _, ok := modPath(rel); ok || slices.Contains(ConfigFiles, rel) {
+		if _, _, ok := modPath(rel); ok || slices.Contains(ConfigFiles, rel) || pluginStorage(rel) {
 			picked[rel] = f
 		}
 	}

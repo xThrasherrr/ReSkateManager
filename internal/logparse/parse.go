@@ -26,7 +26,7 @@ const (
 	KindCommand   Kind = "command"   // [command] <name>: /<text>   (a player's chat command; [command] <name> /<text> as one of the owner's runs)
 	KindAdmin     Kind = "admin"     // [admin] <name>: <text>      (an in-game admin's server command)
 	KindPartyChat Kind = "partychat" // [party chat] <name>: <text>
-	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [words], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk], [parks], [teleport]
+	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [words], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk], [parks], [teleport], [Plugins]
 	KindReady     Kind = "ready"     // <name> is up on <map> for N players.
 	KindSteam     Kind = "steam"     // Steam ID <id>[ (<how it got it>)], public IP <ip>.
 	KindJoinCode  Kind = "joincode"  // Join code: <code>[ (password required)]
@@ -60,7 +60,9 @@ var (
 	pmRe    = regexp.MustCompile(`(?i)\bp\.? ?m\b`)
 	amRe    = regexp.MustCompile(`(?i)\ba\.? ?m\b`)
 	// Since 2.0.3 a tag can name the one player a line was for: "[announcement -> Bob] ...".
-	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk|parks|teleport|lock)(?: -> (.+?))?\] (.*)$`)
+	// [Plugins] is every line the server's plugins log, whenever they run
+	// (Server/server_plugins.cpp in ReSkate's plugins release).
+	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk|parks|teleport|lock|Plugins)(?: -> (.+?))?\] (.*)$`)
 	// One of the owner's chat commands running (2.0.3): "<name> /<command>[ <text>]".
 	customCommandRe = regexp.MustCompile(`^(.+?) /([a-z0-9_-]{1,16})(?: .*)?$`)
 	// ", admin" before 2.0.6; then the player's role, which is everyone's
