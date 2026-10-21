@@ -629,7 +629,7 @@ func (a *API) ban(w http.ResponseWriter, r *http.Request) {
 	if running(in) {
 		reply, err = in.Command(r.Context(), strings.TrimSpace("ban "+req.ID+" "+name), from(r).user.Username)
 	} else {
-		reply, err = a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+		reply, err = in.EditStopped(func(f *serverconfig.File) (string, error) {
 			bans := f.Bans()
 			if slices.ContainsFunc(bans, func(b serverconfig.Ban) bool { return b.ID == req.ID }) {
 				return "", errors.New(req.ID + " is already banned")
@@ -653,7 +653,7 @@ func (a *API) unban(w http.ResponseWriter, r *http.Request) {
 	if running(in) {
 		reply, err = in.Command(r.Context(), "unban "+id, from(r).user.Username)
 	} else {
-		reply, err = a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+		reply, err = in.EditStopped(func(f *serverconfig.File) (string, error) {
 			bans := f.Bans()
 			n := len(bans)
 			bans = slices.DeleteFunc(bans, func(b serverconfig.Ban) bool { return b.ID == id })
@@ -668,33 +668,11 @@ func (a *API) unban(w http.ResponseWriter, r *http.Request) {
 	a.answerReply(w, r, reply, err)
 }
 
-// offlineEdit changes ReSkateServer.json while the server is stopped.
-func (a *API) offlineEdit(in *instance.Instance, fn func(*serverconfig.File) (string, error)) (string, error) {
-	var reply string
-	path := in.Def().ConfigPath() // outside IfStopped: it holds the instance lock
-	ran, err := in.IfStopped(func() error {
-		f, err := serverconfig.Read(path)
-		if err != nil {
-			return err
-		}
-		if reply, err = fn(f); err != nil {
-			return err
-		}
-		return f.Write(path)
-	})
-	if !ran {
-		return "", errJustStarted
-	}
-	return reply, err
-}
-
-var errJustStarted = errors.New("the server just started; try again")
-
 // answerReply answers a change made by a console command or to the config
 // file: the server's reply, or why there is none.
 func (a *API) answerReply(w http.ResponseWriter, r *http.Request, reply string, err error) {
 	switch {
-	case errors.Is(err, errJustStarted):
+	case errors.Is(err, instance.ErrJustStarted):
 		writeErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, instance.ErrNoReply):
 		writeErr(w, http.StatusGatewayTimeout, err.Error())
@@ -829,7 +807,7 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 	user := from(r).user.Username
 
 	if !running(in) {
-		reply, err := a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+		reply, err := in.EditStopped(func(f *serverconfig.File) (string, error) {
 			f.ApplyOffline(plan.Changed)
 			return fmt.Sprintf("Saved %d setting(s); they apply when the server starts.", len(keys)), nil
 		})
@@ -866,11 +844,11 @@ func (a *API) saveSettings(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, r, 500, fmt.Errorf("could not stop the server: %w", err))
 			return
 		}
-		_, err = a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+		_, err = in.EditStopped(func(f *serverconfig.File) (string, error) {
 			f.ApplyOffline(plan.Restart)
 			return "", nil
 		})
-		if errors.Is(err, errJustStarted) {
+		if errors.Is(err, instance.ErrJustStarted) {
 			writeErr(w, http.StatusConflict, "the server was started by someone else before the settings were written")
 			return
 		}

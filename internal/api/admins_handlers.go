@@ -131,7 +131,7 @@ func (a *API) giveRole(r *http.Request, in *instance.Instance, id, role string) 
 		return "", fmt.Errorf("%w: %s is an admin for panel user %s; change their roles or Steam link instead", errPanelAdmin, id, user)
 	}
 	if !running(in) {
-		return a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+		return in.EditStopped(func(f *serverconfig.File) (string, error) {
 			if err := f.SetRole(id, role); err != nil {
 				return "", err
 			}
@@ -234,41 +234,13 @@ func (a *API) takeRole(w http.ResponseWriter, r *http.Request) {
 	a.answerRole(w, r, reply, err)
 }
 
-// roleChange makes change to a server's roles in its data/roles.json and,
-// while it runs, has it read the file again (roles reload), as its own roles
-// editor does, so its players see their tags change at once. A running
-// server writes the file itself as roles are given, so it's read just before.
+// roleChange makes change to a server's roles in its data/roles.json, as the
+// server's own roles editor does (Instance.ChangeRoles).
 func (a *API) roleChange(w http.ResponseWriter, r *http.Request, action, detail string, change func(*serverconfig.File) (string, error)) {
 	in := inst(r)
-	var reply string
-	var err error
-	if !running(in) {
-		reply, err = a.offlineEdit(in, change)
-	} else {
-		reply, err = a.liveRoleChange(r, in, change)
-	}
+	reply, err := in.ChangeRoles(r.Context(), from(r).user.Username, change)
 	a.auditOutcome(r, in.ID(), action, detail, err)
 	a.answerRole(w, r, reply, err)
-}
-
-func (a *API) liveRoleChange(r *http.Request, in *instance.Instance, change func(*serverconfig.File) (string, error)) (string, error) {
-	path := in.Def().ConfigPath()
-	f, err := serverconfig.Read(path)
-	if err != nil {
-		return "", err
-	}
-	reply, err := change(f)
-	if err != nil {
-		return "", err
-	}
-	if err := f.WriteRoles(path); err != nil {
-		return "", err
-	}
-	answer, err := in.Command(r.Context(), "roles reload", from(r).user.Username)
-	if err == nil && strings.Contains(answer, "was not loaded") {
-		err = errors.New(answer) // the server keeps the roles it had
-	}
-	return reply, err
 }
 
 // addServerRole adds a role to a server (ReSkate 2.0.6), with the tag, colour and
@@ -353,7 +325,7 @@ func (a *API) adminChange(w http.ResponseWriter, r *http.Request, in *instance.I
 	if running(in) {
 		reply, err = a.liveAdminChange(r, in, op, id)
 	} else {
-		reply, err = a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+		reply, err = in.EditStopped(func(f *serverconfig.File) (string, error) {
 			list := f.Admins()
 			if op == "add" {
 				if !slices.Contains(list, id) {

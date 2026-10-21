@@ -107,7 +107,7 @@ func (a *API) saveWorld(w http.ResponseWriter, r *http.Request) {
 		a.answerReply(w, r, strings.Join(replies, " "), err)
 		return
 	}
-	reply, err := a.offlineEdit(in, func(f *serverconfig.File) (string, error) {
+	reply, err := in.EditStopped(func(f *serverconfig.File) (string, error) {
 		layers := f.Layers()
 		if req.TimeOfDay != "" {
 			if err := serverconfig.ApplyTimeOfDay(layers, all, req.TimeOfDay); err != nil {

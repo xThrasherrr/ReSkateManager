@@ -646,6 +646,59 @@ func (in *Instance) IfStopped(fn func() error) (ran bool, err error) {
 	return true, fn()
 }
 
+// ErrJustStarted is why EditStopped changed nothing: the server started.
+var ErrJustStarted = errors.New("the server just started; try again")
+
+// EditStopped makes fn's change to a stopped server's config, while it can't
+// start, and returns fn's reply.
+func (in *Instance) EditStopped(fn func(*serverconfig.File) (string, error)) (string, error) {
+	var reply string
+	path := in.Def().ConfigPath() // outside IfStopped: it holds the instance lock
+	ran, err := in.IfStopped(func() error {
+		f, err := serverconfig.Read(path)
+		if err != nil {
+			return err
+		}
+		if reply, err = fn(f); err != nil {
+			return err
+		}
+		return f.Write(path)
+	})
+	if !ran {
+		return "", ErrJustStarted
+	}
+	return reply, err
+}
+
+// ChangeRoles makes change to the server's data/roles.json as its own roles
+// editor does: a running server reads the file again (roles reload), sent as
+// by, so its players see their tags change at once, and a stopped one reads
+// it as it starts.
+func (in *Instance) ChangeRoles(ctx context.Context, by string, change func(*serverconfig.File) (string, error)) (string, error) {
+	if s := in.State(); s != Running && s != Starting {
+		return in.EditStopped(change)
+	}
+	// A running server writes the file itself as roles are given, so it's
+	// read just before.
+	path := in.Def().ConfigPath()
+	f, err := serverconfig.Read(path)
+	if err != nil {
+		return "", err
+	}
+	reply, err := change(f)
+	if err != nil {
+		return "", err
+	}
+	if err := f.WriteRoles(path); err != nil {
+		return "", err
+	}
+	answer, err := in.Command(ctx, "roles reload", by)
+	if err == nil && strings.Contains(answer, "was not loaded") {
+		err = errors.New(answer) // the server keeps the roles it had
+	}
+	return reply, err
+}
+
 // BeginUpdate moves a stopped server to Updating so nothing starts it mid-install.
 func (in *Instance) BeginUpdate() error {
 	in.mu.Lock()
