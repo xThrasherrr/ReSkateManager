@@ -8,22 +8,39 @@
 	const id = $props.id();
 	let open = $state(false);
 	let pinned = $state(false);
+	let button: HTMLButtonElement;
 
 	function close() {
 		open = pinned = false;
 	}
 
-	// Keep the bubble inside the viewport on narrow screens. It is built afresh
-	// each time it opens, so it is measured at its natural spot.
-	function fit(tip: HTMLElement) {
-		const r = tip.getBoundingClientRect();
-		const over = r.right - (window.innerWidth - 16);
-		if (over > 0) tip.style.translate = `${-Math.min(over, r.left - 16)}px 0`;
+	// The bubble sits in the top layer, beside the button, so it never makes the
+	// page taller: that scrolled a tip at the bottom out from under the pointer,
+	// which closed it and scrolled back, over and over. Below the button, or
+	// above when there's more room there; inside the viewport; following it as
+	// anything scrolls.
+	function place(tip: HTMLElement) {
+		tip.showPopover();
+		const move = () => {
+			const b = button.getBoundingClientRect();
+			const { width, height } = tip.getBoundingClientRect();
+			const up = b.bottom + 6 + height > innerHeight - 16 && b.top > innerHeight - b.bottom;
+			tip.style.top = `${up ? b.top - 6 - height : b.bottom + 6}px`;
+			tip.style.left = `${Math.max(16, Math.min(b.left - 8, innerWidth - 16 - width))}px`;
+		};
+		move();
+		addEventListener('scroll', move, true);
+		addEventListener('resize', move);
+		return () => {
+			removeEventListener('scroll', move, true);
+			removeEventListener('resize', move);
+		};
 	}
 </script>
 
-<span class="relative inline-flex align-middle">
+<span class="inline-flex align-middle">
 	<button
+		bind:this={button}
 		type="button"
 		class="inline-flex size-5 items-center justify-center rounded-full text-faint transition-colors hover:text-info {open ? 'text-info' : ''}"
 		aria-label={label}
@@ -40,10 +57,11 @@
 	</button>
 	{#if open}
 		<div
-			{@attach fit}
+			{@attach place}
 			{id}
+			popover="manual"
 			role="tooltip"
-			class="absolute top-full left-0 z-30 mt-1.5 -ml-2 w-72 max-w-[calc(100vw-2rem)] animate-pop rounded-lg border-2 border-ink bg-raised px-3 py-2 font-sans text-xs leading-relaxed font-normal tracking-normal whitespace-pre-line text-fg normal-case shadow-sticker"
+			class="fixed inset-auto m-0 w-72 overflow-visible max-w-[calc(100vw-2rem)] animate-pop rounded-lg border-2 border-ink bg-raised px-3 py-2 font-sans text-xs leading-relaxed font-normal tracking-normal whitespace-pre-line text-fg normal-case shadow-sticker"
 		>
 			{text}
 		</div>
