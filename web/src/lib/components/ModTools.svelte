@@ -8,8 +8,17 @@
 		canUpload,
 		uploading,
 		onrefresh,
-		onfiles
-	}: { browse: string; busy: boolean; canUpload: boolean; uploading: boolean; onrefresh: () => void; onfiles: (files: FileList | null) => void } = $props();
+		onfiles,
+		noun = 'mod'
+	}: {
+		browse: string;
+		busy: boolean;
+		canUpload: boolean;
+		uploading: boolean;
+		onrefresh: () => void;
+		onfiles: (files: FileList | null) => void;
+		noun?: string; // what the upload button uploads
+	} = $props();
 
 	let picker = $state<HTMLInputElement>();
 </script>
@@ -30,6 +39,6 @@
 	/>
 	<button class="btn btn-primary" onclick={() => picker?.click()}>
 		<Icon name="upload" size={14} />
-		{uploading ? 'Upload more' : 'Upload mod'}
+		{uploading ? 'Upload more' : `Upload ${noun}`}
 	</button>
 {/if}

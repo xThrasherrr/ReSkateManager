@@ -43,6 +43,8 @@ type Mod struct {
 	Shared bool `json:"shared,omitempty"`
 	// It has a plugin the server runs too (see SyncPlugins).
 	ServerPlugin bool `json:"serverPlugin,omitempty"`
+	// The base maps it has parks for (parks/<key>.park.json, ReSkate 2.0.6).
+	Parks []string `json:"parks,omitempty"`
 
 	manifestName string
 	// The Thunderstore package it came from as Namespace-Name, when the
@@ -96,7 +98,7 @@ func ReadMods(dir string) ([]Mod, error) {
 				}
 				shared = isSharedLink(path)
 			}
-			m := Mod{Folder: e.Name(), Title: e.Name(), Maps: []ModMap{}, Disabled: disabled, Shared: shared, ServerPlugin: serverPlugin(path)}
+			m := Mod{Folder: e.Name(), Title: e.Name(), Maps: []ModMap{}, Disabled: disabled, Shared: shared, ServerPlugin: serverPlugin(path), Parks: parkKeys(path)}
 			readModInfo(path, &m)
 			levels, err := readLevels(filepath.Join(path, "reskate-levels.json"))
 			if err != nil {

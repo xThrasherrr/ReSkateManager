@@ -44,7 +44,11 @@
 			<p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
 				<span class="font-mono">/{c.name}</span>
 				<span class="sticker sticker-info">Plugin</span>
-				<span class="text-muted">The plugin <span class="font-mono">{plugin}</span> answers it, while it's on under Manager.</span>
+				{#if plugin === 'manager:parks'}
+					<span class="text-muted">The manager answers it, for the players the <a class="text-accent hover:underline" href="parks">Parks</a> page lets spawn parks.</span>
+				{:else}
+					<span class="text-muted">The plugin <span class="font-mono">{plugin}</span> answers it, while it's on under Manager.</span>
+				{/if}
 			</p>
 		{:else}
 			<div class="flex flex-wrap items-center gap-2">

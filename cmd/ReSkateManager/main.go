@@ -35,6 +35,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/lockfile"
 	"github.com/xThrasherrr/ReSkateManager/internal/logfile"
 	"github.com/xThrasherrr/ReSkateManager/internal/logparse"
+	"github.com/xThrasherrr/ReSkateManager/internal/parks"
 	"github.com/xThrasherrr/ReSkateManager/internal/perf"
 	"github.com/xThrasherrr/ReSkateManager/internal/plugins"
 	"github.com/xThrasherrr/ReSkateManager/internal/restarts"
@@ -221,7 +222,8 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 	notifier := &alerts.Notifier{Store: db, Log: log, Version: version}
 	notifier.Start(ctx)
 	status := &discord.Poster{Store: db, Reg: reg, Log: log, Version: version, Release: builds.Version}
-	plugs := &plugins.Manager{Dir: filepath.Join(root, "plugins"), Store: db, Log: log, LogPath: filepath.Join(dataDir, "plugins.log"), Servers: reg, Discord: notifier.Deliver}
+	pks := &parks.Service{Store: db, Log: log}
+	plugs := &plugins.Manager{Dir: filepath.Join(root, "plugins"), Store: db, Log: log, LogPath: filepath.Join(dataDir, "plugins.log"), Servers: reg, Discord: notifier.Deliver, Words: pks.Words}
 	a := &api.API{Cfg: cfg, Store: db, Auth: authSvc, Reg: reg, Updates: updates, Builds: builds, Admins: admins, Self: self, Log: log, Version: version,
 		ConfigPath: cfgPath, ServersDir: serversDir, SharedDir: sharedDir, DataDir: dataDir, CacheDir: cacheDir, Static: static, Backups: backups,
 		Thunderstore: thunderstoreClient(), Alerts: notifier, Discord: status, Plugins: plugs, Exe: exe, Restart: func() { restart.request(reg, stop) }, Base: ctx}
@@ -282,7 +284,11 @@ func run(root string, noTray, noBrowser bool, launcherJSON, exe string) error {
 				log.Warn("network sample", "instance", id, "err", err)
 			}
 		}
-		in.OnNotice = plugs.Notice(id)
+		pluginNotice, parkNotice := plugs.Notice(id), pks.Notice(in)
+		in.OnNotice = func(n instance.Notice) {
+			parkNotice(n)
+			pluginNotice(n)
+		}
 		in.LinkSharedMods = a.LinkSharedMods
 		in.PluginCommands = plugs.PluginCommands
 	}

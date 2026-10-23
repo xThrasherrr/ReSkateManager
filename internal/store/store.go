@@ -294,7 +294,7 @@ func (s *Store) MoveInstance(ctx context.Context, id, dir string) error {
 
 // DeleteInstance removes an instance and everything the panel keeps about it:
 // its admins, announcements, samples, player history, visits, throwdowns and
-// board scores, and the roles granted on it. All of it goes, so a server added later under
+// board scores, its park pools, and the roles granted on it. All of it goes, so a server added later under
 // the same ID starts with none of it, and none of its players.
 func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
@@ -312,6 +312,7 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 		"DELETE FROM throwdowns WHERE instance_id = ?", // and their players with them
 		"DELETE FROM board_scores WHERE instance_id = ?",
 		"DELETE FROM user_roles WHERE instance_id = ?",
+		"DELETE FROM kv WHERE key = 'parks:' || ?", // its park pools (internal/parks)
 		"DELETE FROM instances WHERE id = ?",
 	} {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {

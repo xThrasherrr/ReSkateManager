@@ -12,7 +12,7 @@ var GroupInfo = map[string]string{
 		"Each step has a separate start and return distance, so a player at a boundary doesn't flicker between rates. " +
 		"The four distances must rise in order: full rate return < half rate start ≤ half rate return < low rate start.\n" +
 		"A player who has stood still for a few seconds (in a menu, or away) is sent at 5 a second to everyone until they move.",
-	"Parks": "San Vansterdam has three park lots. Each shows one layout to everyone: a Flump, Mega, Skate or Street park variant, " +
+	"Park lots": "San Vansterdam has three park lots. Each shows one layout to everyone: a Flump, Mega, Skate or Street park variant, " +
 		"or \"empty\" for a bare lot. Changes apply live.\n" +
 		"Randomize picks a layout for each lot (never an empty one) for you to save.",
 	"Park mods": "Parks players built in the game's Park Editor and shared as mods, which the server spawns for everyone. A spawned park belongs to the server: nobody can move or delete it, and it stays when players leave. Needs ReSkate 2.0.6.",

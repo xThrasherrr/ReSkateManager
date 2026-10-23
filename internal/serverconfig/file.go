@@ -932,6 +932,9 @@ const (
 	commandExample   = `e.g. "map {map}"`
 )
 
+// ValidParkName reports whether s can name a park mod, as votes are named.
+func ValidParkName(s string) bool { return validVoteName(s) }
+
 // validVoteName is valid_server_vote_name: 1 to 16 of a-z, 0-9, - and _.
 func validVoteName(s string) bool {
 	if s == "" || len(s) > maxVoteNameBytes {

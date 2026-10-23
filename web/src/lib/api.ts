@@ -1,3 +1,5 @@
+import type { ParkMod } from '#lib/parkmods.js';
+
 export class ApiError extends Error {
 	constructor(
 		public status: number,
@@ -508,6 +510,36 @@ export interface PluginFile {
 	size: number;
 }
 
+// The Parks page (internal/api/park_handlers.go).
+export interface ParkFile {
+	folder: string;
+	key: string; // parks/<key>.park.json
+	objects: number; // the ones the server spawns
+	skipped?: number; // the ones it leaves out, which players' games can't show
+	box: number[]; // its objects' positions: lowest x, y, z, then highest
+	problem?: string; // why the server would refuse it
+}
+export interface ParkPool {
+	name: string;
+	map: string;
+	parks: string[];
+}
+export interface ParkChat {
+	everyone: boolean;
+	roles: string[];
+	minutes: number; // how long a park spawned from chat stays; 0 until removed
+}
+export interface ParksInfo {
+	parks: ParkFile[];
+	setup: ParkMod[];
+	limits: { parks: number; objects: number };
+	spawned: { name: string; objects: number; minutes?: number }[] | null; // null: not running, or it can't say
+	pools: ParkPool[];
+	chat: ParkChat;
+	roles: string[];
+	command: '' | 'manager' | 'taken'; // /parks among the chat commands the server started with
+}
+
 // When scheduled backups run, and how many of each kind of automatic backup are kept.
 export interface BackupSettings {
 	every: number; // hours; 0 is off
@@ -604,6 +636,7 @@ export interface Mod {
 	disabled?: boolean; // moved to DisabledMods, where the server does not look
 	shared?: boolean; // a link to the shared mods, which update and delete it
 	serverPlugin?: boolean; // has a plugin the server runs too, linked into its Plugins folder
+	parks?: string[]; // the base maps it has parks for, parks/<key>.park.json (ReSkate 2.0.6)
 	package?: string; // the Thunderstore package, Namespace-Name
 }
 

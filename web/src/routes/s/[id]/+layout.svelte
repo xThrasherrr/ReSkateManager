@@ -100,6 +100,7 @@
 		{ href: '/settings', label: 'Settings', icon: 'sliders', perm: 'settings.view' },
 		{ href: '/world', label: 'World', icon: 'sun', perm: 'settings.view' },
 		{ href: '/mods', label: 'Mods', icon: 'package', perm: 'settings.view' },
+		{ href: '/parks', label: 'Parks', icon: 'ramp', perm: 'settings.view' },
 		{ href: '/updates', label: 'Updates', icon: 'download', perm: 'server.update' },
 		{ href: '/options', label: 'Server', icon: 'settings', perm: 'instances.manage' }
 	];

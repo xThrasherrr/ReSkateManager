@@ -1,8 +1,10 @@
-// The plugin editor's CodeMirror, imported only by the page that opens it.
+// The plugin and park editors' CodeMirror, imported only by the pages that open it.
 import { basicSetup } from 'codemirror';
-import { EditorView, keymap } from '@codemirror/view';
+import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view';
 import { indentWithTab } from '@codemirror/commands';
-import { HighlightStyle, StreamLanguage, indentUnit, syntaxHighlighting } from '@codemirror/language';
+import { EditorState, StateField, type Text } from '@codemirror/state';
+import { HighlightStyle, StreamLanguage, indentUnit, syntaxHighlighting, type StreamParser } from '@codemirror/language';
+import { json } from '@codemirror/legacy-modes/mode/javascript';
 import { lua } from '@codemirror/legacy-modes/mode/lua';
 import { toml } from '@codemirror/legacy-modes/mode/toml';
 import { tags as t } from '@lezer/highlight';
@@ -20,6 +22,7 @@ const theme = EditorView.theme(
 		},
 		'.cm-gutters': { color: 'var(--color-faint)', backgroundColor: 'var(--color-sunken)', border: 'none' },
 		'.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--color-raised) 55%, transparent)' },
+		'.cm-bad-line, .cm-bad-line.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--color-bad) 18%, transparent)' },
 		'.cm-activeLineGutter': { color: 'var(--color-fg)', backgroundColor: 'transparent' },
 		'.cm-matchingBracket, &.cm-focused .cm-matchingBracket': { color: 'var(--color-fg)', backgroundColor: 'var(--color-line-strong)' },
 		'.cm-selectionMatch': { backgroundColor: 'color-mix(in srgb, var(--color-info) 22%, transparent)' },
@@ -43,13 +46,41 @@ const highlight = HighlightStyle.define([
 	{ tag: [t.special(t.variableName), t.heading], color: 'var(--color-info)' }
 ]);
 
+// The JSON mode styles a key "string property", which highlights as a string;
+// a key alone reads apart from the values.
+const jsonKeys: StreamParser<unknown> = {
+	...json,
+	token: (stream, state) => {
+		const style = json.token(stream, state);
+		return style === 'string property' ? 'property' : style;
+	}
+};
+
+// The line a JSON file stops parsing at, tinted as it's typed.
+const badLine = Decoration.line({ class: 'cm-bad-line' });
+function jsonMarks(doc: Text): DecorationSet {
+	try {
+		JSON.parse(doc.toString());
+		return Decoration.none;
+	} catch (e) {
+		const line = Number(/line (\d+)/.exec(String(e))?.[1]);
+		return line >= 1 && line <= doc.lines ? Decoration.set([badLine.range(doc.line(line).from)]) : Decoration.none;
+	}
+}
+const jsonCheck = StateField.define<DecorationSet>({
+	create: (s) => jsonMarks(s.doc),
+	update: (marks, tr) => (tr.docChanged ? jsonMarks(tr.state.doc) : marks),
+	provide: (f) => EditorView.decorations.from(f)
+});
+
 const languages: Record<string, StreamLanguage<unknown>> = {
+	json: StreamLanguage.define(jsonKeys),
 	lua: StreamLanguage.define(lua),
 	toml: StreamLanguage.define(toml)
 };
 
-/** An editor for one file in parent, telling onchange each edit. */
-export function editor(parent: HTMLElement, doc: string, path: string, onchange: (text: string) => void): EditorView {
+/** An editor for one file in parent, telling onchange each edit; readOnly takes none. */
+export function editor(parent: HTMLElement, doc: string, path: string, onchange: (text: string) => void, readOnly = false): EditorView {
 	const lang = languages[path.slice(path.lastIndexOf('.') + 1).toLowerCase()];
 	return new EditorView({
 		parent,
@@ -61,6 +92,8 @@ export function editor(parent: HTMLElement, doc: string, path: string, onchange:
 			theme,
 			syntaxHighlighting(highlight),
 			lang ?? [],
+			lang === languages.json ? jsonCheck : [],
+			EditorState.readOnly.of(readOnly),
 			EditorView.contentAttributes.of({ 'aria-label': path }),
 			EditorView.updateListener.of((u) => {
 				if (u.docChanged) onchange(u.state.doc.toString());

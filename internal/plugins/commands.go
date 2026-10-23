@@ -44,9 +44,14 @@ func (m *Manager) claimLocked() {
 }
 
 // PluginCommands is the hook for a server's PluginCommands. A word that's left
-// out goes in its plugin's log, saying why.
+// out goes in its plugin's log, saying why. The manager's own words
+// (Manager.Words, such as /parks) come first.
 func (m *Manager) PluginCommands(def instance.Def) (string, error) {
-	var words []serverconfig.Word
+	var extra []serverconfig.Word
+	if m.Words != nil {
+		extra = m.Words(def.ID)
+	}
+	words := slices.Clone(extra)
 	if cs := m.claims.Load(); cs != nil {
 		for _, c := range *cs {
 			if len(c.servers) == 0 || slices.Contains(c.servers, def.ID) {
@@ -67,6 +72,10 @@ func (m *Manager) PluginCommands(def instance.Def) (string, error) {
 			continue
 		}
 		text := fmt.Sprintf("/%s isn't on %s: %s.", w.Name, def.ID, why)
+		if slices.Contains(extra, w) {
+			msgs = append(msgs, "The manager's "+text)
+			continue
+		}
 		msgs = append(msgs, "The plugin "+w.Plugin+"'s "+text)
 		if p := m.runningPlugin(w.Plugin); p != nil {
 			p.line("warn", text)

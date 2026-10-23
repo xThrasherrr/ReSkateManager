@@ -25,6 +25,7 @@ import (
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
 	"github.com/xThrasherrr/ReSkateManager/internal/logfile"
 	"github.com/xThrasherrr/ReSkateManager/internal/plugins/luavm"
+	"github.com/xThrasherrr/ReSkateManager/internal/serverconfig"
 	"github.com/xThrasherrr/ReSkateManager/internal/store"
 )
 
@@ -46,6 +47,9 @@ type Manager struct {
 	Servers Servers      // the servers plugins read and act on; nil for none
 	// Discord posts a plugin's discord.post to its webhook; nil for none.
 	Discord func(ctx context.Context, webhook string, a alerts.Alert) error
+	// Words are the manager's own chat commands on a server, such as /parks,
+	// which PluginCommands puts in ahead of the plugins'; nil for none.
+	Words func(server string) []serverconfig.Word
 
 	mu      sync.Mutex // guards what follows, and starting and stopping runners
 	plugins map[string]*Plugin

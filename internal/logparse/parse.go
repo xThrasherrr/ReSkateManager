@@ -391,3 +391,39 @@ func ParseLocks(text string) ([]Lock, bool) {
 	}
 	return out, len(out) == want
 }
+
+// ParksHeadRe is the first line of the reply to `park-mod list` (ReSkate
+// 2.0.6), or the one it gives when no park mod is set up.
+var ParksHeadRe = regexp.MustCompile(`^(?:Park mods \((\d+) of \d+ spawned, \d+ of \d+ objects\):|No park mods are set up\b)`)
+
+// SpawnedPark is a park mod that's up, as `park-mod list` lists it.
+type SpawnedPark struct {
+	Name    string `json:"name"`
+	Objects int    `json:"objects"`
+	Minutes int    `json:"minutes,omitempty"` // left before it goes; 0 until removed
+}
+
+// A folder can't hold a quote, and the map ends where the spawned part starts.
+var parkLineRe = regexp.MustCompile(`^([a-z0-9_-]+)  "[^"]*"(?: \([a-z0-9_]+\))? on .*?  spawned, (\d+) objects, (?:(\d+) min left|until removed)$`)
+
+// ParseParks reads the reply to `park-mod list`, keeping the spawned ones:
+//
+//	Park mods (N of M spawned, X of Y objects):
+//	  <name>  "<folder>"[ (<key>)] on <map>[  spawned, <n> objects, <m> min left|until removed]
+func ParseParks(text string) ([]SpawnedPark, bool) {
+	lines := strings.Split(text, "\n")
+	m := ParksHeadRe.FindStringSubmatch(lines[0])
+	if m == nil {
+		return nil, false
+	}
+	want, _ := strconv.Atoi(m[1]) // none set up: 0
+	out := make([]SpawnedPark, 0, want)
+	for _, l := range lines[1:] {
+		if m := parkLineRe.FindStringSubmatch(strings.TrimPrefix(l, "  ")); m != nil {
+			objects, _ := strconv.Atoi(m[2])
+			minutes, _ := strconv.Atoi(m[3])
+			out = append(out, SpawnedPark{Name: m[1], Objects: objects, Minutes: minutes})
+		}
+	}
+	return out, len(out) == want
+}

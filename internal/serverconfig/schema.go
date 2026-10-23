@@ -194,9 +194,9 @@ var Fields = []Field{
 	{Key: "throwdown_locks", Label: "Locked for throwdown players", Group: "Gameplay", Type: TypeList, Options: LockTools, Help: "Taken from a throwdown's players while it runs, for fair games.", Default: []string{}},
 	{Key: "activity_log", Label: "Log player activity", Group: "Gameplay", Type: TypeBool, Default: true},
 
-	{Key: "parks.construction", Label: "Construction site / Hedgemont", Group: "Parks", Type: TypeEnum, Options: parkLayouts["construction"], Default: "skatepark_01"},
-	{Key: "parks.historic", Label: "Piers 1 / Historic", Group: "Parks", Type: TypeEnum, Options: parkLayouts["historic"], Default: "megapark_05"},
-	{Key: "parks.financial", Label: "Piers 2 / Financial", Group: "Parks", Type: TypeEnum, Options: parkLayouts["financial"], Default: "flumppark_08"},
+	{Key: "parks.construction", Label: "Construction site / Hedgemont", Group: "Park lots", Type: TypeEnum, Options: parkLayouts["construction"], Default: "skatepark_01"},
+	{Key: "parks.historic", Label: "Piers 1 / Historic", Group: "Park lots", Type: TypeEnum, Options: parkLayouts["historic"], Default: "megapark_05"},
+	{Key: "parks.financial", Label: "Piers 2 / Financial", Group: "Park lots", Type: TypeEnum, Options: parkLayouts["financial"], Default: "flumppark_08"},
 
 	{Key: "park_mods", Label: "Park mods", Group: "Park mods", Type: TypeParkMods, Max: maxParkMods, Help: "Parks built in the game's Park Editor, from mods in the server's Mods. Spawn one with park-mod add <name> while its map runs.", Default: []ParkMod{}},
 	{Key: "park_limits.parks", Label: "Parks spawned at once, at most", Group: "Park mods", Type: TypeInt, Min: 1, Max: 16, Restart: true, Default: 3.0},

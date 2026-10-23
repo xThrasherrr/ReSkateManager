@@ -254,6 +254,25 @@ func TestParseLocks(t *testing.T) {
 	}
 }
 
+func TestParseParks(t *testing.T) {
+	got, ok := ParseParks("Park mods (2 of 3 spawned, 11 of 512 objects):\n" +
+		"  street  \"popular skate 2 street park\" (bam) on San Vansterdam  spawned, 8 objects, 10 min left\n" +
+		"  plaza  \"plaza\" on San Vansterdam\n" +
+		"  bowl  \"Bowl v2.1\" on Isle of Grom  spawned, 3 objects, until removed")
+	if !ok || fmt.Sprint(got) != "[{street 8 10} {bowl 3 0}]" {
+		t.Fatalf("%+v %v", got, ok)
+	}
+	if got, ok := ParseParks("No park mods are set up (maps.park_mods in ReSkateServer.json, or park-mod config add <name> | <mod folder> | <map>)."); !ok || len(got) != 0 {
+		t.Errorf("none: %+v %v", got, ok)
+	}
+	if _, ok := ParseParks("Park mods (1 of 3 spawned, 8 of 512 objects):\n  street  \"x\" on San Vansterdam"); ok {
+		t.Error("parsed a list missing a spawned park")
+	}
+	if _, ok := ParseParks("Unknown command"); ok {
+		t.Error("parsed a non-park-mod reply")
+	}
+}
+
 func TestParseRoleChange(t *testing.T) {
 	for _, c := range []struct {
 		command, text, who, role string

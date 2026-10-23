@@ -14,7 +14,6 @@
 	import LinesInput from '#lib/components/LinesInput.svelte';
 	import CustomVotes from '#lib/components/CustomVotes.svelte';
 	import CustomCommands from '#lib/components/CustomCommands.svelte';
-	import ParkMods from '#lib/components/ParkMods.svelte';
 	import Loading from '#lib/components/Loading.svelte';
 	import LoadError from '#lib/components/LoadError.svelte';
 	import { guardUnsaved } from '#lib/unsaved.svelte.js';
@@ -22,7 +21,6 @@
 	import { plural } from '#lib/format.js';
 	import { voteProblems, type CustomVote } from '#lib/votes.js';
 	import { commandProblems } from '#lib/commands.js';
-	import { parkModProblems } from '#lib/parkmods.js';
 
 	interface Result {
 		command: string;
@@ -33,12 +31,13 @@
 	const ctx = useLive();
 	// Settings the server's layout no longer has, such as reserved slots since ReSkate 1.1.7.
 	let gone = $state.raw<string[]>([]);
-	const fields = $derived((session.meta?.settings ?? []).filter((f) => !gone.includes(f.key)));
+	// Park mods and their limits are set up on the Parks page.
+	const fields = $derived((session.meta?.settings ?? []).filter((f) => !gone.includes(f.key) && f.group !== 'Park mods'));
 	const groups = $derived([...new Set(fields.map((f) => f.group))]);
 	// The groups, a section of them at a time; the URL's #id names the open one, so other pages can link to it.
 	const sectionList = [
 		{ id: 'general', label: 'General', groups: ['General', 'Reserved slots', 'Voice'] },
-		{ id: 'maps', label: 'Maps & parks', groups: ['Map pool', 'Map versions', 'Parks', 'Park mods', 'World'] },
+		{ id: 'maps', label: 'Maps & park lots', groups: ['Map pool', 'Map versions', 'Park lots', 'World'] },
 		{ id: 'gameplay', label: 'Gameplay', groups: ['Gameplay'] },
 		{ id: 'chat', label: 'Chat', groups: ['Announcements', 'Chat commands'] },
 		{ id: 'votes', label: 'Votes & polls', groups: ['Votes', 'Map votes', 'Kick votes', 'Time of day votes', 'Extend votes', 'Custom votes', 'Polls'] },
@@ -123,10 +122,7 @@
 		);
 	});
 	const maps = $derived(modList ? mapChoices(modList) : null);
-	// What a park mod can name: the folders in the server's Mods, and its maps.
-	const modFolders = $derived((modList?.mods ?? []).filter((m) => !m.disabled).map((m) => m.folder));
 	const modMaps = $derived(maps ? maps.mods.flatMap((m) => m.maps.map((x) => x.name)) : []);
-	const mapNames = $derived(maps ? [...maps.retail, ...modMaps] : []);
 	// A saved map the list doesn't have (a level path, or a mod since removed) stays selectable.
 	const unlisted = $derived.by(() => {
 		const v = values.map as string | undefined;
@@ -185,8 +181,7 @@
 	// The settings that are lists of things, each with its own checks.
 	const lists: Partial<Record<Field['type'], { noun: string; problems: (list: any[]) => string[] }>> = {
 		votes: { noun: 'votes', problems: voteProblems },
-		commands: { noun: 'commands', problems: commandProblems },
-		parkmods: { noun: 'park mods', problems: parkModProblems }
+		commands: { noun: 'commands', problems: commandProblems }
 	};
 
 	// What is wrong with a changed value by the rules every setting shares, as
@@ -267,12 +262,18 @@
 						<h2 class="flex items-center gap-1.5 border-b-2 border-line px-4 py-3">
 							{group}
 							{#if session.meta?.groupInfo?.[group]}<InfoTip text={session.meta.groupInfo[group]} label="About {group}" />{/if}
-							{#if group === 'Parks' && canEdit}
+							{#if group === 'Park lots' && canEdit}
 								<button class="btn btn-sm -my-0.5 ml-auto" title="A random layout for each lot, never an empty one. Save to apply." onclick={randomizeParks}>
 									<Icon name="shuffle" size={14} />Randomize
 								</button>
 							{/if}
 						</h2>
+						{#if group === 'Park lots'}
+							<p class="border-b-2 border-line px-4 py-2.5 text-sm text-muted">
+								Parks built in the game's Park Editor, their pools and who may spawn them are under
+								<a class="text-accent hover:underline" href="/s/{ctx.id}/parks">Parks</a>.
+							</p>
+						{/if}
 						<div class="divide-y divide-line/60">
 							{#each fields.filter((f) => f.group === group) as f (f.key)}
 								{@const changed = dirty.includes(f.key)}
@@ -292,7 +293,7 @@
 										</div>
 										{#if f.help}<p class="text-xs text-faint">{f.help}</p>{/if}
 									</div>
-									<div class={f.type === 'maps' || f.type === 'lines' || f.type === 'votes' || f.type === 'commands' || f.type === 'parkmods' || f.long ? 'sm:col-span-2' : ''}>
+									<div class={f.type === 'maps' || f.type === 'lines' || f.type === 'votes' || f.type === 'commands' || f.long ? 'sm:col-span-2' : ''}>
 										{#if f.type === 'bool'}
 											<label class="inline-flex cursor-pointer items-center gap-2">
 												<input id={f.key} type="checkbox" class="peer sr-only" disabled={locked} bind:checked={values[f.key]} />
@@ -339,8 +340,6 @@
 											<CustomVotes id={f.key} bind:value={values[f.key]} max={f.max} saved={(saved[f.key] as CustomVote[] | undefined) ?? []} disabled={locked} />
 										{:else if f.type === 'commands'}
 											<CustomCommands id={f.key} bind:value={values[f.key]} max={f.max} disabled={locked} />
-										{:else if f.type === 'parkmods'}
-											<ParkMods id={f.key} bind:value={values[f.key]} max={f.max} folders={modFolders} maps={mapNames} disabled={locked} />
 										{:else if f.type === 'list' && f.options}
 											<!-- A list from fixed choices (throwdown_locks), kept in their order. -->
 											<div id={f.key} role="group" aria-label={f.label} class="flex flex-wrap gap-x-4 gap-y-1">

@@ -54,7 +54,10 @@
 		[pending && `${plural(pending, 'map')} to load`, stale && `${stale} to unload`].filter(Boolean).join(' and ')
 	);
 	const mapMods = $derived((list?.mods ?? []).filter((m) => m.maps.length || m.problem));
-	const otherMods = $derived((list?.mods ?? []).filter((m) => !m.maps.length && !m.problem));
+	// Park mods that add no maps are the Parks page's.
+	const parkOnly = (m: Mod) => !m.maps.length && !m.problem && !!m.parks?.length;
+	const otherMods = $derived((list?.mods ?? []).filter((m) => !m.maps.length && !m.problem && !parkOnly(m)));
+	const parkMods = $derived((list?.mods ?? []).filter(parkOnly).length);
 
 	const canUpload = $derived(ctx.can('settings.edit'));
 	// From ReSkate 2.0.7 the running server reads Mods again on its maps reload:
@@ -339,6 +342,14 @@
 					{/each}
 				</ul>
 			</section>
+		{/if}
+
+		{#if parkMods}
+			<a class="card flex items-center gap-3 p-4 text-sm text-muted transition-colors hover:bg-raised" href="/s/{ctx.id}/parks">
+				<Icon name="ramp" size={18} class="text-accent" />
+				<span class="min-w-0 flex-1">{plural(parkMods, 'park mod')} {parkMods === 1 ? 'is' : 'are'} under <span class="font-semibold text-fg">Parks</span>, where they're set up and spawned.</span>
+				<Icon name="chevron" size={14} class="-rotate-90" />
+			</a>
 		{/if}
 	{:else if !mods.error}
 		<Loading />

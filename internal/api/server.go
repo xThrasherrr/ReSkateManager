@@ -252,6 +252,13 @@ func (a *API) Handler() http.Handler {
 				r.With(a.can(auth.SettingsEdit)).Delete("/mods/{folder}", a.deleteMod)
 				r.With(a.can(auth.SettingsEdit)).Post("/mods/{folder}/update", a.updateMod)
 				r.With(a.global(auth.SettingsEdit), a.sharedOn).Post("/mods/{folder}/share", a.shareMod)
+				// Park mods (ReSkate 2.0.6): their files, and the Parks page.
+				r.With(a.can(auth.SettingsView)).Get("/mods/{folder}/file", a.modFile)
+				r.With(a.can(auth.SettingsEdit)).Put("/mods/{folder}/file", a.saveModFile)
+				r.With(a.can(auth.SettingsView)).Get("/parks", a.parks)
+				r.With(a.can(auth.SettingsEdit)).Patch("/parks", a.saveParks)
+				r.With(a.can(auth.SettingsEdit)).Post("/parks/spawn", a.spawnParks)
+				r.With(a.can(auth.SettingsEdit)).Post("/parks/remove", a.removeParks)
 				r.With(a.can(auth.SettingsEdit), a.sharedOn).Patch("/shared-mods", a.setSharedMods)
 				r.With(a.can(auth.SettingsView)).Get("/world", a.world)
 				r.With(a.can(auth.SettingsEdit)).Post("/world", a.saveWorld)
