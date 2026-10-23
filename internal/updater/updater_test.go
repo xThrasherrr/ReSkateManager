@@ -265,6 +265,46 @@ func TestLinuxReleaseNeedsDigest(t *testing.T) {
 	}
 }
 
+func TestChoicesAndTaggedRelease(t *testing.T) {
+	tarball := makeTarGz(t, []tarEntry{{name: "ReSkateServer", body: "pre-release server", mode: 0o755}})
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		linux := fmt.Sprintf(`{"name":"ReSkateServer-Linux-9.9.10.tar.gz","browser_download_url":"%s/linux.tar.gz","size":%d,"digest":"sha256:%s"}`,
+			srv.URL, len(tarball), sum(tarball))
+		switch r.URL.Path {
+		case "/repos/o/r/releases":
+			fmt.Fprintf(w, `[
+				{"tag_name":"v9.9.11","draft":true,"assets":[%[1]s]},
+				{"tag_name":"v9.9.10","prerelease":true,"assets":[%[1]s]},
+				{"tag_name":"v9.9.9","assets":[{"name":"launcher.json"}]},
+				{"tag_name":"../x","assets":[%[1]s]}]`, linux)
+		case "/repos/o/r/releases/tags/v9.9.10":
+			fmt.Fprintf(w, `{"tag_name":"v9.9.10","prerelease":true,"assets":[%s]}`, linux)
+		case "/linux.tar.gz":
+			w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := NewChecker("o/r")
+	c.GOOS, c.API = "linux", srv.URL
+	ctx := context.Background()
+
+	// Drafts, releases with no Linux server and tags that aren't tags are left out.
+	got, err := c.Choices(ctx, true)
+	if err != nil || len(got) != 1 || got[0] != (Choice{Tag: "v9.9.10", Version: "9.9.10", Prerelease: true}) {
+		t.Fatalf("choices %+v, %v", got, err)
+	}
+	r, err := c.Release(ctx, "v9.9.10")
+	if err != nil || r.Tag != "v9.9.10" || r.Version != "9.9.10" || r.ExeSHA256 != sum([]byte("pre-release server")) {
+		t.Fatalf("release %+v, %v", r, err)
+	}
+	if _, err := c.Release(ctx, "../latest"); err == nil {
+		t.Error("a tag that leaves releases/tags/ accepted")
+	}
+}
+
 func TestTarInstallRefusesLinksAndTraversal(t *testing.T) {
 	for name, entries := range map[string][]tarEntry{
 		"symlink":   {{name: "ReSkateServer", body: "x", mode: 0o755}, {name: "evil", body: "/etc/passwd", link: true}},

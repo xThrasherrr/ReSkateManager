@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -35,7 +36,12 @@ type InstanceStatus struct {
 	// isn't one this manager knows, such as a build made from source.
 	Version  string `json:"version,omitempty"`
 	UpToDate bool   `json:"upToDate"`
-	Job      *Job   `json:"job,omitempty"`
+	// Ahead is a server on a newer release than the latest, a pre-release
+	// say: Latest would take it back, so it isn't offered as an update.
+	Ahead bool `json:"ahead"`
+	// Releases are the ones that can be installed instead of the latest.
+	Releases []Choice `json:"releases,omitempty"`
+	Job      *Job     `json:"job,omitempty"`
 }
 
 // Service installs server releases, on demand and, in Run, on its own.
@@ -115,6 +121,8 @@ func (s *Service) Status(ctx context.Context, in *instance.Instance, force bool)
 		st.LatestErr = "releases carry no server for this platform; update this server by replacing its files"
 		return st
 	}
+	// Asked even when the latest can't be had: a broken latest is when another release is wanted.
+	st.Releases, _ = s.Checker.Choices(ctx, force)
 	rel, err := s.Checker.Latest(ctx, force)
 	if err != nil {
 		st.LatestErr = err.Error()
@@ -122,17 +130,24 @@ func (s *Service) Status(ctx context.Context, in *instance.Instance, force bool)
 	}
 	st.Latest = rel
 	st.UpToDate = sum == rel.ExeSHA256
+	if v, latest := parseVersion(st.Version), parseVersion(rel.Version); !st.UpToDate && v != nil && latest != nil {
+		st.Ahead = slices.Compare(v, latest) > 0
+	}
 	return st
 }
 
 // ErrRunning refuses an update of a server that has one under way.
 var ErrRunning = errors.New("an update is already in progress")
 
-// Start begins an update. whenEmpty waits for the server to have no players
-// first; otherwise players are warned and the server restarts within a minute.
-func (s *Service) Start(in *instance.Instance, whenEmpty bool, by string) error {
+// Start begins an update to the release tagged tag, or the latest when tag is
+// "". whenEmpty waits for the server to have no players first; otherwise
+// players are warned and the server restarts within a minute.
+func (s *Service) Start(in *instance.Instance, whenEmpty bool, by, tag string) error {
 	if !Supported() {
 		return errors.New("releases carry no server for this platform")
+	}
+	if tag != "" && !tagRe.MatchString(tag) {
+		return fmt.Errorf("%q is not a release tag", tag)
 	}
 	// Checked and taken at once, so two clicks (or a click and the automatic
 	// update) can't both start one.
@@ -151,7 +166,7 @@ func (s *Service) Start(in *instance.Instance, whenEmpty bool, by string) error 
 		base = context.Background()
 	}
 	s.work.Go(func() {
-		err := s.run(base, in, whenEmpty)
+		err := s.run(base, in, whenEmpty, tag)
 		s.setJob(in.ID(), func(j *Job) {
 			j.Finished = time.Now().UnixMilli()
 			if err != nil {
@@ -175,10 +190,10 @@ func (s *Service) Start(in *instance.Instance, whenEmpty bool, by string) error 
 	return nil
 }
 
-func (s *Service) run(base context.Context, in *instance.Instance, whenEmpty bool) error {
+func (s *Service) run(base context.Context, in *instance.Instance, whenEmpty bool, tag string) error {
 	ctx, cancel := context.WithTimeout(base, 2*time.Hour)
 	defer cancel()
-	rel, err := s.Checker.Latest(ctx, true)
+	rel, err := s.Checker.Release(ctx, tag)
 	if err != nil {
 		return err
 	}
@@ -268,11 +283,11 @@ func (s *Service) Run(ctx context.Context) {
 				continue
 			}
 			st := s.Status(ctx, in, false)
-			if st.Latest == nil || !st.Installed || st.UpToDate || (st.Job != nil && st.Job.Finished == 0) {
+			if st.Latest == nil || !st.Installed || st.UpToDate || st.Ahead || (st.Job != nil && st.Job.Finished == 0) {
 				continue
 			}
 			s.Log.Info("auto-updating", "instance", in.ID(), "version", st.Latest.Version)
-			_ = s.Start(in, true, "auto-update")
+			_ = s.Start(in, true, "auto-update", "")
 		}
 		select {
 		case <-ctx.Done():

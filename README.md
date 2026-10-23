@@ -81,7 +81,7 @@ ReSkateManager is a single program that starts your ReSkate servers, keeps them 
 
 ### Updates and backups
 
-- **Updates:** install new server releases on demand or automatically once a server is empty, each verified against the release's SHA-256 hashes. Owners can update the manager itself from the panel, which brings its servers back up afterward. The old binary stays as `.old` for ten minutes; a server update that fails partway restores the previous files.
+- **Updates:** install new server releases on demand or automatically once a server is empty, each verified against the release's SHA-256 hashes. Any recent release can be picked instead, an older one or a ReSkate pre-release to try, and automatic updates leave a newer pre-release in place. Owners can update the manager itself from the panel, which brings its servers back up afterward. The old binary stays as `.old` for ten minutes; a server update that fails partway restores the previous files.
 - **Backups:** daily backups of the database, settings and each server's config, kept for the last seven — mods can be included too. Full details in [Backups and restoring](#backups-and-restoring).
 - **Move a server:** export a server as a zip (settings, announcements and mods) and import it on another manager. Also covered in [Backups and restoring](#backups-and-restoring).
 - **Housekeeping:** the audit log is kept 90 days and player history 180 days, both adjustable on the Manager page. Performance samples keep a week, and the release cache keeps the two newest downloads.

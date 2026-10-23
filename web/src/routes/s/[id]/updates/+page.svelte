@@ -36,11 +36,17 @@
 		return () => clearInterval(t);
 	});
 
+	let tag = $state(''); // '' installs the latest release
+	const pick = $derived(tag ? st?.releases?.find((r) => r.tag === tag) : undefined);
+	const target = $derived(pick?.version ?? st?.latest?.version);
+	// Offered only when it changes something: the latest unless the server is on it or ahead of it, a picked release unless it's the one installed.
+	const offer = $derived(!!st && !!target && (!st.installed || (pick ? pick.version !== st.version : !st.upToDate && !st.ahead)));
+
 	let starting = $state(false);
 	async function start(mode: 'now' | 'empty') {
 		if (starting) return;
 		starting = true;
-		const r = await attempt(() => api.post<UpdateStatus>(`/instances/${ctx.id}/update`, { mode }));
+		const r = await attempt(() => api.post<UpdateStatus>(`/instances/${ctx.id}/update`, { mode, tag: pick?.tag ?? '' }));
 		starting = false;
 		if (r) st = r;
 	}
@@ -68,10 +74,12 @@
 						<p class="mt-1 text-sm text-warn">The server is not installed in this folder yet.</p>
 					{:else if st.upToDate}
 						<p class="mt-1 flex items-center gap-1.5 text-sm text-ok"><Icon name="check" size={14} /> Up to date with {st.latest?.version}</p>
+					{:else if st.ahead}
+						<p class="mt-1 text-sm text-muted">This server runs {st.version}, newer than the latest release {st.latest?.version}.</p>
 					{:else}
 						<p class="mt-1.5"><span class="sticker sticker-accent">New</span> <span class="ml-1 text-sm text-accent">Server {st.latest?.version} is available.</span></p>
 					{/if}
-					{#if st.installed && !st.upToDate}
+					{#if st.installed && !st.upToDate && !st.ahead}
 						<p class="mt-1 text-sm text-muted">
 							{#if st.version}This server runs {st.version}.{:else}The manager can't tell which release this is: it knows the ones it has looked up or installed.{/if}
 						</p>
@@ -87,16 +95,37 @@
 				{/if}
 			</div>
 
-			{#if st.supported && st.latest && (!st.upToDate || !st.installed) && !busy}
-				<div class="mt-4 flex flex-wrap gap-2 border-t-2 border-line pt-4">
-					{#if running && players > 0}
-						<button class="btn btn-primary" disabled={starting} onclick={() => start('empty')}><Icon name="download" size={14} /> Install when the server is empty</button>
-						<button class="btn h-auto min-h-8 py-1 text-left" disabled={starting} onclick={() => start('now')}>Install now (warns {plural(players, 'player')}, restarts in 60 s)</button>
-					{:else}
-						<button class="btn btn-primary" disabled={starting} onclick={() => start('now')}>
-							<Icon name="download" size={14} />
-							{st.installed ? `Install ${st.latest.version}${running ? ' and restart' : ''}` : `Install ${st.latest.version}`}
-						</button>
+			{#if st.supported && !busy && (offer || st.releases?.length)}
+				<div class="mt-4 space-y-3 border-t-2 border-line pt-4">
+					{#if st.releases?.length}
+						<label class="block">
+							<span class="label">Version</span>
+							<select class="input w-full sm:w-72" bind:value={tag}>
+								<option value="">Latest release{st.latest ? ` (${st.latest.version})` : ''}</option>
+								{#each st.releases as r (r.tag)}
+									<option value={r.tag}>{r.version}{r.prerelease ? ' (pre-release)' : ''}{st.installed && r.version === st.version ? ' · installed' : ''}</option>
+								{/each}
+							</select>
+						</label>
+						{#if pick?.prerelease && offer}
+							<p class="text-sm text-warn">A pre-release may be unfinished. The server's config is backed up before it installs, and you can switch back here.</p>
+						{/if}
+						{#if tag && ctx.live.state?.autoUpdate}
+							<p class="text-xs text-faint">Automatic updates are on: they move an older release back up to the latest, and leave a newer pre-release alone.</p>
+						{/if}
+					{/if}
+					{#if offer}
+						<div class="flex flex-wrap gap-2">
+							{#if running && players > 0}
+								<button class="btn btn-primary" disabled={starting} onclick={() => start('empty')}><Icon name="download" size={14} /> Install {target} when the server is empty</button>
+								<button class="btn h-auto min-h-8 py-1 text-left" disabled={starting} onclick={() => start('now')}>Install now (warns {plural(players, 'player')}, restarts in 60 s)</button>
+							{:else}
+								<button class="btn btn-primary" disabled={starting} onclick={() => start('now')}>
+									<Icon name="download" size={14} />
+									Install {target}{st.installed && running ? ' and restart' : ''}
+								</button>
+							{/if}
+						</div>
 					{/if}
 				</div>
 			{/if}
@@ -140,7 +169,7 @@
 
 		<section class="card p-4 text-sm text-muted sm:p-5">
 			<h2 class="mb-1 text-fg">How updates work</h2>
-			The manager reads <span class="font-mono text-xs">launcher.json</span> from the latest ReSkate release, downloads the server zip, checks it against the
+			The manager reads <span class="font-mono text-xs">launcher.json</span> from the latest ReSkate release (or the version you pick), downloads the server zip, checks it against the
 			published SHA-256 and replaces the server's files. <span class="font-mono text-xs">ReSkateServer.json</span>, <span class="font-mono text-xs">Mods/</span>,
 			<span class="font-mono text-xs">world-layers.json</span> and logs are never touched. The server's own self-updater is switched off so it never restarts
 			outside the manager's control.

@@ -67,10 +67,11 @@ func (s *SelfChecker) Run(ctx context.Context) {
 
 // githubRelease is a release as GitHub's API gives it.
 type githubRelease struct {
-	TagName string  `json:"tag_name"`
-	HTMLURL string  `json:"html_url"`
-	Draft   bool    `json:"draft"`
-	Assets  []asset `json:"assets"`
+	TagName    string  `json:"tag_name"`
+	HTMLURL    string  `json:"html_url"`
+	Draft      bool    `json:"draft"`
+	Prerelease bool    `json:"prerelease"`
+	Assets     []asset `json:"assets"`
 }
 
 // Check looks for a newer manager release now. A release follows releases

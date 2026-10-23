@@ -225,7 +225,7 @@ func (a *API) createInstance(w http.ResponseWriter, r *http.Request) {
 	a.audit(r, id, "instance.create", dir)
 	a.Admins.Kick()
 	if req.Install && !in.View().Installed {
-		if err := a.Updates.Start(in, false, from(r).user.Username); err != nil {
+		if err := a.Updates.Start(in, false, from(r).user.Username, ""); err != nil {
 			in.Note("Could not install the server: " + err.Error())
 		}
 	}
@@ -889,15 +889,16 @@ func (a *API) startUpdate(w http.ResponseWriter, r *http.Request) {
 	in := inst(r)
 	var req struct {
 		Mode string `json:"mode"` // now | empty
+		Tag  string `json:"tag"`  // a release, pre-releases too; "" is the latest
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if err := a.Updates.Start(in, req.Mode == "empty", from(r).user.Username); err != nil {
+	if err := a.Updates.Start(in, req.Mode == "empty", from(r).user.Username, req.Tag); err != nil {
 		a.fail(w, r, errStatus(err), err)
 		return
 	}
-	a.audit(r, in.ID(), "server.update", req.Mode)
+	a.audit(r, in.ID(), "server.update", strings.TrimSpace(req.Mode+" "+req.Tag))
 	writeJSON(w, 202, a.Updates.Status(r.Context(), in, false))
 }
 

@@ -596,6 +596,8 @@ export interface UpdateStatus {
 	installed: boolean;
 	version?: string; // the installed release, when the manager knows it
 	upToDate: boolean;
+	ahead: boolean; // on a newer release than the latest, a pre-release say
+	releases?: { tag: string; version: string; prerelease?: boolean }[]; // installable instead of the latest
 	job?: {
 		phase: string;
 		version?: string;

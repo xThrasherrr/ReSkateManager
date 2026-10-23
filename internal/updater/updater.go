@@ -40,6 +40,9 @@ const maxDownload = 512 << 20
 
 var sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// tagRe is a release tag the panel may ask for; it goes into GitHub's URL.
+var tagRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
 // ExeName is the server binary inside a release for this platform.
 func ExeName() string {
 	if runtime.GOOS == "windows" {
@@ -82,6 +85,10 @@ type Checker struct {
 	cached *Release
 	err    error
 	at     time.Time
+	// choices, choicesErr and choicesAt cache Choices as cached, err and at cache Latest.
+	choices    []Choice
+	choicesErr error
+	choicesAt  time.Time
 	// exeSums remembers the exe SHA-256 read from each Linux tarball, by the tarball's SHA-256.
 	exeSums map[string]string
 }
@@ -105,12 +112,87 @@ func (c *Checker) Latest(ctx context.Context, force bool) (*Release, error) {
 	if !force && time.Since(c.at) < 10*time.Minute && (c.cached != nil || c.err != nil) {
 		return c.cached, c.err
 	}
-	c.cached, c.err = c.fetch(ctx)
+	c.cached, c.err = c.fetch(ctx, "")
 	c.at = time.Now()
 	if c.cached != nil && c.Learn != nil {
 		c.Learn(c.cached)
 	}
 	return c.cached, c.err
+}
+
+// Release looks up the release tagged tag, which may be a pre-release; ""
+// is the newest release, looked up again.
+func (c *Checker) Release(ctx context.Context, tag string) (*Release, error) {
+	if tag == "" {
+		return c.Latest(ctx, true)
+	}
+	if !tagRe.MatchString(tag) {
+		return nil, fmt.Errorf("%q is not a release tag", tag)
+	}
+	if c.LauncherJSON != "" {
+		return nil, errors.New("this manager installs only the release its launcher.json override names")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r, err := c.fetch(ctx, tag)
+	if r != nil && c.Learn != nil {
+		c.Learn(r)
+	}
+	return r, err
+}
+
+// Choice is a release the panel offers to install.
+type Choice struct {
+	Tag        string `json:"tag"`
+	Version    string `json:"version"`
+	Prerelease bool   `json:"prerelease,omitempty"`
+}
+
+// Choices lists the recent releases that carry a server for this platform,
+// newest first and pre-releases among them, cached as Latest is. None with
+// a launcher.json override, which pins the one release.
+func (c *Checker) Choices(ctx context.Context, force bool) ([]Choice, error) {
+	if c.LauncherJSON != "" {
+		return nil, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !force && time.Since(c.choicesAt) < 10*time.Minute && (c.choices != nil || c.choicesErr != nil) {
+		return c.choices, c.choicesErr
+	}
+	c.choices, c.choicesErr = c.listChoices(ctx)
+	c.choicesAt = time.Now()
+	return c.choices, c.choicesErr
+}
+
+func (c *Checker) listChoices(ctx context.Context) ([]Choice, error) {
+	body, err := c.get(ctx, c.apiRoot()+"/repos/"+c.Repo+"/releases?per_page=20", 4<<20)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub could not be reached: %w", err)
+	}
+	var rels []githubRelease
+	if err := json.Unmarshal(body, &rels); err != nil {
+		return nil, fmt.Errorf("unexpected GitHub reply: %w", err)
+	}
+	out := []Choice{} // not nil, so an empty list is cached too
+	for _, rel := range rels {
+		if rel.Draft || !tagRe.MatchString(rel.TagName) {
+			continue
+		}
+		assets := map[string]asset{}
+		for _, a := range rel.Assets {
+			assets[a.Name] = a
+		}
+		if c.goos() == "linux" {
+			if _, err := linuxAsset(assets); err != nil {
+				continue
+			}
+		} else if _, ok := assets["launcher.json"]; !ok {
+			continue
+		}
+		out = append(out, Choice{Tag: rel.TagName, Version: strings.TrimPrefix(rel.TagName, "v"), Prerelease: rel.Prerelease})
+	}
+	return out, nil
 }
 
 func (c *Checker) open(ctx context.Context, url string) (*http.Response, error) {
@@ -160,12 +242,20 @@ type asset struct {
 	Digest string `json:"digest"` // "sha256:<hex>", recorded by GitHub at upload
 }
 
-func (c *Checker) latestRelease(ctx context.Context) (string, map[string]asset, error) {
-	api := c.API
-	if api == "" {
-		api = "https://api.github.com"
+func (c *Checker) apiRoot() string {
+	if c.API == "" {
+		return "https://api.github.com"
 	}
-	body, err := c.get(ctx, api+"/repos/"+c.Repo+"/releases/latest", 4<<20)
+	return c.API
+}
+
+// release looks up the release tagged tag, or the newest when tag is "".
+func (c *Checker) release(ctx context.Context, tag string) (string, map[string]asset, error) {
+	which := "latest"
+	if tag != "" {
+		which = "tags/" + url.PathEscape(tag)
+	}
+	body, err := c.get(ctx, c.apiRoot()+"/repos/"+c.Repo+"/releases/"+which, 4<<20)
 	if err != nil {
 		return "", nil, fmt.Errorf("GitHub could not be reached: %w", err)
 	}
@@ -180,15 +270,15 @@ func (c *Checker) latestRelease(ctx context.Context) (string, map[string]asset, 
 	return rel.TagName, assets, nil
 }
 
-func (c *Checker) fetch(ctx context.Context) (*Release, error) {
+// fetch looks up the release tagged tag, or the newest when tag is "".
+func (c *Checker) fetch(ctx context.Context, tag string) (*Release, error) {
 	if c.goos() == "linux" {
 		if c.LauncherJSON != "" {
 			return nil, errors.New("a launcher.json override pins only a Windows server")
 		}
-		return c.fetchLinux(ctx)
+		return c.fetchLinux(ctx, tag)
 	}
 	assets := map[string]asset{}
-	tag := ""
 	var manifest []byte
 	var err error
 	switch {
@@ -197,13 +287,13 @@ func (c *Checker) fetch(ctx context.Context) (*Release, error) {
 	case c.LauncherJSON != "":
 		manifest, err = c.get(ctx, c.LauncherJSON, 1<<20)
 	default:
-		tag, assets, err = c.latestRelease(ctx)
+		tag, assets, err = c.release(ctx, tag)
 		if err != nil {
 			return nil, err
 		}
 		a, ok := assets["launcher.json"]
 		if !ok {
-			return nil, errors.New("the latest release has no launcher.json")
+			return nil, errors.New("the release has no launcher.json")
 		}
 		manifest, err = c.get(ctx, a.URL, 1<<20)
 	}
@@ -219,7 +309,7 @@ func (c *Checker) fetch(ctx context.Context) (*Release, error) {
 	}
 	s := lj.Server
 	if s == nil || s.URL == "" {
-		return nil, errors.New("the latest release has no server")
+		return nil, errors.New("the release has no server")
 	}
 	if !sha256Re.MatchString(s.SHA256) || !sha256Re.MatchString(s.ExeSHA256) || s.Size <= 0 || s.Size > maxDownload {
 		return nil, errors.New("launcher.json has a malformed server entry")
@@ -229,7 +319,7 @@ func (c *Checker) fetch(ctx context.Context) (*Release, error) {
 	if name, ok := strings.CutPrefix(s.URL, "asset:"); ok {
 		a, found := assets[name]
 		if !found {
-			return nil, fmt.Errorf("the latest release is missing asset %s", name)
+			return nil, fmt.Errorf("the release is missing asset %s", name)
 		}
 		r.URL = a.URL
 	} else if !strings.HasPrefix(s.URL, "https://") {
@@ -240,8 +330,8 @@ func (c *Checker) fetch(ctx context.Context) (*Release, error) {
 
 const linuxPrefix, linuxSuffix = "ReSkateServer-Linux-", ".tar.gz"
 
-func (c *Checker) fetchLinux(ctx context.Context) (*Release, error) {
-	tag, assets, err := c.latestRelease(ctx)
+func (c *Checker) fetchLinux(ctx context.Context, tag string) (*Release, error) {
+	tag, assets, err := c.release(ctx, tag)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +467,7 @@ func linuxAsset(assets map[string]asset) (asset, error) {
 	}
 	switch len(found) {
 	case 0:
-		return asset{}, errors.New("the latest release has no Linux server")
+		return asset{}, errors.New("the release has no Linux server")
 	case 1:
 		return found[0], nil
 	}
@@ -388,7 +478,7 @@ func linuxAsset(assets map[string]asset) (asset, error) {
 			return a, nil
 		}
 	}
-	return asset{}, fmt.Errorf("the latest release has %d Linux servers and none says it is for %s", len(found), runtime.GOARCH)
+	return asset{}, fmt.Errorf("the release has %d Linux servers and none says it is for %s", len(found), runtime.GOARCH)
 }
 
 // isURL reports whether s is a web address rather than a file's path.
