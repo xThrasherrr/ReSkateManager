@@ -219,12 +219,13 @@ func TestCommands(t *testing.T) {
 func TestTagLines(t *testing.T) {
 	src := `log_("[announcement" + (target ? " -> " + guest_name(*target) : std::string()) + "] " + line);
 log_("[vote] " + label);
-write_log("[afk" + "] b");`
+write_log("[afk" + "] b");
+log_("[card by plugin " + std::string(plugin) + " -> " + who + "] " + line);`
 	got := tagLines(src)
-	if want := map[string]string{"[announcement": "[announcement -> x] x", "[afk": "[afk] bx"}; !maps.Equal(got, want) {
+	if want := map[string]string{"[announcement": "[announcement -> x] x", "[afk": "[afk] bx", "[card by plugin ": "[card by plugin x -> x] x"}; !maps.Equal(got, want) {
 		t.Errorf("tagLines = %q, want %q", got, want)
 	}
-	if !parsed(got["[announcement"]) || parsed("[announcements -> x] x") || parsed("") {
+	if !parsed(got["[announcement"]) || !parsed(got["[card by plugin "]) || parsed("[announcements -> x] x") || parsed("") {
 		t.Error("parsed doesn't follow the log parser")
 	}
 }

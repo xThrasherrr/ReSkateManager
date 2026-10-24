@@ -172,7 +172,8 @@ func (r *report) checkSource(use *usage) {
 	var heads []string
 	lines := map[string][]string{} // by their "Word: ", when they have one
 	for _, s := range slices.Sorted(maps.Keys(r.cur.lines)) {
-		if r.old.lines[s] || tagRe.MatchString(s) || !meaningful(s) || use.starts(s) || parsed(r.cur.tagLines[s]) {
+		// parsed(s+"x"): a start the parser reads, such as 2.1.2's "[Plugins] ".
+		if r.old.lines[s] || tagRe.MatchString(s) || !meaningful(s) || use.starts(s) || parsed(s+"x") || parsed(r.cur.tagLines[s]) {
 			continue
 		}
 		head := s
@@ -322,8 +323,9 @@ var (
 	verbRe = regexp.MustCompile(`\b(?:name|verb) == "([a-z][a-z0-9]*(?:-[a-z0-9]+)*)"`)
 	// A call that logs a line: write_log in main.cpp, log_ in the host.
 	logRe = regexp.MustCompile(`\b(?:write_log|log_)\(`)
-	// A line that opens a tag's bracket and adds to it: "[announcement" + " -> " + name + "] ".
-	openTagRe = regexp.MustCompile(`^\[[a-z][a-z ]*[a-z]$`)
+	// A line that opens a tag's bracket and adds to it: "[announcement" + " -> " + name + "] ",
+	// or puts a name in it first: "[card by plugin " + plugin + " -> " (2.1.2).
+	openTagRe = regexp.MustCompile(`^\[[a-z][a-z ]*[a-z] ?$`)
 	// The host logging what a command it ran itself answers: a passed vote's,
 	// and since 2.0.3 a chat command's and a poll-run's. The console's own
 	// replies are main.cpp's write_log(host.command(line)).
@@ -359,7 +361,11 @@ func tagLines(text string) map[string]string {
 		if len(lits) < 2 || !openTagRe.MatchString(lits[0]) {
 			continue
 		}
-		line := lits[0] + lits[1] + "x"
+		line := lits[0]
+		if strings.HasSuffix(line, " ") {
+			line += "x"
+		}
+		line += lits[1] + "x"
 		if !strings.Contains(lits[1], "]") {
 			line += "] x"
 		}
