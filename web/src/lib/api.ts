@@ -268,13 +268,15 @@ export interface Player {
 	joinedAt?: number;
 }
 
-/** The tools ReSkate 2.1.0 can take from one player, in its order. */
-export const lockTools = [
+/** The tools ReSkate 2.1.0 can take from one player, in its order; since, those a later one added. */
+export const lockTools: readonly { key: string; label: string; since?: string }[] = [
 	{ key: 'noclip', label: 'Noclip and teleporting' },
 	{ key: 'nobail', label: 'No Bail' },
 	{ key: 'boosts', label: 'Boosts' },
-	{ key: 'tuning', label: 'Their own physics tuning' }
-] as const;
+	{ key: 'tuning', label: 'Their own physics tuning' },
+	{ key: 'ollies', label: 'Ollies', since: '2.1.2' },
+	{ key: 'objects', label: 'Placing objects', since: '2.1.2' }
+];
 
 /** A player whose tools are locked, as the server's locks lists them. */
 export interface Lock {
@@ -637,6 +639,7 @@ export interface Mod {
 	problem?: string;
 	disabled?: boolean; // moved to DisabledMods, where the server does not look
 	shared?: boolean; // a link to the shared mods, which update and delete it
+	plugin?: boolean; // has a Luau plugin (ReSkate 2.1.2), which players can be required to have
 	serverPlugin?: boolean; // has a plugin the server runs too, linked into its Plugins folder
 	parks?: string[]; // the base maps it has parks for, parks/<key>.park.json (ReSkate 2.0.6)
 	package?: string; // the Thunderstore package, Namespace-Name
@@ -652,6 +655,21 @@ export interface ModList {
 	// null with the shared mods turned off in the manager. own: the server's
 	// own copies that keep a shared mod of the same folder out.
 	shared: { use: SharedUse; own: string[] } | null;
+	// The plugins players must have (ReSkate 2.1.2), Owner-Name[-1.2.3]: this
+	// server's and every server's, which the manager puts in its config as it
+	// starts, and whether the running server started with others.
+	required?: string[];
+	everyRequired?: string[];
+	requiredPending?: boolean;
+}
+
+/** One of ReSkate's own plugins the server runs, by its folder (plugin list, ReSkate 2.1.2). */
+export interface ServerPlugin {
+	id: string;
+	state: 'running' | 'stopped' | 'switched off' | 'not loaded';
+	reason?: string;
+	mb?: number;
+	tickMs?: number;
 }
 
 // How a server uses the shared mods: not at all, all of them (ones shared

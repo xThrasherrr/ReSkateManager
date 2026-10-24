@@ -212,7 +212,8 @@ var sections = map[string]string{
 // sections, as slots are kept for each listed player instead. The card went
 // in 2.0.3, which shows every announcement as one; that server writes its
 // announcements without it, and an older one with it or not at all. The
-// admins went into the admin role with 2.0.6's roles.
+// admins went into the admin role with 2.0.6's roles. The drone became a
+// plugin mod in 2.1.2, which writes its required plugins instead.
 var removed = map[string]struct {
 	since string
 	gone  func(*File) bool
@@ -223,6 +224,10 @@ var removed = map[string]struct {
 		return !card && f.announces()
 	}},
 	"admins": {"2.0.6", (*File).HasRoles},
+	"sync_drones": {"2.1.2", func(f *File) bool {
+		_, plugins := f.Get("plugins.required")
+		return plugins
+	}},
 }
 
 // Removed lists the settings the newest servers no longer have.
@@ -765,6 +770,9 @@ func normalize(fd Field, raw any) (any, error) {
 		if fd.Key == "throwdown_locks" {
 			return lockTools(fd, items)
 		}
+		if fd.Key == "plugins.required" {
+			return requiredPlugins(fd, items)
+		}
 		out := []string{}
 		for _, x := range items {
 			it := strings.ToLower(strings.TrimSpace(fmt.Sprint(x)))
@@ -856,6 +864,86 @@ func lockTools(fd Field, items []any) ([]string, error) {
 	}
 	return slices.DeleteFunc(slices.Clone(LockTools), func(t string) bool { return !slices.Contains(named, t) }), nil
 }
+
+// requiredPlugins checks plugins.required as config_error does (ReSkate
+// 2.1.2), since the server won't start on one it refuses: at most 16
+// Thunderstore packages, none named twice whatever the version or case.
+func requiredPlugins(fd Field, items []any) ([]string, error) {
+	out := []string{}
+	for _, x := range items {
+		s := strings.TrimSpace(fmt.Sprint(x))
+		if s == "" {
+			continue
+		}
+		if len(s) > maxPackage || !packageRe.MatchString(s) {
+			return nil, fmt.Errorf("%s: %q is not a Thunderstore package. Write it as Owner-Name, or Owner-Name-1.2.3 for at least that version", fd.Label, s)
+		}
+		if slices.ContainsFunc(out, func(o string) bool { return strings.EqualFold(packageOf(o), packageOf(s)) }) {
+			return nil, fmt.Errorf("%s names %s twice", fd.Label, packageOf(s))
+		}
+		out = append(out, s)
+	}
+	if len(out) > maxRequiredPlugins {
+		return nil, fmt.Errorf("%s holds at most %d", fd.Label, maxRequiredPlugins)
+	}
+	return out, nil
+}
+
+// CleanRequired checks a list of plugins players must have, as the manager
+// keeps them for a server or every server, by plugins.required's rules.
+func CleanRequired(list []string) ([]string, error) {
+	fd, _ := FieldByKey("plugins.required")
+	items := make([]any, len(list))
+	for i, s := range list {
+		items[i] = s
+	}
+	return requiredPlugins(fd, items)
+}
+
+// MergeRequired works out a server's plugins.required as it starts: what
+// the file has besides what the manager put there last time (added), then
+// each of want the file lacks, while the server takes more. It returns the
+// new list, what the manager put in this time, and what didn't fit.
+func MergeRequired(file, added, want []string) (next, put, left []string) {
+	has := func(list []string, s string) bool {
+		return slices.ContainsFunc(list, func(o string) bool { return strings.EqualFold(packageOf(o), packageOf(s)) })
+	}
+	next, put, left = []string{}, []string{}, []string{}
+	for _, s := range file {
+		if !has(added, s) {
+			next = append(next, s)
+		}
+	}
+	for _, s := range want {
+		switch {
+		case has(next, s):
+		case len(next) >= maxRequiredPlugins:
+			left = append(left, s)
+		default:
+			next, put = append(next, s), append(put, s)
+		}
+	}
+	return next, put, left
+}
+
+// packageOf is a required plugin's package, Owner-Name, without the version
+// it may ask for.
+func packageOf(s string) string {
+	if m := packageRe.FindStringSubmatch(s); m != nil {
+		return m[1]
+	}
+	return s
+}
+
+// packageRe is valid_map_package (protocol.cpp): a team and a name of
+// letters, digits and _, then maybe a version of three numbers.
+var packageRe = regexp.MustCompile(`^([A-Za-z0-9_]+-[A-Za-z0-9_]+)(?:-\d{1,9}\.\d{1,9}\.\d{1,9})?$`)
+
+// The longest package name, and how many plugins.required holds (protocol.h).
+const (
+	maxPackage         = 96
+	maxRequiredPlugins = 16
+)
 
 // asNumber reads a number as JSON, the panel or a hand-written file gives it.
 func asNumber(raw any) (float64, bool) {
@@ -1112,7 +1200,9 @@ var ReservedCommandNames = []string{"help", "party", "p", "w", "whisper", "tell"
 	"vote-cancel", "votes", "welcome", "world-layer-sync", "quit", "exit", "stop", "update",
 	"role", "roles", "board-check", "park-mod", "teleport", // 2.0.6
 	"kick-time", // 2.0.8
-	"drones"}    // 2.1.0
+	"drones",    // 2.1.0 and 2.1.1, still kept off for servers on them
+	// 2.1.2
+	"bone-reach", "lock", "locks", "unlock", "throwdown-locks", "words", "poll-run", "plugin"}
 
 // commandNameFree is custom_command_name_free: not one of the chat's own
 // commands, nor a server command admins type as /<command>, and not a

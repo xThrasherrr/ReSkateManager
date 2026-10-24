@@ -547,14 +547,19 @@ func (a *API) lock(verb string) http.HandlerFunc {
 			return
 		}
 		for _, t := range req.Tools {
-			if !slices.Contains(serverconfig.LockTools, t) {
-				writeErr(w, 400, "the tools are "+strings.Join(serverconfig.LockTools, ", "))
+			if !slices.Contains(serverconfig.PlayerLockTools, t) {
+				writeErr(w, 400, "the tools are "+strings.Join(serverconfig.PlayerLockTools, ", "))
 				return
 			}
 		}
 		// An older server has no locks, and would say so.
-		if v := a.Builds.Version(in.Def().Exe()); serverconfig.NewerVersion("2.1.0", v) {
+		v := a.Builds.Version(in.Def().Exe())
+		if serverconfig.NewerVersion("2.1.0", v) {
 			writeErr(w, http.StatusConflict, "ReSkate 2.1.0 locks players' tools; update this server first")
+			return
+		}
+		if serverconfig.NewerVersion("2.1.2", v) && (slices.Contains(req.Tools, "ollies") || slices.Contains(req.Tools, "objects")) {
+			writeErr(w, http.StatusConflict, "ReSkate 2.1.2 locks ollies and placing objects; update this server first")
 			return
 		}
 		tools := strings.Join(req.Tools, ",")
@@ -923,6 +928,11 @@ func (a *API) mods(w http.ResponseWriter, r *http.Request) {
 	if pool == nil {
 		pool = []string{}
 	}
+	plan, err := a.planRequired(r.Context(), in.Def())
+	if err != nil { // a config it can't read, which the page tells of by its maps
+		a.Log.Warn("required plugins", "instance", in.ID(), "err", err)
+		plan = &requiredPlan{}
+	}
 	// The server's own copies that keep a shared mod of the same folder out.
 	var shared map[string]any
 	if a.SharedDir != "" {
@@ -945,6 +955,11 @@ func (a *API) mods(w http.ResponseWriter, r *http.Request) {
 		"map":    current,
 		"pool":   pool,
 		"shared": shared, // null with the shared mods turned off
+		// The plugins players must have (ReSkate 2.1.2): this server's, every
+		// server's, and whether the running server started with others.
+		"required":        plan.own.Plugins,
+		"everyRequired":   plan.every,
+		"requiredPending": in.State() == instance.Running && !slices.Equal(plan.now, plan.next),
 	})
 }
 

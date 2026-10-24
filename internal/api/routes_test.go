@@ -174,6 +174,14 @@ var routePerms = map[string]string{
 	"PUT /api/instances/{id}/mods/uploads/{uid}":         "settings.edit",
 	"PUT /api/instances/{id}/mods/{folder}/file":         "settings.edit",
 	"PUT /api/shared-mods/uploads/{uid}":                 "settings.edit",
+
+	"GET /api/instances/{id}/server-plugins":                  "settings.view",
+	"POST /api/instances/{id}/server-plugins/{plugin}/reload": "settings.edit",
+	"POST /api/instances/{id}/server-plugins/{plugin}/off":    "settings.edit",
+	"POST /api/instances/{id}/server-plugins/{plugin}/on":     "settings.edit",
+	"PATCH /api/instances/{id}/required-plugins":              "settings.edit",
+	"GET /api/required-plugins":                               "settings.view",
+	"PATCH /api/required-plugins":                             "settings.edit",
 }
 
 // Mutating routes that write no audit entry, and why.

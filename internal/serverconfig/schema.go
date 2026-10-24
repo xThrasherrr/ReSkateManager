@@ -83,8 +83,13 @@ var parkLayouts = func() map[string][]string {
 var checkModes = []string{"off", "warn", "kick"}
 
 // LockTools are the tools ReSkate 2.1.0 can lock for single players and a
-// throwdown's players (lock_tools_text), in its order.
-var LockTools = []string{"noclip", "nobail", "boosts", "tuning"}
+// throwdown's players (lock_tools_text), in its order: what "all" is. Ollies
+// came with 2.1.2.
+var LockTools = []string{"noclip", "nobail", "boosts", "tuning", "ollies"}
+
+// PlayerLockTools are those a single player can have locked: 2.1.2 locks
+// placing objects too, but only by name, and throwdown_locks never keeps it.
+var PlayerLockTools = append(LockTools[:len(LockTools):len(LockTools)], "objects")
 
 // A vote's own length and cooldown, from ReSkate 2.0.2; 0 is the votes' own.
 const (
@@ -147,6 +152,8 @@ var Fields = []Field{
 
 	{Key: "reserved_slots", Label: "Reserved slots", Group: "Reserved slots", Type: TypeInt, Min: 0, Max: 248, Help: "Of the max players, kept for the players below and the admins. 0 is none.", Default: 0.0},
 	{Key: "reserved", Label: "Players with a reserved slot", Group: "Reserved slots", Type: TypeList, Help: "SteamID64s. They can join a full server; admins always can.", Default: []string{}},
+
+	{Key: "plugins.required", Label: "Plugins every player must have", Group: "Plugins", Type: TypeList, Max: maxRequiredPlugins, Restart: true, Help: "Thunderstore packages: Owner-Name, or Owner-Name-1.2.3 for at least that version. Players without them get them as they join.", Default: []string{}},
 
 	{Key: "map_pool", Label: "Maps in the pool", Group: "Map pool", Type: TypeMaps, Help: "The maps players vote between, in rotation order.", Default: []string{}},
 	{Key: "map_rotation_minutes", Label: "Minutes on each map", Group: "Map pool", Type: TypeInt, Min: 0, Max: 1440, Help: "Then the server moves to the next pool map. 0 is off.", Default: 0.0},

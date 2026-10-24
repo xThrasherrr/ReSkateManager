@@ -26,7 +26,7 @@ const (
 	KindCommand   Kind = "command"   // [command] <name>: /<text>   (a player's chat command; [command] <name> /<text> as one of the owner's runs)
 	KindAdmin     Kind = "admin"     // [admin] <name>: <text>      (an in-game admin's server command)
 	KindPartyChat Kind = "partychat" // [party chat] <name>: <text>
-	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [words], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk], [parks], [teleport], [Plugins]
+	KindTagged    Kind = "tagged"    // [vote], [poll], [announcement], [words], [party], [dm], [throwdown], [objects], [map], [anticheat], [join], [network], [steam], [direct], [afk], [parks], [teleport], [Plugins], [hide], [world], [card by plugin x], [poll by plugin x]
 	KindReady     Kind = "ready"     // <name> is up on <map> for N players.
 	KindSteam     Kind = "steam"     // Steam ID <id>[ (<how it got it>)], public IP <ip>.
 	KindJoinCode  Kind = "joincode"  // Join code: <code>[ (password required)]
@@ -61,8 +61,12 @@ var (
 	amRe    = regexp.MustCompile(`(?i)\ba\.? ?m\b`)
 	// Since 2.0.3 a tag can name the one player a line was for: "[announcement -> Bob] ...".
 	// [Plugins] is every line the server's plugins log, whenever they run
-	// (Server/server_plugins.cpp in ReSkate's plugins release).
-	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk|parks|teleport|lock|Plugins)(?: -> (.+?))?\] (.*)$`)
+	// (Server/server_plugins.cpp, ReSkate 2.1.2); [hide] and [world] are what
+	// they do to players and the world.
+	tagRe = regexp.MustCompile(`^\[(chat|command|admin|party chat|party|dm|vote|poll|announcement|words|throwdown|objects|map|rotation|anticheat|join|network|steam|direct|afk|parks|teleport|lock|Plugins|hide|world)(?: -> (.+?))?\] (.*)$`)
+	// A plugin's card or poll (2.1.2) names the plugin, a poll its number,
+	// and whom it went to: "[poll by plugin <id> #<n> -> <who>] <text>".
+	pluginTagRe = regexp.MustCompile(`^\[(card|poll) by plugin (.+?)(?: #\d+)?(?: -> (.+?))?\] (.*)$`)
 	// One of the owner's chat commands running (2.0.3): "<name> /<command>[ <text>]".
 	customCommandRe = regexp.MustCompile(`^(.+?) /([a-z0-9_-]{1,16})(?: .*)?$`)
 	// ", admin" before 2.0.6; then the player's role, which is everyone's
@@ -131,7 +135,8 @@ var startupPrefixes = []string{"Signing in to Steam", "Wrote a default ", "Added
 	"Global bans", "The global ban list could not be read", "The ReSkate team's lists (global bans and chat words) could not be read",
 	"Word lists: ", "No steam_token: ", "The server browser now shows only servers with a steam_token",
 	"The server browser shows servers without a steam_token again", "Connection: ", "Steam networking debug output is on",
-	"steam_debug: ", "Threads: ", ChatWords, "The role ", MapVersions}
+	"steam_debug: ", "Threads: ", ChatWords, "The role ", MapVersions,
+	"Required plugin"} // 2.1.2 checks plugins.required on Thunderstore as it starts
 
 // ChatWords starts what words answers, which 2.0.6 prints at startup too,
 // straight after it's up.
@@ -166,6 +171,11 @@ func Classify(e *Entry) {
 		default:
 			e.Kind, e.Name = KindTagged, m[2]
 		}
+		return
+	}
+	if m := pluginTagRe.FindStringSubmatch(first); m != nil {
+		e.Kind, e.Tag, e.Name = KindTagged, m[1], m[3]
+		e.Fields = map[string]string{"plugin": m[2]}
 		return
 	}
 	if m := joinRe.FindStringSubmatch(first); m != nil {
@@ -360,9 +370,10 @@ type Lock struct {
 	Throwdown []string `json:"throwdown"` // their throwdown's, while it runs
 }
 
-// The tools as lock_tools_text lists them; only these, so a name with ": "
-// in it still ends where they start.
-const lockToolsRe = `((?:noclip|nobail|boosts|tuning)(?:, (?:noclip|nobail|boosts|tuning))*)`
+// The tools as lock_tools_text lists them, ollies and objects from 2.1.2;
+// only these, so a name with ": " in it still ends where they start.
+const lockTool = `(?:noclip|nobail|boosts|tuning|ollies|objects)`
+const lockToolsRe = `(` + lockTool + `(?:, ` + lockTool + `)*)`
 
 var lockLineRe = regexp.MustCompile(`^(\d+)  (.*?)( \(not here\))?: ` + lockToolsRe + `? ?(?:\(throwdown: ` + lockToolsRe + `\))?$`)
 
@@ -390,6 +401,51 @@ func ParseLocks(text string) ([]Lock, bool) {
 		}
 	}
 	return out, len(out) == want
+}
+
+// PluginsHeadRe is the first line of the reply to `plugin list` (ReSkate
+// 2.1.2): a plugin, or that there are none.
+var PluginsHeadRe = regexp.MustCompile(`^(?:No server plugins\.|[^:\n]+: (?:running|stopped|switched off|not loaded)\b)`)
+
+// ServerPlugin is one of ReSkate's own plugins the server runs, as `plugin
+// list` lists it, by the folder it found it in.
+type ServerPlugin struct {
+	ID     string  `json:"id"`
+	State  string  `json:"state"`            // running, stopped, switched off or not loaded
+	Reason string  `json:"reason,omitempty"` // why it isn't running
+	MB     float64 `json:"mb,omitempty"`     // the memory a running one uses
+	TickMS float64 `json:"tickMs,omitempty"` // and how long its tick takes
+}
+
+var pluginLineRe = regexp.MustCompile(`^(.+?): (running|stopped|switched off|not loaded)(?:, ([\d.]+) MB, ([\d.]+) ms a tick| \((.*))?$`)
+
+// ParsePlugins reads the reply to `plugin list`:
+//
+//	<id>: running, <n> MB, <n> ms a tick
+//	<id>: stopped|switched off|not loaded[ (<why>)]
+func ParsePlugins(text string) ([]ServerPlugin, bool) {
+	out := []ServerPlugin{}
+	if strings.HasPrefix(text, "No server plugins.") {
+		return out, true
+	}
+	for l := range strings.SplitSeq(text, "\n") {
+		m := pluginLineRe.FindStringSubmatch(l)
+		if m == nil {
+			// A why can run over lines, as a Luau error's does.
+			if len(out) == 0 {
+				return nil, false
+			}
+			out[len(out)-1].Reason += "\n" + l
+			continue
+		}
+		mb, _ := strconv.ParseFloat(m[3], 64)
+		tick, _ := strconv.ParseFloat(m[4], 64)
+		out = append(out, ServerPlugin{ID: m[1], State: m[2], Reason: m[5], MB: mb, TickMS: tick})
+	}
+	for i := range out {
+		out[i].Reason = strings.TrimSuffix(out[i].Reason, ")")
+	}
+	return out, true
 }
 
 // ParksHeadRe is the first line of the reply to `park-mod list` (ReSkate

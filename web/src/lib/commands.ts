@@ -33,7 +33,8 @@ const taken = [
 	'vote-cancel', 'votes', 'welcome', 'world-layer-sync', 'quit', 'exit', 'stop', 'update',
 	'role', 'roles', 'board-check', 'park-mod', 'teleport', // 2.0.6
 	'kick-time', // 2.0.8
-	'drones' // 2.1.0
+	'drones', // 2.1.0 and 2.1.1, still kept off for servers on them
+	'bone-reach', 'lock', 'locks', 'unlock', 'throwdown-locks', 'words', 'poll-run', 'plugin' // 2.1.2
 ];
 
 /** What is wrong with each command, by its place in the list ('' for nothing). */

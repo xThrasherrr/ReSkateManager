@@ -12,13 +12,14 @@ import (
 	"testing"
 )
 
-// A config as ReSkate 2.1.0 writes it (layout in Server/server_config.cpp), in
+// A config as ReSkate 2.1.2 writes it (layout in Server/server_config.cpp), in
 // the sections of 1.1.7 and later, with the admins an older one listed: the
 // server moves them into data/roles.json when it starts.
 const sectionedConfig = `{
   "server": {"name": "Sectioned", "password": "", "welcome_message": "hi", "chat_color": "#8E5CFF", "chat_text_color": "d9c8ff",
     "listed": true, "max_players": 32, "port": 27017, "query_port": 27018, "steam_token": "TOKEN", "auto_update": false, "activity_log": true},
   "access": {"admins": ["76561198000000001"], "reserved_players_slots": ["76561198000000002"], "use_global_bans": false},
+  "plugins": {"required": []},
   "maps": {"map": "Isle of Grom", "pool": ["Isle of Grom", "San Vansterdam"], "rotation_minutes": 20,
     "rotation_vote": false, "rotation_vote_seconds": 30, "rotation_extend_minutes": 15, "rotation_announce": true,
     "latest_versions": false, "latest_check_minutes": 60,
@@ -26,7 +27,7 @@ const sectionedConfig = `{
     "layers": {"grom_tod_1_night": "on"}, "park_mods": [], "park_limits": {"parks": 3, "objects": 512}},
   "players": {"allow_boosts": false, "allow_no_bail": true, "allow_noclip": false, "allow_parties": true, "party_size": 4,
     "afk_kick_minutes": 5, "allow_voice_chat": true, "voice_range": 30, "object_placement": "admins", "object_limit": 10,
-    "allow_object_scaling": true, "sync_effects": true, "sync_drones": true, "announce_throwdowns": false,
+    "allow_object_scaling": true, "sync_effects": true, "announce_throwdowns": false,
     "throwdown_locks": ["nobail", "boosts"], "kick_minutes": 0, "word_warnings": 3, "use_global_word_filter": true},
   "anti_cheat": {"speed_hack": "kick", "pinned_board": "warn", "modified_scoring": "off", "allowed_scoring_mods": ["00000000deadbeef"],
     "enforce_tuning": true, "bone_scale_limit": 2, "bone_reach_limit": 1.0},
@@ -342,17 +343,24 @@ func TestKickTimes(t *testing.T) {
 }
 
 // 2.1.0's drones and throwdown locks change live. The locks are read as the
-// server reads them, and kept in its order.
+// server reads them, and kept in its order. 2.1.2 made the drone a plugin mod.
 func TestDronesAndThrowdownLocks(t *testing.T) {
-	f, _ := readSectioned(t)
-	if v := f.Values(); v["sync_drones"] != true || !slices.Equal(v["throwdown_locks"].([]string), []string{"nobail", "boosts"}) {
-		t.Errorf("read %v %v", v["sync_drones"], v["throwdown_locks"])
+	older := &File{Root: map[string]any{"players": map[string]any{"sync_drones": true}}}
+	if p, err := Diff(older, map[string]any{"sync_drones": false}, nil); err != nil || !slices.Equal(p.Commands, []string{"drones off"}) {
+		t.Errorf("2.1.1's drones planned %+v (%v)", p, err)
 	}
-	p, err := Diff(f, map[string]any{"sync_drones": false, "throwdown_locks": []any{"Tuning", "teleport, boosts"}}, nil)
+	f, _ := readSectioned(t)
+	if _, err := Diff(f, map[string]any{"sync_drones": false}, nil); err == nil || !slices.Contains(f.Gone(), "sync_drones") {
+		t.Error("drones planned for 2.1.2")
+	}
+	if v := f.Values(); !slices.Equal(v["throwdown_locks"].([]string), []string{"nobail", "boosts"}) {
+		t.Errorf("read %v", v["throwdown_locks"])
+	}
+	p, err := Diff(f, map[string]any{"throwdown_locks": []any{"Tuning", "teleport, boosts"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"drones off", "throwdown-locks noclip,boosts,tuning"}; !slices.Equal(p.Commands, want) || len(p.Restart) != 0 {
+	if want := []string{"throwdown-locks noclip,boosts,tuning"}; !slices.Equal(p.Commands, want) || len(p.Restart) != 0 {
 		t.Fatalf("planned %+v, want %q", p, want)
 	}
 	f.ApplyOffline(p.Changed)
@@ -363,11 +371,53 @@ func TestDronesAndThrowdownLocks(t *testing.T) {
 	if p, err = Diff(f, map[string]any{"throwdown_locks": []any{}}, nil); err != nil || !slices.Equal(p.Commands, want) {
 		t.Errorf("planned %+v (%v), want %q", p, err, want)
 	}
-	if p, err = Diff(f, map[string]any{"throwdown_locks": []any{"all"}}, nil); err != nil || !slices.Equal(p.Commands, []string{"throwdown-locks noclip,nobail,boosts,tuning"}) {
+	if p, err = Diff(f, map[string]any{"throwdown_locks": []any{"all"}}, nil); err != nil || !slices.Equal(p.Commands, []string{"throwdown-locks noclip,nobail,boosts,tuning,ollies"}) {
 		t.Errorf("all planned %+v (%v)", p, err)
 	}
 	if _, err := Diff(f, map[string]any{"throwdown_locks": []any{"flying"}}, nil); err == nil {
 		t.Error("an unknown tool accepted")
+	}
+}
+
+// 2.1.2's required plugins are read as the server starts, and checked as
+// its config_error does.
+func TestRequiredPlugins(t *testing.T) {
+	f, _ := readSectioned(t)
+	p, err := Diff(f, map[string]any{"plugins.required": []any{" neekgate-FPV_Drone ", "Owner-Board_Break-1.0.0", ""}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Restart["plugins.required"]; fmt.Sprint(got) != "[neekgate-FPV_Drone Owner-Board_Break-1.0.0]" || len(p.Commands) != 0 {
+		t.Fatalf("planned %+v", p)
+	}
+	f.ApplyOffline(p.Changed)
+	if got, _ := f.at("plugins.required"); fmt.Sprint(got) != "[neekgate-FPV_Drone Owner-Board_Break-1.0.0]" {
+		t.Errorf("wrote %v", got)
+	}
+	seventeen := make([]any, 17)
+	for i := range seventeen {
+		seventeen[i] = fmt.Sprintf("Owner-Plugin%d", i)
+	}
+	for _, bad := range [][]any{{"FPV_Drone"}, {"neekgate-FPV-Drone"}, {"neekgate-FPV_Drone-1.0"}, {"a-b", "A-B-1.2.3"}, seventeen} {
+		if _, err := Diff(f, map[string]any{"plugins.required": bad}, nil); err == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+}
+
+// As a server starts, the manager swaps what it required there last time
+// for what it requires now, by package, keeping what the config has besides.
+func TestMergeRequired(t *testing.T) {
+	next, put, left := MergeRequired([]string{"Own-A", "Old-B", "New-C"}, []string{"old-b-1.0.0", "New-C"}, []string{"New-C-2.0.0", "Own-A", "Add-D"})
+	if !slices.Equal(next, []string{"Own-A", "New-C-2.0.0", "Add-D"}) || !slices.Equal(put, []string{"New-C-2.0.0", "Add-D"}) || len(left) != 0 {
+		t.Errorf("got %q put %q left %q", next, put, left)
+	}
+	full := make([]string, 16)
+	for i := range full {
+		full[i] = fmt.Sprintf("Own-P%d", i)
+	}
+	if next, put, left := MergeRequired(full, nil, []string{"Own-P3", "More-E"}); len(next) != 16 || len(put) != 0 || !slices.Equal(left, []string{"More-E"}) {
+		t.Errorf("full: %q put %q left %q", next, put, left)
 	}
 }
 
@@ -528,7 +578,7 @@ func TestSectionedRemoved(t *testing.T) {
 // and a server before 2.0.2 has no announcements at all.
 func TestCardRemoved(t *testing.T) {
 	f, path := readSectioned(t)
-	if g := f.Gone(); !slices.Equal(g, []string{"announcements.card", "reserved_slots"}) {
+	if g := f.Gone(); !slices.Equal(g, []string{"announcements.card", "reserved_slots", "sync_drones"}) {
 		t.Errorf("2.0.3 lacks %q", g)
 	}
 	if _, err := Diff(f, map[string]any{"announcements.card": false}, nil); err == nil || !strings.Contains(err.Error(), "2.0.3") {

@@ -261,6 +261,10 @@ type Instance struct {
 	// before each start, and says what it couldn't. It runs under the
 	// instance's lock; set before Start.
 	PluginCommands func(Def) (string, error)
+	// RequirePlugins puts the plugins players must have in the server's
+	// config before each start, and says what it couldn't. It runs under the
+	// instance's lock; set before Start.
+	RequirePlugins func(Def) (string, error)
 }
 
 // New makes a stopped instance, its console seeded with the end of its log.
@@ -445,6 +449,13 @@ func (in *Instance) startLocked() error {
 	if in.PluginCommands != nil {
 		if msg, err := in.PluginCommands(in.def); err != nil {
 			in.managerLineLocked("Could not put the plugins' chat commands in: " + err.Error())
+		} else if msg != "" {
+			in.managerLineLocked(msg)
+		}
+	}
+	if in.RequirePlugins != nil {
+		if msg, err := in.RequirePlugins(in.def); err != nil {
+			in.managerLineLocked("Could not put the required plugins in: " + err.Error())
 		} else if msg != "" {
 			in.managerLineLocked(msg)
 		}

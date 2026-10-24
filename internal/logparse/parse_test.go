@@ -2,6 +2,7 @@ package logparse
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +62,14 @@ func TestClassify(t *testing.T) {
 		{"[Plugins] Plugin Trick_Race loaded (console, server, session.read).", KindTagged, "", "", nil},
 		{"[Plugins] [Trick_Race] round 2 starts", KindTagged, "", "", nil},
 		{"[Plugins] warning: Plugin broken was not loaded: \"side\" must be \"client\", \"server\" or \"both\"", KindTagged, "", "", nil},
+		// 2.1.2: what the server's plugins do to players and the world, and show them.
+		{"[hide] Bob hidden from 2 player(s) by plugin prop_hunt", KindTagged, "", "", nil},
+		{"[world] A plugin set the time of day to night.", KindTagged, "", "", nil},
+		{"[card by plugin prop_hunt -> everyone] Hide!", KindTagged, "everyone", "", map[string]string{"plugin": "prop_hunt"}},
+		{"[poll by plugin prop_hunt #3 -> Bob, Al] Ready? | Yes | No", KindTagged, "Bob, Al", "", map[string]string{"plugin": "prop_hunt"}},
+		{"[poll by plugin prop_hunt #3] Bob answered 1 Yes", KindTagged, "", "", map[string]string{"plugin": "prop_hunt"}},
+		{"Required plugin neekgate-FPV_Drone is left out: Thunderstore does not list it as a plugin. Players are only asked for plugins.", KindStartup, "", "", nil},
+		{"Required plugins: 2 checked on Thunderstore; players without them are offered them as they join.", KindStartup, "", "", nil},
 		// 2.0.2: an announcement is logged before the reply to the announce that posted it.
 		{"[announcement] Join our Discord", KindTagged, "", "", nil},
 		{"[poll] Thrasher started a poll: Next map? Grom | Stadium", KindTagged, "", "", nil},
@@ -246,11 +255,42 @@ func TestParseLocks(t *testing.T) {
 	if got, ok := ParseLocks("0 players have locked tools"); !ok || len(got) != 0 {
 		t.Errorf("none: %+v %v", got, ok)
 	}
+	// 2.1.2 locks ollies and placing objects too.
+	if got, ok := ParseLocks("1 player has locked tools\n  76561198000000001  Thrasher: tuning, ollies, objects"); !ok || fmt.Sprint(got[0].Tools) != "[tuning ollies objects]" {
+		t.Errorf("2.1.2's tools: %+v %v", got, ok)
+	}
 	if _, ok := ParseLocks("1 player has locked tools\n  76561198000000001  Thrasher: flying"); ok {
 		t.Error("parsed an unknown tool")
 	}
 	if _, ok := ParseLocks("Unknown command"); ok {
 		t.Error("parsed a non-locks reply")
+	}
+}
+
+func TestParsePlugins(t *testing.T) {
+	got, ok := ParsePlugins("Trick_Race: running, 1.5 MB, 0.042 ms a tick\n" +
+		"broken: stopped (main.luau:3: attempt to call a nil value\nstack: main.luau:3)\n" +
+		"quiet: switched off (plugin on quiet starts it again)\n" +
+		"client_only: not loaded (it is a client plugin)")
+	want := []ServerPlugin{
+		{ID: "Trick_Race", State: "running", MB: 1.5, TickMS: 0.042},
+		{ID: "broken", State: "stopped", Reason: "main.luau:3: attempt to call a nil value\nstack: main.luau:3"},
+		{ID: "quiet", State: "switched off", Reason: "plugin on quiet starts it again"},
+		{ID: "client_only", State: "not loaded", Reason: "it is a client plugin"},
+	}
+	if !ok || !slices.Equal(got, want) {
+		t.Errorf("got %+v %v", got, ok)
+	}
+	if got, ok := ParsePlugins(`No server plugins. A plugin is a folder in Plugins with a reskate-plugin.json ("side" "server" or "both").`); !ok || len(got) != 0 {
+		t.Errorf("none: %+v %v", got, ok)
+	}
+	for _, head := range []string{"Trick_Race: running, 1.5 MB, 0.042 ms a tick", "No server plugins. A plugin is..."} {
+		if !PluginsHeadRe.MatchString(head) {
+			t.Errorf("head %q not matched", head)
+		}
+	}
+	if _, ok := ParsePlugins(`Unknown command "plugin". Type help.`); ok || PluginsHeadRe.MatchString(`Unknown command "plugin". Type help.`) {
+		t.Error("parsed a server without plugins")
 	}
 }
 

@@ -123,6 +123,8 @@
 	let locks = $state.raw<Lock[]>([]);
 	const lockOf = (id: string) => locks.find((l) => l.id === id);
 	const toolNames = (keys: string[]) => keys.map((k) => lockTools.find((t) => t.key === k)?.label ?? k).join(', ');
+	// Ollies and objects from 2.1.2, offered unless the server is known to be older.
+	const toolsHere = $derived(lockTools.filter((t) => !t.since || !(serverVersion && newerVersion(t.since, serverVersion))));
 	const beginLocks = newest();
 	async function loadLocks() {
 		const current = beginLocks();
@@ -419,7 +421,7 @@
 		can't give one back.
 	</p>
 	<div class="mt-3 space-y-2">
-		{#each lockTools as t (t.key)}
+		{#each toolsHere as t (t.key)}
 			<label class="flex cursor-pointer items-center gap-2 text-sm">
 				<input type="checkbox" value={t.key} bind:group={lockPick} />
 				{t.label}

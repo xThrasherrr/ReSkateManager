@@ -85,6 +85,54 @@ func (a *API) reloadMods(w http.ResponseWriter, r *http.Request) {
 	a.answerReply(w, r, reply, err)
 }
 
+// serverPlugins lists the plugins the running server runs from its Plugins
+// folder (ReSkate 2.1.2), by folder: how each is doing, for the Mods page.
+func (a *API) serverPlugins(w http.ResponseWriter, r *http.Request) {
+	in := inst(r)
+	if !a.runsPlugins(w, in) {
+		return
+	}
+	list, err := in.ServerPlugins(r.Context())
+	if err != nil {
+		a.answerReply(w, r, "", err)
+		return
+	}
+	writeJSON(w, 200, list)
+}
+
+// serverPlugin reloads one of the server's plugins, or switches it off or on
+// until the server restarts (plugin reload|off|on <id>).
+func (a *API) serverPlugin(verb string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		in := inst(r)
+		id, err := pathParam(r, "plugin")
+		// The server reads the id up to a space.
+		if err != nil || id == "" || strings.ContainsFunc(id, func(c rune) bool { return c <= ' ' || c == 0x7f }) {
+			writeErr(w, 400, "bad plugin")
+			return
+		}
+		if !a.runsPlugins(w, in) {
+			return
+		}
+		reply, err := in.Command(r.Context(), "plugin "+verb+" "+id, from(r).user.Username)
+		if why, refused := strings.CutPrefix(reply, "error: "); err == nil && refused {
+			err = errors.New(why)
+		}
+		a.auditOutcome(r, in.ID(), "server-plugin."+verb, id, err)
+		a.answerReply(w, r, reply, err)
+	}
+}
+
+// runsPlugins answers 409 for a server older than ReSkate 2.1.2, which has no
+// plugins to run.
+func (a *API) runsPlugins(w http.ResponseWriter, in *instance.Instance) bool {
+	if v := a.Builds.Version(in.Def().Exe()); serverconfig.NewerVersion("2.1.2", v) {
+		writeErr(w, http.StatusConflict, "ReSkate 2.1.2 runs server plugins; update this server first")
+		return false
+	}
+	return true
+}
+
 // setModEnabled enables or disables a mod. The server reads Mods only when it
 // starts, so a running one keeps the mod's maps until it restarts, or until
 // it reads them again (reloadMods).

@@ -255,6 +255,12 @@ func (a *API) Handler() http.Handler {
 				// Park mods (ReSkate 2.0.6): their files, and the Parks page.
 				r.With(a.can(auth.SettingsView)).Get("/mods/{folder}/file", a.modFile)
 				r.With(a.can(auth.SettingsEdit)).Put("/mods/{folder}/file", a.saveModFile)
+				// ReSkate's own plugins (2.1.2) the server runs from its mods.
+				r.With(a.can(auth.SettingsView)).Get("/server-plugins", a.serverPlugins)
+				r.With(a.can(auth.SettingsEdit)).Post("/server-plugins/{plugin}/reload", a.serverPlugin("reload"))
+				r.With(a.can(auth.SettingsEdit)).Post("/server-plugins/{plugin}/off", a.serverPlugin("off"))
+				r.With(a.can(auth.SettingsEdit)).Post("/server-plugins/{plugin}/on", a.serverPlugin("on"))
+				r.With(a.can(auth.SettingsEdit)).Patch("/required-plugins", a.saveServerRequired)
 				r.With(a.can(auth.SettingsView)).Get("/parks", a.parks)
 				r.With(a.can(auth.SettingsEdit)).Patch("/parks", a.saveParks)
 				r.With(a.can(auth.SettingsEdit)).Post("/parks/spawn", a.spawnParks)
@@ -310,6 +316,10 @@ func (a *API) Handler() http.Handler {
 				r.With(a.global(auth.SettingsEdit)).Delete("/{folder}", a.deleteSharedMod)
 				r.With(a.global(auth.SettingsEdit)).Post("/{folder}/update", a.updateSharedMod)
 			})
+
+			// The plugins every server requires of players reach every server.
+			r.With(a.anyServer(auth.SettingsView)).Get("/required-plugins", a.requiredPlugins)
+			r.With(a.global(auth.SettingsEdit)).Patch("/required-plugins", a.saveRequired)
 
 			// Browsing Thunderstore; installing goes through a server's mods or the shared ones.
 			r.Route("/thunderstore", func(r chi.Router) {

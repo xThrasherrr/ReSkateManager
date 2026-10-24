@@ -41,7 +41,9 @@ type Mod struct {
 	Disabled bool `json:"disabled,omitempty"`
 	// A link to the shared mods, where it is updated and deleted.
 	Shared bool `json:"shared,omitempty"`
-	// It has a plugin the server runs too (see SyncPlugins).
+	// It has a Luau plugin (ReSkate 2.1.2), which players can be required to
+	// have, and one the server runs too (see SyncPlugins).
+	Plugin       bool `json:"plugin,omitempty"`
 	ServerPlugin bool `json:"serverPlugin,omitempty"`
 	// The base maps it has parks for (parks/<key>.park.json, ReSkate 2.0.6).
 	Parks []string `json:"parks,omitempty"`
@@ -98,7 +100,8 @@ func ReadMods(dir string) ([]Mod, error) {
 				}
 				shared = isSharedLink(path)
 			}
-			m := Mod{Folder: e.Name(), Title: e.Name(), Maps: []ModMap{}, Disabled: disabled, Shared: shared, ServerPlugin: serverPlugin(path), Parks: parkKeys(path)}
+			m := Mod{Folder: e.Name(), Title: e.Name(), Maps: []ModMap{}, Disabled: disabled, Shared: shared, Parks: parkKeys(path)}
+			m.Plugin, m.ServerPlugin = pluginSides(path)
 			readModInfo(path, &m)
 			levels, err := readLevels(filepath.Join(path, "reskate-levels.json"))
 			if err != nil {
@@ -168,19 +171,20 @@ func readModInfo(path string, m *Mod) {
 	}
 }
 
-// serverPlugin reports whether the mod at path has a plugin the server runs:
-// a reskate-plugin.json whose side isn't the default, client.
-func serverPlugin(path string) bool {
+// pluginSides reports whether the mod at path has a plugin, a
+// reskate-plugin.json, and whether the server runs it: its side isn't the
+// default, client.
+func pluginSides(path string) (plugin, server bool) {
 	data, err := readCapped(filepath.Join(path, "reskate-plugin.json"), maxModJSON)
 	if err != nil {
-		return false
+		return false, false
 	}
 	var p struct {
 		Side any `json:"side"`
 	}
 	// A broken one goes to the server too, which logs what's wrong with it.
 	err = json.Unmarshal(bytes.TrimPrefix(data, utf8BOM), &p)
-	return err != nil || (p.Side != nil && p.Side != "client")
+	return true, err != nil || (p.Side != nil && p.Side != "client")
 }
 
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}

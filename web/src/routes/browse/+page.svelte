@@ -9,6 +9,8 @@
 	import { session } from '#lib/session.svelte.js';
 	import { instances } from '#lib/instances.svelte.js';
 	import { ago, bytes, httpUrl, plural } from '#lib/format.js';
+	import { attempt, flip } from '#lib/toast.svelte.js';
+	import { PLUGINS, requires, withRequired } from '#lib/required.js';
 	import Icon from '#lib/components/Icon.svelte';
 	import Modal from '#lib/components/Modal.svelte';
 	import Loading from '#lib/components/Loading.svelte';
@@ -59,8 +61,47 @@
 		untrack(() => {
 			loadServers(ids);
 			loadShared();
+			loadEvery();
 		});
 	});
+
+	// ---- The plugins players must have (ReSkate 2.1.2): every server's, and each one's ----
+
+	// null when it can't be read.
+	let every = $state.raw<string[] | null>(null);
+	// Every server's reach every server, so changing them takes settings.edit on all.
+	const canEvery = $derived(session.can('settings.edit') && every !== null);
+	async function loadEvery() {
+		every = (await api.get<{ plugins: string[] }>('/required-plugins').catch(() => null))?.plugins ?? null;
+	}
+	const isPlugin = (mod: StoreMod) => mod.categories.includes(PLUGINS);
+	const requiredOn = (id: string, mod: StoreMod) => requires(lists[id]?.required, mod.fullName);
+	const requiredAnywhere = (mod: StoreMod) => requires(every ?? [], mod.fullName) || servers.some((s) => requiredOn(s.id, mod));
+	// Servers known to be older than 2.1.2 take the list once they're updated.
+	const tooOld = (id: string) => {
+		const v = instances.byId(id)?.serverVersion;
+		return !!v && newerVersion('2.1.2', v);
+	};
+	let requiring = $state(false);
+	/** Asks players for mod on server id, or every server (null), from its next start, or stops. */
+	async function require(id: string | null, mod: StoreMod, on: boolean) {
+		requiring = true;
+		const name = modName(mod);
+		const r =
+			id === null
+				? await attempt(
+						() => api.patch<{ plugins: string[] }>('/required-plugins', { plugins: withRequired(every ?? [], mod.fullName, on) }),
+						on ? `Every server asks players for ${name} from its next start` : `Servers stop asking for ${name} from their next start`
+					)
+				: await attempt(
+						() => api.patch<{ plugins: string[] }>(`/instances/${id}/required-plugins`, { plugins: withRequired(lists[id]?.required ?? [], mod.fullName, on) }),
+						`${instances.byId(id)?.name ?? id} ${on ? 'asks players for' : 'stops asking for'} ${name} from its next start`
+					);
+		if (r && id === null) every = r.plugins;
+		else if (r && lists[id!]) lists = { ...lists, [id!]: { ...lists[id!]!, required: r.plugins } };
+		requiring = false;
+		return r;
+	}
 
 	// ---- What each place has already ----
 
@@ -192,7 +233,8 @@
 	// ---- Finding mods ----
 
 	let q = $state('');
-	let category = $state('');
+	// A link can open a category, such as a server's Mods page does Plugins.
+	let category = $state(page.url.searchParams.get('category') ?? '');
 	let mapsOnly = $state(false);
 	let sort = $state<'downloads' | 'updated' | 'created' | 'rating' | 'name'>('downloads');
 	let showDeprecated = $state(false);
@@ -313,6 +355,7 @@
 <!-- Where the mod is already, and the button that opens the install list. -->
 {#snippet action(mod: StoreMod)}
 	{@const p = placed(mod)}
+	{#if isPlugin(mod) && requiredAnywhere(mod)}<span class="sticker sticker-accent" title="Players must have it on {requires(every ?? [], mod.fullName) ? 'every server' : 'some servers'}">Required</span>{/if}
 	{#if p.shared}<span class="sticker sticker-info" title="In the shared mods, v{p.shared.version ?? '?'}">Shared</span>{/if}
 	{#if p.own.length}
 		<span class="text-xs text-muted" title={p.own.map((o) => `${o.s.name}: v${o.copy.version ?? '?'}${o.copy.disabled ? ' (off)' : ''}`).join('\n')}>
@@ -337,7 +380,8 @@
 			<h1 class="page-title">Browse mods</h1>
 			<p class="mt-2 text-sm text-muted">
 				Mods from <a class="text-accent hover:underline" href="https://thunderstore.io/c/reskate/" target="_blank" rel="noreferrer">Thunderstore</a>, for any of
-				your servers and the shared mods at once. Servers load only map mods; the rest change players' games, so the browser looks inside each mod for its maps.
+				your servers and the shared mods at once. Servers load map mods and plugins' server halves; the rest change players' games, so the browser looks inside each mod for its maps.
+				A plugin can be required of players, on a server or every one.
 			</p>
 		</div>
 		<button
@@ -542,6 +586,52 @@
 					{/each}
 				</select>
 			</label>
+
+			{#if isPlugin(mod) && (canEvery || servers.length)}
+				<div>
+					<div class="label">Players must have it on</div>
+					<ul class="divide-y divide-line/60 rounded-lg border-2 border-line">
+						{#if canEvery}
+							<li class="flex items-center gap-3 px-3 py-2">
+								<input
+									id="require-every"
+									type="checkbox"
+									class="shrink-0"
+									checked={requires(every ?? [], mod.fullName)}
+									disabled={requiring}
+									onchange={(e) => flip(e, (on) => require(null, mod, on))}
+								/>
+								<label for="require-every" class="min-w-0 flex-1 cursor-pointer">
+									<span class="font-medium">Every server</span>
+									<span class="block text-xs text-muted">Those added later too</span>
+								</label>
+							</li>
+						{/if}
+						{#each servers as s (s.id)}
+							{@const viaEvery = requires(every ?? [], mod.fullName)}
+							<li class="flex items-center gap-3 px-3 py-2">
+								<input
+									id="require-{s.id}"
+									type="checkbox"
+									class="shrink-0"
+									checked={viaEvery || requiredOn(s.id, mod)}
+									disabled={requiring || viaEvery || !lists[s.id]}
+									onchange={(e) => flip(e, (on) => require(s.id, mod, on))}
+								/>
+								<label for="require-{s.id}" class="min-w-0 flex-1 {viaEvery ? '' : 'cursor-pointer'}">
+									<span class="font-medium">{s.name}</span>
+									{#if viaEvery}<span class="block text-xs text-muted">Every server asks for it</span>
+									{:else if tooOld(s.id)}<span class="block text-xs text-muted">Needs ReSkate 2.1.2: it asks once it's updated</span>{/if}
+								</label>
+							</li>
+						{/each}
+					</ul>
+					<p class="mt-1 text-xs text-faint">
+						A player without it is asked once as they join, and their game gets it. A server asks from its next start. Only a plugin with a server half needs
+						installing on the server too.
+					</p>
+				</div>
+			{/if}
 
 			{#if canInstall}
 				<div>

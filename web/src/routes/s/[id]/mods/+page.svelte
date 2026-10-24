@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { api, poolMapsFrom, type Mod, type ModList, type SharedUse } from '#lib/api.js';
+	import { api, poolMapsFrom, type Mod, type ModList, type ServerPlugin, type SharedUse } from '#lib/api.js';
 	import { sharedHelp, relinks, sharedDone } from '#lib/shared.js';
 	import { useLive } from '#lib/context.js';
 	import { attempt } from '#lib/toast.svelte.js';
+	import { packageOf, requires, withRequired } from '#lib/required.js';
+	import { newest } from '#lib/newest.js';
 	import { uploads, SHARED } from '#lib/uploads.svelte.js';
 	import { ModsPage } from '#lib/mods.svelte.js';
 	import { session } from '#lib/session.svelte.js';
@@ -71,6 +73,58 @@
 		await attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/mods/reload`), (r) => r.reply.split('\n')[0] ?? r.reply);
 		reloading = false;
 		load();
+	}
+
+	// ---- ReSkate's plugins (2.1.2): which players must have, and how the server's run ----
+
+	// Not offered where the server is known to be older.
+	const pluginsHere = $derived(!(serverVersion && newerVersion('2.1.2', serverVersion)));
+	// This server's and every server's, which the manager puts in its config as it starts.
+	const required = $derived(list?.required ?? []);
+	const every = $derived(list?.everyRequired ?? []);
+	const ownReq = (mod: Mod) => !!mod.package && requires(required, mod.package);
+	const everyReq = (mod: Mod) => !!mod.package && requires(every, mod.package);
+	// Everything players must have here: this server's, then every server's it doesn't have too, each with its mod here if there is one.
+	const requiredRows = $derived(
+		[...required.map((entry) => ({ entry, every: false })), ...every.filter((e) => !requires(required, e)).map((entry) => ({ entry, every: true }))].map((r) => ({
+			...r,
+			mod: list?.mods.find((m) => m.package && packageOf(m.package) === packageOf(r.entry))
+		}))
+	);
+	async function setRequired(pkg: string, title: string, on: boolean, key = pkg) {
+		working = key;
+		const when = serverState === 'running' ? " from the server's next start" : '';
+		await attempt(
+			() => api.patch(`/instances/${ctx.id}/required-plugins`, { plugins: withRequired(required, pkg, on) }),
+			on ? `Players are asked for ${title}${when}` : `Players no longer need ${title}${when}`
+		);
+		working = '';
+		load();
+	}
+
+	// The running server's plugins, by folder, asked for while it has some.
+	const runsPlugins = $derived(serverState === 'running' && pluginsHere && enabled.some((m) => m.serverPlugin));
+	let pluginStates = $state.raw<Record<string, ServerPlugin>>({});
+	const pluginOf = (mod: Mod) => (mod.serverPlugin && !mod.disabled ? pluginStates[lower(mod.folder)] : undefined);
+	const beginPlugins = newest();
+	async function loadPlugins() {
+		const current = beginPlugins();
+		const r = runsPlugins ? await api.get<ServerPlugin[]>(`/instances/${ctx.id}/server-plugins`).catch(() => null) : null;
+		if (current()) pluginStates = Object.fromEntries((r ?? []).map((p) => [lower(p.id), p]));
+	}
+	$effect(() => {
+		list; // a mod enabled, disabled or updated
+		untrack(loadPlugins);
+		if (!runsPlugins) return;
+		// The server looks in its Plugins folder every 2 seconds.
+		const t = setTimeout(loadPlugins, 3000);
+		return () => clearTimeout(t);
+	});
+	async function pluginAction(mod: Mod, p: ServerPlugin, verb: 'reload' | 'off' | 'on') {
+		working = mod.folder;
+		await attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/server-plugins/${encodeURIComponent(p.id)}/${verb}`), (r) => r.reply);
+		working = '';
+		loadPlugins();
 	}
 
 	// Linked shared mods are updated under Shared mods.
@@ -144,9 +198,36 @@
 {#snippet credits(mod: Mod)}
 	<ModCredits {mod} up={updates[mod.folder]}>
 		{#if mod.shared}<span class="sticker sticker-info" title="Linked from the shared mods, which update and delete it">Shared</span>{/if}
-		{#if mod.serverPlugin}<span class="sticker sticker-accent" title="The server runs its plugin too, while the mod is enabled (ReSkate's plugins)">Server plugin</span>{/if}
+		{#if mod.serverPlugin}<span class="sticker sticker-accent" title="The server runs its plugin too, while the mod is enabled (ReSkate's plugins)">Server plugin</span>
+		{:else if mod.plugin}<span class="sticker" title="A Luau plugin that players' games run (ReSkate's plugins)">Plugin</span>{/if}
+		{#if pluginsHere && everyReq(mod)}<span class="sticker sticker-info" title="Every server requires it of players; change that in the mod browser">Required on every server</span>
+			<!-- Editors see it on the Require toggle. -->
+		{:else if pluginsHere && ownReq(mod) && !canUpload}<span class="sticker sticker-info" title="Players must have it to join; their game gets it as they join">Required</span>{/if}
 		{#if mod.disabled}<span class="sticker">Disabled</span>{/if}
 	</ModCredits>
+{/snippet}
+
+{#snippet pluginState(mod: Mod)}
+	{@const p = pluginOf(mod)}
+	{#if p}
+		<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+			<span class="sticker {p.state === 'running' ? 'sticker-info' : 'sticker-warn'}">Plugin {p.state}</span>
+			{#if p.state === 'running'}<span>{p.mb?.toFixed(1) ?? 0} MB, {p.tickMs?.toFixed(3) ?? 0} ms a tick</span>{/if}
+			{#if canUpload}
+				<button class="btn btn-ghost btn-sm" disabled={working === mod.folder} onclick={() => pluginAction(mod, p, 'reload')} title="Load its files again"
+					><Icon name="restart" size={12} /> Reload</button
+				>
+				<button
+					class="btn btn-ghost btn-sm"
+					disabled={working === mod.folder}
+					onclick={() => pluginAction(mod, p, p.state === 'switched off' ? 'on' : 'off')}
+					title={p.state === 'switched off' ? 'Start it again' : 'Stop it until switched on or the server restarts; the mod stays enabled'}
+					><Icon name="power" size={12} /> {p.state === 'switched off' ? 'Switch on' : 'Switch off'}</button
+				>
+			{/if}
+		</div>
+		{#if p.reason && p.state !== 'switched off'}<p class="mt-1 text-xs whitespace-pre-wrap text-bad">{p.reason}</p>{/if}
+	{/if}
 {/snippet}
 
 {#snippet poolWarning(maps: string[])}
@@ -170,6 +251,16 @@
 {#snippet controls(mod: Mod)}
 	{@const updating = uploads.pending(ctx.id, mod.folder)}
 	<div class="flex shrink-0 flex-wrap items-center gap-1.5">
+		{#if canUpload && pluginsHere && mod.plugin && mod.package && !everyReq(mod)}
+			<button
+				class="btn btn-sm"
+				aria-pressed={ownReq(mod)}
+				disabled={working === mod.folder || updating}
+				onclick={() => setRequired(mod.package!, mod.title, !ownReq(mod), mod.folder)}
+				title={ownReq(mod) ? 'Players no longer need it to join' : 'Players must have it to join: their game gets it as they join'}
+				><Icon name={ownReq(mod) ? 'check' : 'users'} size={12} /> {ownReq(mod) ? 'Required' : 'Require'}</button
+			>
+		{/if}
 		<ModUpdate
 			{mod}
 			up={updates[mod.folder]}
@@ -245,6 +336,50 @@
 
 		<ModProfiles id={ctx.id} server={serverName} canAdd={canUpload} changed={list} />
 
+		<section class="card">
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b-2 border-line px-4 py-3">
+				<div class="min-w-0 flex-1 basis-72">
+					<h2>Plugins players must have</h2>
+					<p class="text-sm text-muted">A player without one is asked once as they join, and their game gets it from Thunderstore.</p>
+				</div>
+				{#if canUpload}
+					<a class="btn btn-sm" href="/browse?to={encodeURIComponent(ctx.id)}&category=Plugins"><Icon name="plus" size={12} /> Add from the mod browser</a>
+				{/if}
+			</div>
+			{#if requiredRows.length}
+				<ul class="divide-y divide-line/60 px-1 py-1.5">
+					{#each requiredRows as r (r.entry)}
+						<li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+							<span class="font-medium">{r.mod?.title ?? r.entry}</span>
+							<span class="font-mono text-xs text-faint">{r.entry}</span>
+							{#if r.every}<span class="sticker sticker-info" title="Change it in the mod browser">Every server</span>{/if}
+							{#if r.mod}<span class="sticker" title="In this server's Mods{r.mod.serverPlugin ? ', and the server runs its plugin' : ''}">Installed here</span>{/if}
+							<span class="flex-1"></span>
+							{#if canUpload && !r.every}
+								<button
+									class="btn btn-ghost btn-sm size-7 px-0"
+									disabled={working === r.entry}
+									onclick={() => setRequired(r.entry, r.mod?.title ?? r.entry, false)}
+									title="Stop asking players for it"
+									aria-label="Stop asking players for {r.entry}"><Icon name="x" size={13} /></button
+								>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<p class="px-4 py-3 text-sm text-muted">None. Players can join without any plugin.</p>
+			{/if}
+			{#if !pluginsHere || list.requiredPending}
+				<p class="flex items-start gap-1.5 border-t-2 border-line px-4 py-3 text-sm text-warn">
+					<Icon name="alert" size={14} class="mt-0.5 shrink-0" />
+					{!pluginsHere
+						? `This server runs ReSkate ${serverVersion}: it asks for these once it's updated to 2.1.2 or later.`
+						: 'These changed since the server started. Players are asked for them from its next start.'}
+				</p>
+			{/if}
+		</section>
+
 		{#if restartNote}
 			<div class="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border-2 border-dashed border-warn/60 bg-warn/5 px-4 py-3 text-sm text-muted">
 				<p class="min-w-0 flex-1 basis-72">
@@ -290,6 +425,7 @@
 						</p>
 					{/if}
 					{#if mod.description}<p class="text-sm text-muted">{mod.description}</p>{/if}
+					{@render pluginState(mod)}
 					{#if mod.problem}
 						<p class="flex items-start gap-1.5 text-sm text-bad"><Icon name="alert" size={14} /> {mod.problem}</p>
 					{/if}
@@ -325,7 +461,9 @@
 			<section class="card">
 				<h2 class="border-b-2 border-line px-4 py-3">Other mods</h2>
 				<p class="px-4 pt-3 text-xs text-faint">
-					These have no reskate-levels.json, so they add no maps. Only players' games use them, apart from server plugins, which the server runs too.
+					These have no reskate-levels.json, so they add no maps. Only players' games use them, apart from server plugins, which the server runs too.{pluginsHere
+						? ' Require a plugin, and players without it get it as they join.'
+						: ''}
 				</p>
 				<ul class="divide-y divide-line/60 px-1 py-1.5">
 					{#each otherMods as mod (mod.folder)}
@@ -336,6 +474,7 @@
 									{@render credits(mod)}
 								</div>
 								{#if mod.title !== mod.folder}<div class="truncate font-mono text-xs text-faint" title={mod.folder}>{mod.folder}</div>{/if}
+								{@render pluginState(mod)}
 							</div>
 							{@render controls(mod)}
 						</li>

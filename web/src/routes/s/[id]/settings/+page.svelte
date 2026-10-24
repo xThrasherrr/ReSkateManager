@@ -31,8 +31,8 @@
 	const ctx = useLive();
 	// Settings the server's layout no longer has, such as reserved slots since ReSkate 1.1.7.
 	let gone = $state.raw<string[]>([]);
-	// Park mods and their limits are set up on the Parks page.
-	const fields = $derived((session.meta?.settings ?? []).filter((f) => !gone.includes(f.key) && f.group !== 'Park mods'));
+	// Park mods and their limits are set up on the Parks page, and the plugins players must have on the Mods page and in the mod browser.
+	const fields = $derived((session.meta?.settings ?? []).filter((f) => !gone.includes(f.key) && f.group !== 'Park mods' && f.group !== 'Plugins'));
 	const groups = $derived([...new Set(fields.map((f) => f.group))]);
 	// The groups, a section of them at a time; the URL's #id names the open one, so other pages can link to it.
 	const sectionList = [

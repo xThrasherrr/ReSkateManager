@@ -312,7 +312,8 @@ func (s *Store) DeleteInstance(ctx context.Context, id string) error {
 		"DELETE FROM throwdowns WHERE instance_id = ?", // and their players with them
 		"DELETE FROM board_scores WHERE instance_id = ?",
 		"DELETE FROM user_roles WHERE instance_id = ?",
-		"DELETE FROM kv WHERE key = 'parks:' || ?", // its park pools (internal/parks)
+		"DELETE FROM kv WHERE key = 'parks:' || ?",            // its park pools (internal/parks)
+		"DELETE FROM kv WHERE key = 'required-plugins:' || ?", // its required plugins (internal/api)
 		"DELETE FROM instances WHERE id = ?",
 	} {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {
