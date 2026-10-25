@@ -70,6 +70,20 @@ class Toasts {
 
 export const toast = new Toasts();
 
+/** A change's answer: the server's reply, or, from one made on every server,
+ * where it was done as one toast and why it failed where it did as another. */
+export function toastAnswer(r: { reply?: string; results?: { name: string; error?: string }[] }, done: string) {
+	if (!r.results) {
+		if (r.reply) toast.ok(r.reply);
+		return;
+	}
+	const ok = r.results.filter((x) => !x.error);
+	const failed = r.results.filter((x) => x.error);
+	if (ok.length) toast.ok(`${done} on ${ok.map((x) => x.name).join(', ')}.`);
+	if (failed.length) toast.error(failed.map((x) => `${x.name}: ${x.error}`).join('\n'));
+	if (!r.results.length) toast.info('Nothing to change on any server.');
+}
+
 /**
  * Runs what flipping a switch asks for, and flips it back if that fails. The
  * page's state never moved, so it alone would not: Svelte leaves an input's

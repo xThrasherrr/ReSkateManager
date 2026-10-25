@@ -328,3 +328,38 @@ func TestEditRoles(t *testing.T) {
 		t.Errorf("a server without roles: %v", err)
 	}
 }
+
+// A new server takes the first's roles whole, then what the rest add.
+func TestCopyRoles(t *testing.T) {
+	first, _ := Read(rolesServer(t, `{"server": {"name": "a"}}`, newRoles))
+	old, _ := Read(rolesServer(t, `{"server": {"name": "b"}}`, ""))
+	other, _ := Read(rolesServer(t, `{"server": {"name": "c"}}`, `{"default_role": "player", "roles": [
+		{"name": "player"}, {"name": "og", "tag": "OG", "commands": ["say"]}],
+		"players": {"76561198000000001": "og", "76561198000000003": "og", "76561198000000004": "ghost"}}`))
+	path := rolesServer(t, `{"server": {"name": "new"}}`, "")
+	f, _ := Read(path)
+	f.CopyRoles([]*File{old, first, other})
+	if err := f.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	g, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, given, def := g.Roles()
+	names := []string{}
+	for _, r := range list {
+		names = append(names, r.Name)
+	}
+	if def != "player" || !slices.Equal(names, []string{"player", "moderator", "admin", "og"}) || !slices.Equal(list[3].Commands, []string{"say"}) {
+		t.Errorf("roles %v, default %q", list, def)
+	}
+	want := map[string]string{"76561198000000001": "admin", "76561198000000002": "moderator", "76561198000000003": "og"}
+	if !maps.Equal(given, want) {
+		t.Errorf("given %v", given)
+	}
+	none, _ := Read(rolesServer(t, `{"server": {"name": "x"}}`, ""))
+	if none.CopyRoles([]*File{old}); none.HasRoles() {
+		t.Error("roles from servers without any")
+	}
+}

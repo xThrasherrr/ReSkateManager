@@ -27,6 +27,9 @@
 	];
 	let dir = $state('');
 	let busy = $state(false);
+	// A fresh install can start with the other servers' roles, who has them, and their bans.
+	let copyRoles = $state(true);
+	let copyBans = $state(true);
 
 	let file = $state.raw<File | null>(null);
 	let installAfter = $state(true);
@@ -37,7 +40,14 @@
 		if (mode === 'export') return importExport();
 		busy = true;
 		const inst = await attempt(
-			() => api.post<InstanceView>('/instances', { name, dir: mode === 'folder' ? dir : '', install: mode === 'install' }),
+			() =>
+				api.post<InstanceView>('/instances', {
+					name,
+					dir: mode === 'folder' ? dir : '',
+					install: mode === 'install',
+					roles: mode === 'install' && copyRoles && session.can('ingame.admins.manage'),
+					bans: mode === 'install' && copyBans && session.can('players.ban')
+				}),
 			(v) => (mode === 'install' ? `Created ${v.name}; installing the latest server…` : `Added ${v.name}`)
 		);
 		busy = false;
@@ -262,6 +272,20 @@
 					/>
 					<p class="text-xs text-faint">{importing.phase === 'uploading' ? `Uploading ${Math.round(importing.part * 100)}%` : 'Unpacking…'}</p>
 				</div>
+			{/if}
+		{/if}
+		{#if mode === 'install' && instances.list.length}
+			{#if session.can('ingame.admins.manage')}
+				<label class="flex items-start gap-2 text-sm">
+					<input type="checkbox" class="mt-0.5" bind:checked={copyRoles} disabled={busy} />
+					<span>Copy the other servers' roles <span class="block text-xs text-faint">And who was given them. Admins kept in step with panel users come from their panel roles.</span></span>
+				</label>
+			{/if}
+			{#if session.can('players.ban')}
+				<label class="flex items-start gap-2 text-sm">
+					<input type="checkbox" class="mt-0.5" bind:checked={copyBans} disabled={busy} />
+					<span>Copy the other servers' bans</span>
+				</label>
 			{/if}
 		{/if}
 		{#if mode === 'folder'}

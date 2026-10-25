@@ -59,7 +59,7 @@ func (f *File) SetRole(id, role string) error {
 	if f.roles == nil {
 		return ErrNoRoles
 	}
-	if role != "" && !f.hasRole(role) {
+	if role != "" && !f.HasRole(role) {
 		return fmt.Errorf("the server has no %q role", role)
 	}
 	players, _ := f.roles["players"].(map[string]any)
@@ -159,8 +159,8 @@ func (f *File) rolePlayers() map[string]string {
 	return out
 }
 
-// hasRole reports whether the roles have one by this name.
-func (f *File) hasRole(name string) bool { return f.role(name) != nil }
+// HasRole reports whether the server has a role by this name.
+func (f *File) HasRole(name string) bool { return f.role(name) != nil }
 
 // role is the role by this name, as the file has it; nil when there's none.
 func (f *File) role(name string) map[string]any {
@@ -238,7 +238,7 @@ func (f *File) AddRole(l RoleLook) error {
 	if !RoleNameRe.MatchString(l.Name) || l.Name == "none" {
 		return errors.New("a role's name is 1 to 24 of a-z, 0-9, - and _, and not none")
 	}
-	if f.hasRole(l.Name) {
+	if f.HasRole(l.Name) {
 		return fmt.Errorf("the server has a %q role already", l.Name)
 	}
 	list, _ := f.roles["roles"].([]any)
@@ -279,7 +279,7 @@ func (f *File) DeleteRole(name string) (int, error) {
 	if f.roles == nil {
 		return 0, ErrNoRoles
 	}
-	if !f.hasRole(name) {
+	if !f.HasRole(name) {
 		return 0, fmt.Errorf("the server has no %q role", name)
 	}
 	if def, _ := f.roles["default_role"].(string); name == def {
@@ -305,13 +305,48 @@ func (f *File) DeleteRole(name string) (int, error) {
 	return n, nil
 }
 
+// CopyRoles gives the server the roles of others and who was given them, as
+// a new one takes them from the rest: all of the first's when it has none yet,
+// then each role and player of the others it hasn't, as many roles as a
+// server holds. A player keeps the role they have, and the first others to
+// give them one win.
+func (f *File) CopyRoles(others []*File) {
+	for _, o := range others {
+		if o.roles == nil {
+			continue
+		}
+		if f.roles == nil {
+			f.roles, f.rolesSet = o.roles, true
+			continue
+		}
+		items, _ := o.roles["roles"].([]any)
+		for _, item := range items {
+			role, _ := item.(map[string]any)
+			list, _ := f.roles["roles"].([]any)
+			if name, _ := role["name"].(string); name != "" && !f.HasRole(name) && len(list) < maxRoles {
+				f.roles["roles"], f.rolesSet = append(list, role), true
+			}
+		}
+		players, _ := f.roles["players"].(map[string]any)
+		if players == nil {
+			players = map[string]any{}
+			f.roles["players"] = players
+		}
+		for id, role := range o.rolePlayers() {
+			if _, ok := players[id]; !ok && f.HasRole(role) {
+				players[id], f.rolesSet = role, true
+			}
+		}
+	}
+}
+
 // setAdminRole gives the admin role to ids and takes it from everyone else
 // who has it, who are then the default role again. The config's own list
 // goes: the server would give its players the role again.
 func (f *File) setAdminRole(ids []string) error {
 	given := f.rolePlayers()
 	for _, id := range ids {
-		if given[id] != AdminRole && !f.hasRole(AdminRole) {
+		if given[id] != AdminRole && !f.HasRole(AdminRole) {
 			return fmt.Errorf("%s has no %q role to give", RolesFile, AdminRole)
 		}
 	}

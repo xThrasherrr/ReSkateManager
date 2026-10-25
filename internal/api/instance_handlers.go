@@ -139,6 +139,8 @@ func (a *API) createInstance(w http.ResponseWriter, r *http.Request) {
 		Name    string `json:"name"`
 		Dir     string `json:"dir"`
 		Install bool   `json:"install"`
+		Roles   bool   `json:"roles"` // the other servers' roles, and who was given them
+		Bans    bool   `json:"bans"`  // and their bans
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -223,6 +225,11 @@ func (a *API) createInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	in := a.Reg.Add(d)
 	a.audit(r, id, "instance.create", dir)
+	if req.Roles || req.Bans {
+		if err := a.copyFromOthers(r, in, req.Roles, req.Bans); err != nil {
+			in.Note("Could not copy the other servers' roles and bans: " + err.Error())
+		}
+	}
 	a.Admins.Kick()
 	if req.Install && !in.View().Installed {
 		if err := a.Updates.Start(in, false, from(r).user.Username, ""); err != nil {
@@ -230,6 +237,54 @@ func (a *API) createInstance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 201, a.viewFor(r, in))
+}
+
+// copyFromOthers gives a new server the roles of the other servers the user
+// manages admins on, and the bans of those they may ban on, as CopyRoles
+// merges them. Admins kept in step with panel users stay the sync's: it makes
+// them admins here too if their panel roles say so.
+func (a *API) copyFromOthers(r *http.Request, in *instance.Instance, roles, bans bool) error {
+	perms := from(r).perms
+	roles = roles && perms.Can(auth.IngameAdmins, in.ID())
+	bans = bans && perms.Can(auth.PlayersBan, in.ID())
+	var withRoles []*serverconfig.File
+	var banList []serverconfig.Ban
+	for _, other := range a.Reg.List() {
+		if other.ID() == in.ID() {
+			continue
+		}
+		f, err := serverconfig.Read(other.Def().ConfigPath())
+		if err != nil {
+			continue // one that never started has nothing to give
+		}
+		if roles && f.HasRoles() && perms.Can(auth.IngameAdmins, other.ID()) {
+			panel, err := a.Admins.PanelAdmins(r.Context(), other.ID())
+			if err != nil {
+				return err
+			}
+			for id := range panel {
+				_ = f.SetRole(id, "") // it has roles, so it can't fail
+			}
+			withRoles = append(withRoles, f)
+		}
+		if bans && perms.Can(auth.PlayersBan, other.ID()) {
+			banList = append(banList, f.Bans()...)
+		}
+	}
+	_, err := in.EditStopped(func(f *serverconfig.File) (string, error) {
+		f.CopyRoles(withRoles)
+		if len(banList) > 0 {
+			list := f.Bans()
+			for _, b := range banList {
+				if !slices.ContainsFunc(list, func(x serverconfig.Ban) bool { return x.ID == b.ID }) {
+					list = append(list, b)
+				}
+			}
+			f.SetBans(list)
+		}
+		return "", nil
+	})
+	return err
 }
 
 func (a *API) updateInstance(w http.ResponseWriter, r *http.Request) {
@@ -616,11 +671,13 @@ func chatText(s string) (string, bool) {
 	return msg, msg != "" && len(msg) <= maxMessage
 }
 
+// ban bans a player from this server, or with everywhere from every server
+// the user may ban on where they aren't already.
 func (a *API) ban(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
 	var req struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		Everywhere bool   `json:"everywhere"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -629,48 +686,81 @@ func (a *API) ban(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(supervisor.CutText(supervisor.CleanText(req.Name), 64))
-	var reply string
-	var err error
-	if running(in) {
-		reply, err = in.Command(r.Context(), strings.TrimSpace("ban "+req.ID+" "+name), from(r).user.Username)
-	} else {
-		reply, err = in.EditStopped(func(f *serverconfig.File) (string, error) {
-			bans := f.Bans()
-			if slices.ContainsFunc(bans, func(b serverconfig.Ban) bool { return b.ID == req.ID }) {
-				return "", errors.New(req.ID + " is already banned")
+	detail := strings.TrimSpace(req.ID + " " + name)
+	if req.Everywhere {
+		a.everyServer(w, r, auth.PlayersBan, "player.ban", detail, func(in *instance.Instance) (string, error) {
+			if banned(in, req.ID) {
+				return "", errUnchanged
 			}
-			f.SetBans(append(bans, serverconfig.Ban{ID: req.ID, Name: name, Added: time.Now().Unix()}))
-			return req.ID + " was banned.", nil
+			return a.banOn(r, in, req.ID, name)
 		})
+		return
 	}
-	a.auditOutcome(r, in.ID(), "player.ban", strings.TrimSpace(req.ID+" "+name), err)
+	in := inst(r)
+	reply, err := a.banOn(r, in, req.ID, name)
+	a.auditOutcome(r, in.ID(), "player.ban", detail, err)
 	a.answerReply(w, r, reply, err)
 }
 
+// banOn bans a player from a server: with the ban command while it runs,
+// else in its bans.
+func (a *API) banOn(r *http.Request, in *instance.Instance, id, name string) (string, error) {
+	if running(in) {
+		return in.Command(r.Context(), strings.TrimSpace("ban "+id+" "+name), from(r).user.Username)
+	}
+	return in.EditStopped(func(f *serverconfig.File) (string, error) {
+		bans := f.Bans()
+		if slices.ContainsFunc(bans, func(b serverconfig.Ban) bool { return b.ID == id }) {
+			return "", errors.New(id + " is already banned")
+		}
+		f.SetBans(append(bans, serverconfig.Ban{ID: id, Name: name, Added: time.Now().Unix()}))
+		return id + " was banned.", nil
+	})
+}
+
+// banned reports whether a server's bans hold a player, as its file has them.
+func banned(in *instance.Instance, id string) bool {
+	f, err := serverconfig.Read(in.Def().ConfigPath())
+	return err == nil && slices.ContainsFunc(f.Bans(), func(b serverconfig.Ban) bool { return b.ID == id })
+}
+
+// unban lifts a player's ban on this server, or with ?everywhere=1 on every
+// server the user may ban on that has them banned.
 func (a *API) unban(w http.ResponseWriter, r *http.Request) {
-	in := inst(r)
 	id, ok := steamParam(w, r)
 	if !ok {
 		return
 	}
-	var reply string
-	var err error
-	if running(in) {
-		reply, err = in.Command(r.Context(), "unban "+id, from(r).user.Username)
-	} else {
-		reply, err = in.EditStopped(func(f *serverconfig.File) (string, error) {
-			bans := f.Bans()
-			n := len(bans)
-			bans = slices.DeleteFunc(bans, func(b serverconfig.Ban) bool { return b.ID == id })
-			if len(bans) == n {
-				return "", errors.New("that SteamID64 is not banned")
+	if r.URL.Query().Get("everywhere") == "1" {
+		a.everyServer(w, r, auth.PlayersBan, "player.unban", id, func(in *instance.Instance) (string, error) {
+			if !banned(in, id) {
+				return "", errUnchanged
 			}
-			f.SetBans(bans)
-			return id + " was unbanned.", nil
+			return a.unbanOn(r, in, id)
 		})
+		return
 	}
+	in := inst(r)
+	reply, err := a.unbanOn(r, in, id)
 	a.auditOutcome(r, in.ID(), "player.unban", id, err)
 	a.answerReply(w, r, reply, err)
+}
+
+// unbanOn lifts a player's ban on a server, as banOn bans them.
+func (a *API) unbanOn(r *http.Request, in *instance.Instance, id string) (string, error) {
+	if running(in) {
+		return in.Command(r.Context(), "unban "+id, from(r).user.Username)
+	}
+	return in.EditStopped(func(f *serverconfig.File) (string, error) {
+		bans := f.Bans()
+		n := len(bans)
+		bans = slices.DeleteFunc(bans, func(b serverconfig.Ban) bool { return b.ID == id })
+		if len(bans) == n {
+			return "", errors.New("that SteamID64 is not banned")
+		}
+		f.SetBans(bans)
+		return id + " was unbanned.", nil
+	})
 }
 
 // answerReply answers a change made by a console command or to the config

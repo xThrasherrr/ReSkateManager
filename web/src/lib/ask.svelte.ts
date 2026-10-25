@@ -5,15 +5,19 @@ export interface Question {
 	action: string;
 	/** Red, for what can't be taken back or cuts players off; the default. */
 	danger?: boolean;
+	/** A box to tick before going ahead, such as "On every server" (askTicked). */
+	tick?: string;
 }
 
 /** The one question on screen, answered by the dialog in the root layout. */
 class Asker {
 	question = $state.raw<Question | null>(null);
+	ticked = $state(false);
 	#resolve: ((yes: boolean) => void) | null = null;
 
 	ask(q: Question): Promise<boolean> {
 		this.#resolve?.(false); // a question still open counts as a no
+		this.ticked = false;
 		this.question = q;
 		return new Promise((resolve) => (this.#resolve = resolve));
 	}
@@ -31,3 +35,6 @@ export const asker = new Asker();
 /** Asks before something that can't be taken back, or that cuts players off.
  * Resolves to whether they went ahead; closing the dialog is a no. */
 export const ask = (q: Question) => asker.ask(q);
+
+/** As ask, with q's box to tick if it has one: null for a no, else whether they ticked it. */
+export const askTicked = async (q: Question) => ((await asker.ask(q)) ? { ticked: asker.ticked } : null);

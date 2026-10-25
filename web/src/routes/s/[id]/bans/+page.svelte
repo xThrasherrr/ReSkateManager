@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api, message, type Admin } from '#lib/api.js';
 	import { useLive } from '#lib/context.js';
-	import { attempt } from '#lib/toast.svelte.js';
+	import { attempt, toastAnswer } from '#lib/toast.svelte.js';
 	import { newest } from '#lib/newest.js';
 	import { Busy } from '#lib/busy.svelte.js';
 	import { dateTime } from '#lib/format.js';
@@ -14,7 +14,8 @@
 	import LoadError from '#lib/components/LoadError.svelte';
 	import Pager from '#lib/components/Pager.svelte';
 	import SteamId from '#lib/components/SteamId.svelte';
-	import { ask } from '#lib/ask.svelte.js';
+	import { ask, askTicked } from '#lib/ask.svelte.js';
+	import { instances } from '#lib/instances.svelte.js';
 
 	interface Ban {
 		id: string;
@@ -56,19 +57,35 @@
 	onLine(ctx.live, /was (un)?banned|is (no longer )?an admin|^\S.* (is now [a-z0-9_-]+|is [a-z0-9_-]+ again|no longer has a role)\.$/, load);
 
 	const busy = new Busy();
+	// Other servers this user could ban on too.
+	const others = $derived(instances.list.filter((i) => i.id !== ctx.id && i.permissions?.includes('players.ban')).length);
+	type Answer = { reply?: string; results?: { name: string; error?: string }[] };
 
+	let everywhere = $state(false);
 	async function addBan(e: SubmitEvent) {
 		e.preventDefault();
-		const body = { id: banId.trim(), name: banName.trim() };
-		const r = await busy.run('ban', () => attempt(() => api.post<{ reply: string }>(`/instances/${ctx.id}/bans`, body), (r) => r.reply));
+		const body = { id: banId.trim(), name: banName.trim(), everywhere: everywhere && others > 0 };
+		const r = await busy.run('ban', () => attempt(() => api.post<Answer>(`/instances/${ctx.id}/bans`, body)));
 		if (r) {
+			toastAnswer(r, `${body.name || body.id} banned`);
 			banId = banName = '';
 			load();
 		}
 	}
 	async function unban(b: Ban) {
-		if (!(await ask({ title: `Unban ${b.name || b.id}?`, body: 'They can join this server again.', action: 'Unban', danger: false }))) return;
-		if (await busy.run(`unban:${b.id}`, () => attempt(() => api.del<{ reply: string }>(`/instances/${ctx.id}/bans/${b.id}`), (r) => r.reply))) load();
+		const go = await askTicked({
+			title: `Unban ${b.name || b.id}?`,
+			body: 'They can join this server again.',
+			action: 'Unban',
+			danger: false,
+			tick: others ? 'On every server that bans them' : undefined
+		});
+		if (!go) return;
+		const r = await busy.run(`unban:${b.id}`, () => attempt(() => api.del<Answer>(`/instances/${ctx.id}/bans/${b.id}${go.ticked ? '?everywhere=1' : ''}`)));
+		if (r) {
+			toastAnswer(r, `${b.name || b.id} unbanned`);
+			load();
+		}
 	}
 	async function addAdmin(e: SubmitEvent) {
 		e.preventDefault();
@@ -96,6 +113,13 @@
 			<form onsubmit={addBan} class="flex flex-col gap-2 border-b-2 border-line bg-sunken/40 px-4 py-3 sm:flex-row">
 				<input class="input font-mono" placeholder="SteamID64" aria-label="SteamID64 to ban" bind:value={banId} required />
 				<input class="input" placeholder="Name (optional)" aria-label="Their name (optional)" bind:value={banName} maxlength="64" />
+				{#if others}
+					<label class="inline-flex shrink-0 cursor-pointer items-center gap-2" title="Banned on every server you can ban on, where they aren't already">
+						<input type="checkbox" class="peer sr-only" bind:checked={everywhere} />
+						<span class="switch"></span>
+						<span class="text-sm text-muted">Every server</span>
+					</label>
+				{/if}
 				<button class="btn btn-danger shrink-0" disabled={!isSteamId(banId) || busy.is()}><Icon name="ban" size={14} /> {busy.is('ban') ? 'Banning…' : 'Ban'}</button>
 			</form>
 		{/if}

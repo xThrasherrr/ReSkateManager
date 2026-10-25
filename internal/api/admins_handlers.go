@@ -169,12 +169,38 @@ func (a *API) answerRole(w http.ResponseWriter, r *http.Request, reply string, e
 	a.answerReply(w, r, reply, err)
 }
 
-// roleResult is how giving a role went on one server.
-type roleResult struct {
+// serverResult is how a change made on every server went on one.
+type serverResult struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Reply string `json:"reply,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// errUnchanged is a server an everyServer change leaves out: it had nothing
+// to change.
+var errUnchanged = errors.New("nothing to change")
+
+// everyServer makes change on every server the caller holds perm on, audited
+// on each as action, and answers how it went where there was something to do.
+func (a *API) everyServer(w http.ResponseWriter, r *http.Request, perm, action, detail string, change func(*instance.Instance) (string, error)) {
+	results := []serverResult{}
+	for _, in := range a.Reg.List() {
+		if !from(r).perms.Can(perm, in.ID()) {
+			continue
+		}
+		reply, err := change(in)
+		if errors.Is(err, errUnchanged) {
+			continue
+		}
+		a.auditOutcome(r, in.ID(), action, detail, err)
+		res := serverResult{ID: in.ID(), Name: in.Def().Name, Reply: reply}
+		if err != nil {
+			res.Error = err.Error()
+		}
+		results = append(results, res)
+	}
+	writeJSON(w, 200, map[string]any{"results": results})
 }
 
 // setRole gives a player a role on this server, or on every server the user
@@ -204,22 +230,9 @@ func (a *API) setRole(w http.ResponseWriter, r *http.Request) {
 		a.answerRole(w, r, reply, err)
 		return
 	}
-	results := []roleResult{}
-	for _, other := range a.Reg.List() {
-		if !from(r).perms.Can(auth.IngameAdmins, other.ID()) {
-			continue
-		}
-		res := roleResult{ID: other.ID(), Name: other.Def().Name}
-		reply, err := a.giveRole(r, other, req.ID, req.Role)
-		a.auditOutcome(r, other.ID(), "role.give", req.ID+" "+req.Role, err)
-		if err != nil {
-			res.Error = err.Error()
-		} else {
-			res.Reply = reply
-		}
-		results = append(results, res)
-	}
-	writeJSON(w, 200, map[string]any{"results": results})
+	a.everyServer(w, r, auth.IngameAdmins, "role.give", req.ID+" "+req.Role, func(in *instance.Instance) (string, error) {
+		return a.giveRole(r, in, req.ID, req.Role)
+	})
 }
 
 // takeRole takes a player's role away on this server.
@@ -235,24 +248,35 @@ func (a *API) takeRole(w http.ResponseWriter, r *http.Request) {
 }
 
 // roleChange makes change to a server's roles in its data/roles.json, as the
-// server's own roles editor does (Instance.ChangeRoles).
-func (a *API) roleChange(w http.ResponseWriter, r *http.Request, action, detail string, change func(*serverconfig.File) (string, error)) {
+// server's own roles editor does (Instance.ChangeRoles): to this server's, or
+// everywhere, to those of every server the user manages admins on.
+func (a *API) roleChange(w http.ResponseWriter, r *http.Request, everywhere bool, action, detail string, change func(*serverconfig.File) (string, error)) {
+	by := from(r).user.Username
+	if everywhere {
+		a.everyServer(w, r, auth.IngameAdmins, action, detail, func(in *instance.Instance) (string, error) {
+			return in.ChangeRoles(r.Context(), by, change)
+		})
+		return
+	}
 	in := inst(r)
-	reply, err := in.ChangeRoles(r.Context(), from(r).user.Username, change)
+	reply, err := in.ChangeRoles(r.Context(), by, change)
 	a.auditOutcome(r, in.ID(), action, detail, err)
 	a.answerRole(w, r, reply, err)
 }
 
-// addServerRole adds a role to a server (ReSkate 2.0.6), with the tag, colour and
-// rank given and what the default role has.
+// addServerRole adds a role to a server (ReSkate 2.0.6), or to every server,
+// with the tag, colour and rank given and what the default role has.
 func (a *API) addServerRole(w http.ResponseWriter, r *http.Request) {
-	var req serverconfig.RoleLook
+	var req struct {
+		serverconfig.RoleLook
+		Everywhere bool `json:"everywhere"`
+	}
 	if !readJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
-	a.roleChange(w, r, "role.create", req.Name, func(f *serverconfig.File) (string, error) {
-		return "Added the " + req.Name + " role.", f.AddRole(req)
+	a.roleChange(w, r, req.Everywhere, "role.create", req.Name, func(f *serverconfig.File) (string, error) {
+		return "Added the " + req.Name + " role.", f.AddRole(req.RoleLook)
 	})
 }
 
@@ -263,15 +287,20 @@ func (a *API) editServerRole(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
-	a.roleChange(w, r, "role.edit", name, func(f *serverconfig.File) (string, error) {
+	a.roleChange(w, r, false, "role.edit", name, func(f *serverconfig.File) (string, error) {
 		return "Saved the " + name + " role.", f.EditRole(name, req)
 	})
 }
 
-// deleteServerRole deletes a role; its players are the default role again.
+// deleteServerRole deletes a role, or with ?everywhere=1 deletes it on every
+// server that has it; its players are the default role again.
 func (a *API) deleteServerRole(w http.ResponseWriter, r *http.Request) {
 	name, _ := pathParam(r, "role")
-	a.roleChange(w, r, "role.delete", name, func(f *serverconfig.File) (string, error) {
+	everywhere := r.URL.Query().Get("everywhere") == "1"
+	a.roleChange(w, r, everywhere, "role.delete", name, func(f *serverconfig.File) (string, error) {
+		if everywhere && !f.HasRole(name) {
+			return "", errUnchanged
+		}
 		n, err := f.DeleteRole(name)
 		if err != nil || n == 0 {
 			return "Deleted the " + name + " role.", err

@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { api, type Admin, type RoleList, type ServerRole } from '#lib/api.js';
-	import { ask } from '#lib/ask.svelte.js';
+	import { ask, askTicked } from '#lib/ask.svelte.js';
 	import { Busy } from '#lib/busy.svelte.js';
 	import { useLive } from '#lib/context.js';
 	import { steamProfile } from '#lib/format.js';
 	import { instances } from '#lib/instances.svelte.js';
 	import { allItCanUse, canUse, giveable, maxRoleRank, maxRoleTag, maxRoles, validRoleName } from '#lib/roles.js';
 	import { hexColour, isSteamId, utf8Length } from '#lib/text.js';
-	import { attempt, toast } from '#lib/toast.svelte.js';
+	import { attempt, toastAnswer } from '#lib/toast.svelte.js';
 	import ColourInput from './ColourInput.svelte';
 	import Icon from './Icon.svelte';
 	import Modal from './Modal.svelte';
@@ -21,8 +21,10 @@
 	const ctx = useLive();
 	const busy = new Busy();
 	const given = $derived(roles.roles.reduce((n, r) => n + r.players.length, 0));
-	// Other servers this user could give the role on too.
+	// Other servers this user could make the change on too.
 	const others = $derived(instances.list.filter((i) => i.id !== ctx.id && i.permissions?.includes('ingame.admins.manage')).length);
+	// A change's answer: this server's reply, or how it went on every server.
+	type Answer = { reply?: string; results?: { name: string; error?: string }[] };
 
 	// Give a role: to whom, which, and on every server the user manages admins on.
 	let giveId = $state('');
@@ -31,15 +33,9 @@
 	async function giveRole(e: SubmitEvent) {
 		e.preventDefault();
 		const body = { id: giveId.trim(), role: giveName, everywhere: everywhere && others > 0 };
-		const r = await busy.run('give', () =>
-			attempt(() => api.post<{ reply?: string; results?: { name: string; reply?: string; error?: string }[] }>(`/instances/${ctx.id}/roles/players`, body))
-		);
+		const r = await busy.run('give', () => attempt(() => api.post<Answer>(`/instances/${ctx.id}/roles/players`, body)));
 		if (!r) return;
-		if (r.results) {
-			const done = r.results.filter((x) => !x.error);
-			if (done.length) toast.ok(`${body.role} given on ${done.map((x) => x.name).join(', ')}.`);
-			for (const x of r.results.filter((x) => x.error)) toast.error(`${x.name}: ${x.error}`);
-		} else if (r.reply) toast.ok(r.reply);
+		toastAnswer(r, `${body.role} given`);
 		giveId = '';
 		onchange();
 	}
@@ -53,6 +49,8 @@
 	let editing = $state('');
 	let open = $state(false);
 	let form = $state({ name: '', tag: '', color: '#FFFFFF', rank: 0 });
+	// A new role made on every server the user manages admins on, too.
+	let addEverywhere = $state(false);
 	function edit(r?: ServerRole) {
 		editing = r?.name ?? '';
 		form = { name: r?.name ?? '', tag: r?.tag ?? '', color: r?.color || '#FFFFFF', rank: r?.rank ?? 0 };
@@ -61,7 +59,7 @@
 	const problem = $derived.by(() => {
 		const name = form.name.trim().toLowerCase();
 		if (!editing && !validRoleName(name)) return 'The name is 1 to 24 lowercase letters, digits, - or _, and not none.';
-		if (!editing && roles.roles.some((r) => r.name === name)) return 'The server has a role by that name already.';
+		if (!editing && !addEverywhere && roles.roles.some((r) => r.name === name)) return 'The server has a role by that name already.';
 		if (utf8Length(form.tag.trim()) > maxRoleTag) return `A title is at most ${maxRoleTag} letters.`;
 		if (!hexColour.test(form.color)) return 'The colour is like #FF74C6.';
 		if (!Number.isInteger(form.rank) || form.rank < 0 || form.rank > maxRoleRank) return `The rank is 0 to ${maxRoleRank}.`;
@@ -70,12 +68,16 @@
 	async function save() {
 		const look = { tag: form.tag.trim(), color: form.color, rank: form.rank };
 		const path = `/instances/${ctx.id}/roles`;
+		const name = form.name.trim().toLowerCase();
 		const done = await busy.run('save', () =>
-			editing
-				? attempt(() => api.patch<{ reply: string }>(`${path}/${encodeURIComponent(editing)}`, look), (r) => r.reply)
-				: attempt(() => api.post<{ reply: string }>(path, { name: form.name.trim().toLowerCase(), ...look }), (r) => r.reply)
+			attempt(() =>
+				editing
+					? api.patch<Answer>(`${path}/${encodeURIComponent(editing)}`, look)
+					: api.post<Answer>(path, { name, ...look, everywhere: addEverywhere && others > 0 })
+			)
 		);
 		if (done) {
+			toastAnswer(done, `Added the ${name} role`);
 			open = false;
 			onchange();
 		}
@@ -92,8 +94,14 @@
 		const n = r.players.length;
 		const who = n === 1 ? 'The player who has it is' : `The ${n} players who have it are`;
 		const body = !n ? 'Nobody has it.' : roles.default ? `${who} ${roles.default} again.` : `${who} given no role.`;
-		if (!(await ask({ title: `Delete the ${r.name} role?`, body, action: 'Delete' }))) return;
-		if (await busy.run(`del:${r.name}`, () => attempt(() => api.del<{ reply: string }>(`/instances/${ctx.id}/roles/${encodeURIComponent(r.name)}`), (x) => x.reply))) onchange();
+		const go = await askTicked({ title: `Delete the ${r.name} role?`, body, action: 'Delete', tick: others ? 'On every server that has it' : undefined });
+		if (!go) return;
+		const path = `/instances/${ctx.id}/roles/${encodeURIComponent(r.name)}${go.ticked ? '?everywhere=1' : ''}`;
+		const done = await busy.run(`del:${r.name}`, () => attempt(() => api.del<Answer>(path)));
+		if (done) {
+			toastAnswer(done, `Deleted the ${r.name} role`);
+			onchange();
+		}
 	}
 </script>
 
@@ -211,6 +219,13 @@
 		</label>
 		{#if form.tag.trim()}
 			<p class="flex items-center gap-2 text-sm text-muted">In the game: <RoleTag tag={form.tag.trim()} color={form.color} /></p>
+		{/if}
+		{#if !editing && others}
+			<label class="inline-flex cursor-pointer items-center gap-2" title="Added wherever there's no role of that name yet; the rest say so">
+				<input type="checkbox" class="peer sr-only" bind:checked={addEverywhere} />
+				<span class="switch"></span>
+				<span class="text-sm text-muted">On every server</span>
+			</label>
 		{/if}
 		{#if problem}<p class="text-xs text-bad">{problem}</p>{/if}
 	</div>

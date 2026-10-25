@@ -587,3 +587,84 @@ func TestEditServerRoles(t *testing.T) {
 		t.Errorf("a viewer added a role: %d", code)
 	}
 }
+
+// Roles and bans made and lifted on every server at once, here stopped: one
+// without the role, or where the ban already holds, is left out, and so is
+// one the user may not change. A new server can take them all.
+func TestRolesAndBansEverywhere(t *testing.T) {
+	p, a := newBackupPanel(t)
+	in, _ := a.Reg.Get("a")
+	const roles = `{"default_role": "player", "roles": [{"name": "player"}, {"name": "admin", "commands": ["*"]}], "players": {}}`
+	writeFile(t, in.Def().ConfigPath(), `{"server": {"name": "A"}}`)
+	writeFile(t, filepath.Join(in.Def().Dir, serverconfig.RolesFile), roles)
+	b := instance.Def{ID: "b", Name: "B", Dir: filepath.Join(t.TempDir(), "b")}
+	writeFile(t, b.ConfigPath(), `{"server": {"name": "B"}}`)
+	writeFile(t, filepath.Join(b.Dir, serverconfig.RolesFile), roles)
+	a.Reg.Add(b)
+	everywhere := func(method, path, body string) map[string]string {
+		t.Helper()
+		code, out := p.do(method, path, body)
+		var res struct {
+			Results []struct{ ID, Error string }
+		}
+		if json.Unmarshal(out, &res); code != 200 {
+			t.Fatalf("%s %s: %d %s", method, path, code, out)
+		}
+		got := map[string]string{}
+		for _, r := range res.Results {
+			got[r.ID] = r.Error
+		}
+		return got
+	}
+	hasRole := func(dir, role string) bool {
+		f, err := serverconfig.Read(filepath.Join(dir, "ReSkateServer.json"))
+		return err == nil && f.HasRole(role)
+	}
+
+	if got := everywhere("POST", "/api/instances/a/roles", `{"name": "OG", "tag": "OG", "everywhere": true}`); len(got) != 2 || got["a"] != "" || got["b"] != "" ||
+		!hasRole(in.Def().Dir, "og") || !hasRole(b.Dir, "og") {
+		t.Errorf("create everywhere: %v", got)
+	}
+	if code, out := p.do("DELETE", "/api/instances/a/roles/og", ""); code != 200 || hasRole(in.Def().Dir, "og") || !hasRole(b.Dir, "og") {
+		t.Errorf("delete here: %d %s", code, out)
+	}
+	if got := everywhere("DELETE", "/api/instances/a/roles/og?everywhere=1", ""); len(got) != 1 || got["b"] != "" || hasRole(b.Dir, "og") {
+		t.Errorf("delete everywhere: %v", got)
+	}
+
+	const ban = `{"id": "76561198000000005", "name": "Griefer", "everywhere": true}`
+	if got := everywhere("POST", "/api/instances/a/bans", ban); len(got) != 2 || got["a"] != "" || got["b"] != "" {
+		t.Errorf("ban everywhere: %v", got)
+	}
+	if got := everywhere("POST", "/api/instances/a/bans", ban); len(got) != 0 {
+		t.Errorf("banned again: %v", got)
+	}
+
+	// A new server takes the roles and who has them, and the bans.
+	everywhere("POST", "/api/instances/b/roles", `{"name": "og", "everywhere": true}`)
+	p.do("POST", "/api/instances/b/roles/players", `{"id": "76561198000000003", "role": "og"}`)
+	code, out := p.do("POST", "/api/instances", `{"name": "C", "roles": true, "bans": true}`)
+	var c struct{ ID string }
+	if json.Unmarshal(out, &c); code != http.StatusCreated {
+		t.Fatalf("create: %d %s", code, out)
+	}
+	nc, _ := a.Reg.Get(c.ID)
+	f, err := serverconfig.Read(nc.Def().ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, given, _ := f.Roles(); !f.HasRole("og") || !f.HasRole("admin") || given["76561198000000003"] != "og" ||
+		len(f.Bans()) != 1 || f.Bans()[0].Name != "Griefer" {
+		t.Errorf("new server: roles %v, bans %v", given, f.Bans())
+	}
+
+	// A moderator of a alone lifts the ban there, not on b.
+	p.createUser("mod", fmt.Sprintf(`{"roleId":%d,"instance":"a"}`, p.roleID("Moderator")))
+	p.signIn("mod")
+	if got := everywhere("DELETE", "/api/instances/a/bans/76561198000000005?everywhere=1", ""); len(got) != 1 || got["a"] != "" {
+		t.Errorf("unban everywhere: %v", got)
+	}
+	if f, _ := serverconfig.Read(b.ConfigPath()); len(f.Bans()) != 1 {
+		t.Errorf("b's bans: %v", f.Bans())
+	}
+}
