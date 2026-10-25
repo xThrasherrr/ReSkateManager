@@ -5,12 +5,14 @@
 	import { useLive } from '#lib/context.js';
 	import { steamProfile } from '#lib/format.js';
 	import { instances } from '#lib/instances.svelte.js';
+	import { Paged } from '#lib/paged.svelte.js';
 	import { allItCanUse, canUse, giveable, maxRoleRank, maxRoleTag, maxRoles, validRoleName } from '#lib/roles.js';
 	import { hexColour, isSteamId, utf8Length } from '#lib/text.js';
 	import { attempt, toastAnswer } from '#lib/toast.svelte.js';
 	import ColourInput from './ColourInput.svelte';
 	import Icon from './Icon.svelte';
 	import Modal from './Modal.svelte';
+	import Pager from './Pager.svelte';
 	import RoleTag from './RoleTag.svelte';
 
 	// A server's roles (ReSkate 2.0.6, data/roles.json) and who has each: give
@@ -25,6 +27,33 @@
 	const others = $derived(instances.list.filter((i) => i.id !== ctx.id && i.permissions?.includes('ingame.admins.manage')).length);
 	// A change's answer: this server's reply, or how it went on every server.
 	type Answer = { reply?: string; results?: { name: string; error?: string }[] };
+
+	// How the roles are listed, the viewer's choice, kept in this browser.
+	const sorts: Record<string, { label: string; by?: (a: ServerRole, b: ServerRole) => number }> = {
+		file: { label: 'As the server lists them' },
+		rank: { label: 'Highest rank first', by: (a, b) => b.rank - a.rank },
+		name: { label: 'By name', by: (a, b) => a.name.localeCompare(b.name) },
+		players: { label: 'Most players first', by: (a, b) => b.players.length - a.players.length }
+	};
+	let sort = $state('file');
+	try {
+		const s = localStorage.getItem('rsm.roleSort');
+		if (s && s in sorts) sort = s;
+	} catch {
+		// No storage here: as the server lists them.
+	}
+	function keepSort() {
+		try {
+			localStorage.setItem('rsm.roleSort', sort);
+		} catch {
+			// Not kept: it lasts until the page is left.
+		}
+	}
+	const sorted = $derived.by(() => {
+		const by = sorts[sort]?.by;
+		return by ? [...roles.roles].sort(by) : roles.roles;
+	});
+	const paged = new Paged('roles', () => sorted);
 
 	// Give a role: to whom, which, and on every server the user manages admins on.
 	let giveId = $state('');
@@ -114,7 +143,12 @@
 				a player's name. A new role has what the default role has; README-roles.txt beside the server lists the commands and permissions a role can get.
 			</p>
 		</div>
-		<button class="btn btn-sm shrink-0" disabled={roles.roles.length >= maxRoles || busy.is()} onclick={() => edit()}><Icon name="plus" size={14} /> New role</button>
+		<div class="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
+			<select class="input h-7 w-auto py-0 text-xs" aria-label="Sort the roles" bind:value={sort} onchange={keepSort}>
+				{#each Object.entries(sorts) as [key, s] (key)}<option value={key}>{s.label}</option>{/each}
+			</select>
+			<button class="btn btn-sm" disabled={roles.roles.length >= maxRoles || busy.is()} onclick={() => edit()}><Icon name="plus" size={14} /> New role</button>
+		</div>
 	</div>
 	<form onsubmit={giveRole} class="flex flex-col gap-2 border-b-2 border-line bg-sunken/40 px-4 py-3 sm:flex-row sm:items-center">
 		<input class="input font-mono" list="role-players" placeholder="SteamID64" aria-label="SteamID64 to give a role" bind:value={giveId} required />
@@ -136,7 +170,7 @@
 		<table class="table">
 			<thead><tr><th>Role</th><th class="hidden md:table-cell">Rank</th><th class="hidden sm:table-cell">Can use</th><th>Players</th><th></th></tr></thead>
 			<tbody>
-				{#each roles.roles as r (r.name)}
+				{#each paged.shown as r (r.name)}
 					<tr>
 						<td class="whitespace-nowrap">
 							<span class="font-medium">{r.name}</span>
@@ -189,6 +223,7 @@
 			</tbody>
 		</table>
 	</div>
+	<Pager {paged} label="Roles to show" />
 </section>
 
 <Modal bind:open title={editing ? `The ${editing} role` : 'New role'}>
