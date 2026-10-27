@@ -296,3 +296,34 @@ func TestMeaningful(t *testing.T) {
 		}
 	}
 }
+
+// A server plugin's lines are written by Host::log (2.1.2); the manager's
+// plugins hear the server's through them, so a new shape of them is breaking.
+func TestCheckPluginLog(t *testing.T) {
+	src := `void Host::console(std::string_view text) { environment_.console(text); }
+void Host::log(std::string_view plugin, LogLevel level, std::string_view text) {
+    environment_.log(level, std::format("[{}] {}", plugin, text));
+}
+std::string Host::level() { return "x"; }`
+	if got := pluginLog(src); got != "[{}] {}" {
+		t.Fatalf("pluginLog = %q", got)
+	}
+	logs := &upstream{strings: map[string]bool{"[Plugins] ": true}, pluginLog: "[{}] {}"}
+	for _, c := range []struct {
+		old, cur *upstream
+		breaking bool
+	}{
+		{&upstream{}, logs, false},
+		{logs, logs, false},
+		{logs, &upstream{strings: logs.strings, pluginLog: "[plugin {}] {}"}, true},
+		{logs, &upstream{strings: map[string]bool{"[plugins] ": true}, pluginLog: "[{}] {}"}, true},
+		{logs, &upstream{}, true},
+		{&upstream{}, &upstream{}, false}, // before 2.1.2
+	} {
+		r := &report{old: c.old, cur: c.cur}
+		r.checkPluginLog()
+		if len(r.Breaking) > 0 != c.breaking {
+			t.Errorf("%q to %q: breaking %q", c.old.pluginLog, c.cur.pluginLog, r.Breaking)
+		}
+	}
+}

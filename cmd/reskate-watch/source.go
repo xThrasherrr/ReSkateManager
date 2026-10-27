@@ -29,7 +29,10 @@ type upstream struct {
 	lines    map[string]bool     // how the lines the server logs start: the first literal it logs
 	tagLines map[string]string   // of those, the ones that add to a tag's bracket, each with a line it writes
 	selfRuns map[string]string   // where the server logs the answer to a command it runs itself, by file
-	readme   string
+	// pluginLog is the format Host::log writes a server plugin's reskate.log
+	// lines with (Extension/Plugins/plugin_host.cpp), "" before 2.1.2.
+	pluginLog string
+	readme    string
 }
 
 func (r *report) loadSource(ctx context.Context, src, was string) error {
@@ -102,6 +105,9 @@ func readUpstream(src, tag string) (*upstream, error) {
 		}
 	}
 	u.all = strings.Join(slices.Sorted(maps.Keys(u.strings)), "\x00")
+	if text, err := git(src, "show", tag+":Extension/Plugins/plugin_host.cpp"); err == nil {
+		u.pluginLog = pluginLog(text)
+	}
 	u.readme, _ = git(src, "show", tag+":Server/README.txt")
 	return u, nil
 }
@@ -206,8 +212,30 @@ func (r *report) checkSource(use *usage) {
 		}
 	}
 	r.checkReserved()
+	r.checkPluginLog()
 
 	r.sourceDetails()
+}
+
+// checkPluginLog builds a server plugin's hello as the server logs it at To
+// and has the manager's parser read it: the manager's plugins hear the
+// server's through those lines (internal/logparse/bridge.go).
+func (r *report) checkPluginLog() {
+	const where = "Host::log in Extension/Plugins/plugin_host.cpp"
+	f := r.cur.pluginLog
+	if f == "" {
+		if r.old.pluginLog != "" {
+			r.Breaking = append(r.Breaking, "The source no longer has "+where+", which writes a server plugin's log lines: the manager's plugins hear the server's through them (internal/logparse/bridge.go)")
+		}
+		return
+	}
+	line := "[Plugins] " + strings.Replace(strings.Replace(f, "{}", "races", 1), "{}", "rsm hello", 1)
+	if _, ok := logparse.ParseBridge(line); !ok || !r.cur.strings["[Plugins] "] {
+		r.Breaking = append(r.Breaking, fmt.Sprintf("%s writes a server plugin's lines with %s now, so a plugin's hello may no longer be %s, which internal/logparse/bridge.go reads",
+			where, code(f), code(line)))
+		return
+	}
+	r.Checked = append(r.Checked, fmt.Sprintf("A server plugin's log lines (%s): %s, as the manager's plugins hear them.", where, code(f)))
 }
 
 // reservedLists are the manager's copies of the names the server's checks
@@ -343,6 +371,23 @@ func parsed(line string) bool {
 	e := logparse.Entry{Text: line}
 	logparse.Classify(&e)
 	return e.Kind != logparse.KindRaw
+}
+
+// pluginLogRe is where Host::log is defined.
+var pluginLogRe = regexp.MustCompile(`(?m)^void Host::log\(`)
+
+// pluginLog is the text Host::log formats a plugin's line with, "[{}] {}" for
+// its id and the text, or "" when the source has none.
+func pluginLog(src string) string {
+	m := pluginLogRe.FindStringIndex(src)
+	if m == nil {
+		return ""
+	}
+	var f strings.Builder
+	for _, l := range cppLiterals(body(src, m[0])) {
+		f.WriteString(l.text)
+	}
+	return f.String()
 }
 
 // tagLines finds the log calls whose line opens a tag's bracket and adds to
