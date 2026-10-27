@@ -38,8 +38,9 @@ var consolePerms = func() map[string]string {
 }()
 
 // ownerCommands are the console commands only owners may run: poll-run
-// (2.0.3) runs any command for the winning answer, as custom votes do.
-var ownerCommands = []string{"poll-run"}
+// (2.0.3) runs any command for the winning answer, as custom votes do, and
+// rsm speaks for the manager to the server's plugins (reskate.send).
+var ownerCommands = []string{"poll-run", "rsm"}
 
 // ConsolePerm is the permission a console line needs besides console.exec,
 // "" for none. A command the manager doesn't know needs settings.edit, so one

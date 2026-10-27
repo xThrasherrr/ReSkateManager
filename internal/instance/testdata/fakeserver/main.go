@@ -86,7 +86,8 @@ func main() {
 	}
 	players := map[string]string{}
 	banned := map[string]bool{}
-	keys := map[string]string{} // the server plugins' keys from the manager, by id
+	keys := map[string]string{}   // the server plugins' keys from the manager, by id
+	told := map[string][]string{} // the messages the manager sent them, by id
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
 		line := in.Text()
@@ -126,8 +127,12 @@ func main() {
 			id, rest, _ := strings.Cut(arg, " ")
 			if k, ok := strings.CutPrefix(rest, "key "); ok {
 				keys[id] = k
+			} else if b, err := base64.StdEncoding.DecodeString(rest); err == nil {
+				told[id] = append(told[id], string(b))
 			}
 			log("Ran by a plugin.")
+		case "told": // test hook: "told <id>", the messages the manager sent that plugin, joined by " | "
+			log(strings.Join(append([]string{"told"}, told[arg]...), " | "))
 		case "bridge": // test hook: "bridge <id> <json>", that plugin's message to the manager, with its key
 			id, data, _ := strings.Cut(arg, " ")
 			if keys[id] == "" {

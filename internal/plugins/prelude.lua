@@ -104,6 +104,14 @@ ui = api("ui", {"card"})
 -- with server.say.
 discord = api("discord", {"post"})
 
+-- reskate.send(server, plugin, data [, fn]) sends data, a table or a value,
+-- to a ReSkate plugin on the server, named by its id as a "reskate" event's
+-- e.plugin is: its console command "rsm <id>" gets it as JSON in base64,
+-- about 3 KB of JSON at most. Messages go apart from server.*'s, ten a
+-- second and 64 waiting at most; it needs reskate.send, and fn hears whether
+-- the server ran it, as with server.say.
+reskate = api("reskate", {"send"})
+
 -- require(name) runs one of the plugin's own files once and returns what it
 -- returned: "lib.util" is lib/util.lua in the plugin's folder.
 local loaded = {}

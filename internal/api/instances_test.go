@@ -285,8 +285,9 @@ func TestConsolePermissions(t *testing.T) {
 		}
 	}
 
-	// A kick vote is a kick; poll-run runs a command of its own, so it is
-	// the owners' even beside every other permission.
+	// A kick vote is a kick; poll-run runs a command of its own, and rsm
+	// speaks for the manager to the server's plugins, so they are the
+	// owners' even beside every other permission.
 	p.post("/api/auth/logout", `{}`)
 	p.post("/api/auth/login", `{"username":"owner","password":"`+testPassword+`"}`)
 	code, b = p.do("POST", "/api/roles", `{"name":"Everything","permissions":["console.view","console.exec","players.kick","players.chat","settings.edit"]}`)
@@ -302,6 +303,8 @@ func TestConsolePermissions(t *testing.T) {
 		"announce-to bob hi":                    400,
 		"poll-run tod {answer} | Time? | a | b": 403,
 		"POLL-RUN tod {answer} | Time? | a | b": 403,
+		"rsm races key ABCDEFGHIJKLMNOPQRSTUVW": 403,
+		"RSM races e30=":                        403,
 	} {
 		body, _ := json.Marshal(map[string]string{"line": line})
 		if code, b := p.do("POST", "/api/instances/a/command", string(body)); code != want {

@@ -31,7 +31,7 @@ func (a *API) command(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if verb := auth.OwnersCommand(line); verb != "" && !c.perms.Owner {
-		writeErr(w, 403, "only owners can run "+verb+": it runs a server command of its own")
+		writeErr(w, 403, "only owners can run "+verb)
 		return
 	}
 	reply, err := in.Command(r.Context(), line, c.user.Username)

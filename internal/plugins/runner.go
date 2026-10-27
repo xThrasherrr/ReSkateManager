@@ -73,11 +73,12 @@ type runner struct {
 	servers map[string]bool // nil for all of them
 	jobs    chan job
 	acts    chan action
+	tells   chan action     // reskate.send's, with a queue and rate of their own
 	ctx     context.Context // done once it stops
 	cancel  context.CancelFunc
 	quit    <-chan struct{} // ctx.Done()
 	done    chan struct{}
-	sent    chan struct{}                   // closed once send has returned
+	sending sync.WaitGroup                  // send, for acts and tells
 	want    atomic.Pointer[map[string]bool] // the events it has handlers for
 
 	cards        sync.WaitGroup     // the cards waiting their turn (uiCall)
@@ -104,8 +105,8 @@ type runner struct {
 }
 
 func newRunner(m *Manager, p *Plugin, man Manifest, rt *luavm.Runtime) *runner {
-	r := &runner{m: m, p: p, man: man, rt: rt, jobs: make(chan job, queueSize), acts: make(chan action, actionQueue), posts: make(chan post, maxPosts), done: make(chan struct{}),
-		sent: make(chan struct{}), tokens: logBurst, tokensAt: time.Now()}
+	r := &runner{m: m, p: p, man: man, rt: rt, jobs: make(chan job, queueSize), acts: make(chan action, actionQueue), tells: make(chan action, tellQueue), posts: make(chan post, maxPosts), done: make(chan struct{}),
+		tokens: logBurst, tokensAt: time.Now()}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	r.quit = r.ctx.Done()
 	r.cardCtx, r.cardCancel = context.WithCancel(r.ctx)
@@ -157,13 +158,14 @@ func (r *runner) stop() {
 
 func (r *runner) loop() {
 	defer close(r.done)
-	defer func() { <-r.sent }()
+	defer r.sending.Wait()
 	defer r.cards.Wait()
 	defer r.posting.Wait()
 	defer r.cancel() // ends send and the cards waiting when the plugin ends on its own
 	defer r.m.unlist(r)
 	defer r.reset()
-	go r.send()
+	r.sending.Go(func() { r.send(r.acts, actionRate, actionBurst) })
+	r.sending.Go(func() { r.send(r.tells, tellRate, tellBurst) })
 	r.take()
 	if err := r.m.data.load(r.p.ID); err != nil {
 		r.fail(Failed, "Its store didn't load: "+err.Error())
@@ -241,10 +243,12 @@ func (r *runner) reset() {
 	r.timers, r.handlers = nil, nil
 	r.want.Store(nil)
 	r.gen++
-	for len(r.acts) > 0 {
-		select {
-		case <-r.acts:
-		default:
+	for _, q := range []chan action{r.acts, r.tells} {
+		for len(q) > 0 {
+			select {
+			case <-q:
+			default:
+			}
 		}
 	}
 	r.vmMu.Lock()
@@ -544,6 +548,8 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 		return r.uiCall(name, args)
 	case "discord":
 		return r.discordCall(name, args)
+	case "reskate":
+		return r.reskateCall(name, args)
 	}
 	return nil, fmt.Errorf("no function %s", name)
 }

@@ -28,7 +28,12 @@ type Bridge struct {
 // characters, matched without case. The key is crypto/rand.Text's. The line
 // must match to its end, so a message cut at ReSkate's 2000 characters, or
 // one with a line after it, is no message.
-var bridgeRe = regexp.MustCompile(`^\[Plugins\] \[([A-Za-z0-9_-]{1,44})\] rsm (?:hello|([A-Z2-7]{26}) ([A-Za-z0-9+/]+={0,2}))$`)
+var bridgeRe = regexp.MustCompile(`^\[Plugins\] \[(` + bridgeID + `)\] rsm (?:hello|([A-Z2-7]{26}) ([A-Za-z0-9+/]+={0,2}))$`)
+
+const bridgeID = `[A-Za-z0-9_-]{1,44}`
+
+// BridgeIDRe is a ReSkate plugin's id the manager's plugins can send to.
+var BridgeIDRe = regexp.MustCompile(`^` + bridgeID + `$`)
 
 // BridgeDepth is how many tables deep a message may go: a plugin's event
 // holds it, and the Lua bridge takes 16 at most.

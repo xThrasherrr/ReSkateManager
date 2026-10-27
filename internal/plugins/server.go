@@ -59,6 +59,7 @@ type action struct {
 	// roles, for server.makerole, changes data/roles.json in place of line;
 	// it says what it did, and what the audit log calls it.
 	roles func(*serverconfig.File) (reply, audit string, err error)
+	tell  string // for reskate.send, the ReSkate plugin line is the message to
 }
 
 // result is what came of an action, back on the runner's goroutine.
@@ -231,7 +232,7 @@ func (r *runner) serverCall(name string, args []any) ([]any, error) {
 			return nil, fmt.Errorf("bad argument #2 to '%s' (%v)", name, err)
 		}
 		if verb := auth.OwnersCommand(line); verb != "" {
-			return nil, fmt.Errorf("%s can't run %s: only owners can, since it runs a server command of its own", name, verb)
+			return nil, fmt.Errorf("%s can't run %s: only owners can", name, verb)
 		}
 		// As in the panel's console: console.exec, and what the line does.
 		if err := r.need(name, auth.ConsoleExec, a.server); err != nil {
@@ -406,25 +407,24 @@ func teleportWhere(call string, v any) (string, error) {
 }
 
 // send sends the plugin's commands, one at a time and a few a second, until
-// the runner stops. Each is audited as the plugin's, and what came of it goes
-// back to the runner.
-func (r *runner) send() {
-	defer close(r.sent)
-	tokens, at := actionBurst, time.Now()
+// the runner stops: those from queue, rate a second past burst at once. Each
+// is audited as the plugin's, and what came of it goes back to the runner.
+func (r *runner) send(queue <-chan action, rate, burst float64) {
+	tokens, at := burst, time.Now()
 	for {
 		var a action
 		select {
 		case <-r.quit:
 			return
-		case a = <-r.acts:
+		case a = <-queue:
 		}
 		now := time.Now()
-		tokens, at = min(actionBurst, tokens+now.Sub(at).Seconds()*actionRate), now
+		tokens, at = min(burst, tokens+now.Sub(at).Seconds()*rate), now
 		if tokens < 1 {
 			select {
 			case <-r.quit:
 				return
-			case <-time.After(time.Duration((1 - tokens) / actionRate * float64(time.Second))):
+			case <-time.After(time.Duration((1 - tokens) / rate * float64(time.Second))):
 			}
 			tokens, at = 1, time.Now()
 		}
@@ -432,13 +432,16 @@ func (r *runner) send() {
 		ctx, cancel := context.WithTimeout(r.ctx, actionTime)
 		var reply string
 		var err error
-		if a.roles != nil {
+		switch {
+		case a.roles != nil:
 			reply, err = a.in.ChangeRoles(ctx, "plugin:"+r.p.ID, func(f *serverconfig.File) (string, error) {
 				reply, audit, err := a.roles(f)
 				a.audit = audit
 				return reply, err
 			})
-		} else {
+		case a.tell != "":
+			reply, err = a.in.Tell(ctx, a.tell, a.line)
+		default:
 			reply, err = a.in.Command(ctx, a.line, "plugin:"+r.p.ID)
 		}
 		cancel()
@@ -500,8 +503,10 @@ func (r *runner) finish(a action, reply string, err error) bool {
 	if err != nil {
 		detail += " (failed: " + err.Error() + ")"
 	}
-	if err := r.m.Store.Audit(context.Background(), store.AuditEntry{Username: "plugin:" + r.p.ID, Instance: a.server, Action: a.audit, Detail: detail}); err != nil {
-		r.m.Log.Warn("audit write failed", "err", err)
+	if a.audit != "" { // "" for a message to a ReSkate plugin: data, not an act
+		if err := r.m.Store.Audit(context.Background(), store.AuditEntry{Username: "plugin:" + r.p.ID, Instance: a.server, Action: a.audit, Detail: detail}); err != nil {
+			r.m.Log.Warn("audit write failed", "err", err)
+		}
 	}
 	return r.hand(a, reply, err)
 }

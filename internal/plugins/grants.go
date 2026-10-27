@@ -22,12 +22,17 @@ type Grant struct {
 	Calls []string `json:"calls"`
 }
 
-// DiscordPost is the one grant that isn't a panel permission: it lets a
-// plugin post to Discord webhooks it names, its only way to the network.
-const DiscordPost = "discord.post"
+// The grants that aren't panel permissions. DiscordPost lets a plugin post
+// to Discord webhooks it names, its only way to the network; ReSkateSend
+// lets it send messages to ReSkate plugins on its servers, which may act on
+// them as the manager's word.
+const (
+	DiscordPost = "discord.post"
+	ReSkateSend = "reskate.send"
+)
 
 // Grants are the panel's own permissions that plugins can be given, on the
-// servers they run on, and DiscordPost. A plugin's plugin.toml asks for them,
+// servers they run on, and the two above. A plugin's plugin.toml asks for them,
 // and the owner grants them on its card; nothing is granted until then.
 var Grants = func() []Grant {
 	g := []Grant{
@@ -39,6 +44,7 @@ var Grants = func() []Grant {
 		// server.command's lines need what the panel's console asks of them.
 		{Key: auth.SettingsEdit, Calls: []string{"server.command"}},
 		{Key: DiscordPost, Label: "Post to Discord webhooks", Calls: []string{"discord.post"}},
+		{Key: ReSkateSend, Label: "Talk to ReSkate plugins", Calls: []string{"reskate.send"}},
 	}
 	for i := range g {
 		if g[i].Label == "" {

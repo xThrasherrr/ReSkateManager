@@ -81,6 +81,12 @@ func (in *Instance) bridgeLocked(text string) bool {
 	return true
 }
 
+// Tell sends a ReSkate plugin on the server a message from the manager's
+// plugins, to its console command "rsm <id>", out of the console's view.
+func (in *Instance) Tell(ctx context.Context, plugin, msg string) (string, error) {
+	return in.send(ctx, "rsm "+plugin+" "+msg, "", true, nil)
+}
+
 // sendKey hands a ReSkate plugin its key. One that doesn't get it, as the
 // server is still starting, says hello again.
 func (in *Instance) sendKey(plugin, key string) {

@@ -298,6 +298,7 @@ What a plugin can call:
 | `stats.around(board, steamId [, {server, period, limit}])` | The players about a player's place (5, or up to 100), theirs in the middle where there's room |
 | `ui.card(id, steamId or "all", card)` | Shows one player, or everyone, a card at the top of the screen: `card` is text, or `{title =, lines = {...}}` |
 | `discord.post(webhook, card)` | Posts a card to a Discord channel through one of its webhooks, as a message with the title on top and each line under it |
+| `reskate.send(id, plugin, data)` | Sends a ReSkate plugin on the server a message: `data` is a table or a value, as JSON has them (see below) |
 
 A board covers all your servers: a sum adds a player's scores up from every server, a best takes their highest and a fastest their lowest. `{server = id}` reads one server's instead, and `{period = "month"}` or `{period = "week"}` this calendar month or the week from Monday instead of all time, each from midnight on the manager's clock (in Docker, UTC unless `TZ` is set). Players with the same score share a rank, whoever got there first listed first. Every plugin can read `playtime`, a board of everyone's time on your servers, from the panel's own record of visits. A board belongs to the plugin that defined it first: only that one adds to it, its `keep` can't change, and every plugin reads it. `public` lets a board out of the panel: `GET /api/boards` gives `playtime` and every public board across all your servers, each with its first players' `rank`, `name` and `value` and no SteamIDs, to anyone signed in with `players.view` on all servers, such as a website's read-only panel user. It takes `?server=` for one server's boards, `?period=all|month|week` and `?limit=` (10, up to 100).
 
@@ -323,11 +324,13 @@ Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` 
 
 A ReSkate plugin on a server (ReSkate 2.1.2 on) talks to the manager's plugins through the server's log, as it has no other way out of a dedicated server. It adds a console command named `rsm` and its id, and says `reskate.log("rsm hello")` as it starts, and again every 10 seconds until the manager answers by running `rsm <id> key <key>`. Then each message is `reskate.log("rsm " .. key .. " " .. base64(json))`: one line of 2000 characters at most, its JSON 8 tables deep at most, and 50 lines a second across everything the plugin logs. ReSkate has no base64, so the plugin brings its own: the standard alphabet, with or without the `=` padding. The key is new each time the server starts, and goes only to that plugin's command: any plugin can print a line that looks like another's, so a message without its plugin's key is dropped, and the server's console notes the first. Messages and keys stay out of the console.
 
+The manager's plugins answer with `reskate.send(e.server, e.plugin, data)`, which runs `rsm <id> <base64 json>` on the server, also out of the console's view; the base64 is padded. A message holds about 3 KB of JSON (a console line holds 4096 bytes) and goes 8 tables deep at most. A table whose keys are 1 to n goes as a list, any other as an object, and an empty one as `{}`. Only the server's console can run a plugin's command, not an admin in the game, and only owners can type `rsm` in the panel's console, so a message on that command is the manager's.
+
 ```lua
 -- In the ReSkate plugin's server copy ("side": "server", with the console permission)
 local key
 reskate.console.command("rsm " .. reskate.id:lower(), "The manager's messages", function(args)
-  if args[1] == "key" then key = args[2] end
+  if args[1] == "key" then key = args[2] else on_message(reskate.json.decode(unbase64(args[1]))) end
 end)
 local function send(t) if key then reskate.log("rsm " .. key .. " " .. base64(reskate.json.encode(t))) end end
 ```
@@ -343,10 +346,13 @@ local function send(t) if key then reskate.log("rsm " .. key .. " " .. base64(re
 | `console.exec` | `server.teleport`, `server.command` |
 | `settings.edit` | `server.command` for lines that change settings |
 | `discord.post` | `discord.post` |
+| `reskate.send` | `reskate.send` |
 
-`server.command` needs what the panel's console asks of the person typing the line: `console.exec`, and for a line that kicks, bans, chats, gives roles or changes settings, that permission as well. Plugins can't run `poll-run`, `quit` or `update`. A call the plugin wasn't granted raises an error that says what to grant.
+`server.command` needs what the panel's console asks of the person typing the line: `console.exec`, and for a line that kicks, bans, chats, gives roles or changes settings, that permission as well. Plugins can't run `poll-run`, `rsm`, `quit` or `update`. A call the plugin wasn't granted raises an error that says what to grant.
 
-`discord.post` is the one permission that isn't the panel's own: it's a plugin's only way out to the network, and only to a Discord webhook's address (`https://discord.com/api/webhooks/...`), which the plugin names. Its lines show as written, with Discord's formatting escaped; its title isn't escaped, so put what players typed in the lines. It pings nobody, `@everyone` included. Posts go one at a time in the order made, waiting out Discord's rate, with up to 16 waiting; a function given last hears `fn(true, "Posted.")` or `fn(false, why)`. Each shows in the audit log as `plugin:<ID>`'s `plugin.discord`, without the webhook.
+`discord.post` isn't one of the panel's own permissions: it's a plugin's only way out to the network, and only to a Discord webhook's address (`https://discord.com/api/webhooks/...`), which the plugin names. Its lines show as written, with Discord's formatting escaped; its title isn't escaped, so put what players typed in the lines. It pings nobody, `@everyone` included. Posts go one at a time in the order made, waiting out Discord's rate, with up to 16 waiting; a function given last hears `fn(true, "Posted.")` or `fn(false, why)`. Each shows in the audit log as `plugin:<ID>`'s `plugin.discord`, without the webhook.
+
+`reskate.send` isn't the panel's own either. A ReSkate plugin takes what it gets as the manager's word, which may mean showing players a rank or acting for them, so grant it only to a plugin you trust to speak for the manager. Its messages queue apart from the plugin's other commands, 64 at most and ten a second, and they show in neither the server's console nor the audit log.
 
 Commands are sent after the call returns, in the order made, with the panel's: the call returns `true` once it's queued, or `false` and why when too many are waiting. A function given last is called with what came of it, `fn(ok, reply)`: `ok` is false when the server didn't get it, wasn't running or didn't know the command, and `reply` is the server's answer (which may say it couldn't, as "No single connected player matches ...") or why it failed. Without one, a command that failed goes in the plugin's log. Each command shows in the server's console and the audit log as `plugin:<ID>`'s.
 
