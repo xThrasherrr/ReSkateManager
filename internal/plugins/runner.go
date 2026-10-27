@@ -43,7 +43,8 @@ type job struct {
 	event   string
 	payload map[string]any
 	timer   int64
-	result  *result // what came of a command it sent
+	result  *result // what came of a command it sent, or of a call it made
+	call    *called // a call another plugin made of what it exposed
 }
 
 type timer struct {
@@ -79,6 +80,7 @@ type runner struct {
 	quit    <-chan struct{} // ctx.Done()
 	done    chan struct{}
 	sending sync.WaitGroup                  // send, for acts and tells
+	calls   atomic.Int32                    // its calls to other plugins waiting for answers
 	want    atomic.Pointer[map[string]bool] // the events it has handlers for
 
 	cards        sync.WaitGroup     // the cards waiting their turn (uiCall)
@@ -94,6 +96,8 @@ type runner struct {
 	vm   *luavm.VM
 
 	handlers  map[string][]luavm.Ref
+	serving   *called // the call its exposed function is answering
+	given     bool    // and whether it has given its answer
 	timers    map[int64]*timer
 	nextTimer int64
 	gen       uint64 // counts fresh starts, so a command's answer finds the Lua that sent it
@@ -162,6 +166,7 @@ func (r *runner) loop() {
 	defer r.cards.Wait()
 	defer r.posting.Wait()
 	defer r.cancel() // ends send and the cards waiting when the plugin ends on its own
+	defer r.refuseCalls()
 	defer r.m.unlist(r)
 	defer r.reset()
 	r.sending.Go(func() { r.send(r.acts, actionRate, actionBurst) })
@@ -266,6 +271,9 @@ func (r *runner) reset() {
 func (r *runner) handle(j job) bool {
 	if j.result != nil {
 		return r.answered(j.result)
+	}
+	if j.call != nil {
+		return r.serve(j.call)
 	}
 	if j.event != "" {
 		r.p.mu.Lock()
@@ -524,6 +532,12 @@ func (r *runner) answer(name string, args []any) ([]any, error) {
 		}
 		r.log(level, text)
 		return nil, nil
+	case "expose":
+		return nil, r.expose(arg(0), arg(1))
+	case "answer":
+		return nil, r.answerCall(arg(0))
+	case "call":
+		return r.callCall(args)
 	case "source":
 		mod, ok := arg(0).(string)
 		if !ok {

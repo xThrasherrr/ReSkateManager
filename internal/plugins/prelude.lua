@@ -112,6 +112,21 @@ discord = api("discord", {"post"})
 -- the server ran it, as with server.say.
 reskate = api("reskate", {"send"})
 
+-- expose(name, fn) offers fn to the manager's other plugins: one's
+-- call(plugin, name, args [, fn]) runs it as fn(e), with e.from that
+-- plugin's ID and e.args a copy of args, and what it returns is the answer,
+-- a copy too. Copies hold what JSON does, 8 tables deep at most. call
+-- returns true once queued, or false and why when the plugin isn't running,
+-- doesn't expose name or is too busy, and fn hears fn(true, answer), or
+-- fn(false, why) when it failed. A plugin may have 64 calls waiting.
+function expose(name, fn)
+  if type(fn) ~= "function" then
+    error("bad argument #2 to 'expose' (function expected, got " .. type(fn) .. ")", 2)
+  end
+  call("expose", name, function(e) call("answer", (fn(e))) end)
+end
+_ENV.call = function(...) return call("call", ...) end -- _ENV: call is the bridge's here
+
 -- require(name) runs one of the plugin's own files once and returns what it
 -- returned: "lib.util" is lib/util.lua in the plugin's folder.
 local loaded = {}

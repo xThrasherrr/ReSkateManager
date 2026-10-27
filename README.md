@@ -274,6 +274,8 @@ What a plugin can call:
 | `cancel(timer)` | Stops a timer; true if it was still going |
 | `log(...)`, `warn(...)` | Writes a line to the plugin's log: its card and `data/plugins.log`. `print` is `log` |
 | `require(name)` | Runs one of the plugin's own files once, `"lib.util"` being `lib/util.lua`, and returns what it returned |
+| `expose(name, fn)` | Lets the other plugins call `fn(e)` as `name`: `e.from` is the calling plugin's ID and `e.args` what it sent, and what `fn` returns is the answer |
+| `call(plugin, name, args, fn)` | Calls what another plugin exposed as `name`, and `fn(ok, answer)` hears the answer, or `fn(false, why)` |
 | `server.list()` | Each of the plugin's servers, as `server.info` gives it |
 | `server.info(id)` | A server: `id`, `name`, `state`, `players` (how many), and `map`, `slots` and `started_at` once known |
 | `server.players(id)` | Who is on it, first in first, each as `player.joined` gives them |
@@ -305,6 +307,8 @@ A board covers all your servers: a sum adds a player's scores up from every serv
 Boards are read from a snapshot, worked out again once something is added (a read waits up to 50 ms for it, then takes the one before) or once it's 30 seconds old. A read that can't be answered returns `nil` and why: `local rows, err = stats.top("wins")`. What plugins keep is written within a second, so a crash loses that second at most. Removing a plugin keeps its store and its boards, so adding it again brings them back.
 
 A plugin that replaces others, such as one made from two you ran before, says so in its `plugin.toml`: `takes = {cheers = "cheers."}`. As it starts, each one's store moves into its own, every key with the prefix given (64 bytes at most) before it, and their boards become its own. It doesn't start while one of them is still installed. A plugin whose keys can't all move, because the new one has one of them already or one would be longer than 256 bytes, keeps its store, and the log says why; the next start tries again.
+
+Plugins call each other through what they expose: `expose("rank", function(e) return ranks[e.args.id] end)` in one, and `call("tiers", "rank", {id = steamId}, function(ok, rank) ... end)` in another. A call doesn't wait: `call` returns `true` once it's queued, or `false` and why when the plugin isn't running, doesn't expose that name, or is too busy, and the answer comes to `fn` later, as a command's reply does. Arguments and answers are copies, holding what JSON does (no functions) 8 tables deep at most, so neither plugin can change the other's tables. A call that fails, or one still waiting when its plugin stops, is answered `fn(false, why)`; the failure goes in the called plugin's log. A plugin can have 64 calls waiting for answers, and `e.from` tells the called plugin who's asking, so it can refuse whoever it doesn't serve.
 
 A server shows one card at a time, whoever it's for, so cards wait their turn: the manager's own announcements first, then plugins' cards in the order they came, each once the card up now is down. That includes cards the server puts up itself, such as its timed announcements. A card waits a minute at most, and a plugin can have 16 waiting. Today's servers show a card as one line under their ANNOUNCEMENT title, its title and lines joined with " · " and cut at 200 bytes, for 6 to 15 seconds as it's longer, and not to a player with chat off or a menu open: a welcome is best sent some seconds after the join, with `after`.
 

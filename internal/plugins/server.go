@@ -65,7 +65,7 @@ type action struct {
 // result is what came of an action, back on the runner's goroutine.
 type result struct {
 	action
-	reply string
+	reply any // the server's reply, or what a call was answered
 	err   error
 }
 
