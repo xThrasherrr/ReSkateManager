@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 
 // Events are what on() takes: the server's notices, by these names.
 var Events = []string{
-	"player.joined", "player.left", "chat", "map", "state",
+	"player.joined", "player.left", "chat", "map", "state", "reskate",
 	"throwdown.placed", "throwdown.removed", "throwdown.joined", "throwdown.left", "throwdown.started",
 	"throwdown.quit", "throwdown.lead", "throwdown.scored", "throwdown.landed", "throwdown.missed",
 	"throwdown.finished",
@@ -55,6 +56,20 @@ func event(server string, n instance.Notice) (string, map[string]any) {
 	case instance.NoticeThrowdown:
 		throwdown(e, n.Throwdown)
 		return "throwdown." + n.Throwdown.Kind, e
+	case instance.NoticeReSkate:
+		e["plugin"] = n.Plugin
+		if n.Text == "" {
+			e["hello"] = true
+			return "reskate", e
+		}
+		d := json.NewDecoder(strings.NewReader(n.Text))
+		d.UseNumber()
+		var data any
+		if err := d.Decode(&data); err != nil {
+			return "", nil // logparse.ParseBridge passes only JSON
+		}
+		e["data"] = whole(data)
+		return "reskate", e
 	case instance.NoticeCommand:
 		e["name"] = n.Player.Name
 		if n.Player.ID != "" {
@@ -68,6 +83,28 @@ func event(server string, n instance.Notice) (string, map[string]any) {
 		return "command:" + n.Command, e
 	}
 	return "", nil
+}
+
+// whole gives JSON decoded with UseNumber its numbers back, each whole one
+// as an integer: JSON doesn't tell 1 from 1.0, and Lua prints a float's ".0".
+func whole(v any) any {
+	switch v := v.(type) {
+	case json.Number:
+		if i, err := v.Int64(); err == nil {
+			return i
+		}
+		f, _ := v.Float64()
+		return f
+	case []any:
+		for i, x := range v {
+			v[i] = whole(x)
+		}
+	case map[string]any:
+		for k, x := range v {
+			v[k] = whole(x)
+		}
+	}
+	return v
 }
 
 func putPlayer(e map[string]any, p instance.Player) {

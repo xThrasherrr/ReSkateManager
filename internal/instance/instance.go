@@ -91,9 +91,9 @@ type Notice struct {
 	Kind      string             // NoticeJoined, NoticeLeft, ...
 	Player    Player             // joined, left, chat and command; a chat's ID is "" when its name could be more than one
 	Leave     Leave              // left
-	Text      string             // chat: the message; command: what followed the word
+	Text      string             // chat: the message; command: what followed the word; reskate: the JSON, "" for a hello
 	Command   string             // command: the word a player typed, one of a plugin's
-	Plugin    string             // command: the plugin it's for
+	Plugin    string             // command: the plugin it's for; reskate: the ReSkate plugin it's from
 	Map       string             // map, and state: the map loaded
 	Throwdown logparse.Throwdown // throwdown
 	State     State              // state: now, and before
@@ -109,6 +109,7 @@ const (
 	NoticeMap       = "map"
 	NoticeState     = "state"
 	NoticeCommand   = "command"
+	NoticeReSkate   = "reskate" // a ReSkate plugin on the server, to the manager's plugins
 )
 
 // Why the roster let a player go when the server never said they left.
@@ -219,7 +220,8 @@ type Instance struct {
 	// cmdSem serialises commands so replies arrive in the order they were
 	// sent; a channel, so someone waiting for their turn can give up.
 	cmdSem chan struct{}
-	cards  cards // the server's one announcement card, which Announce waits for
+	cards  cards  // the server's one announcement card, which Announce waits for
+	bridge bridge // this run's ReSkate plugins that talk to the manager's plugins, by id
 	// reconciling is set while a roster check is asked for and not begun.
 	reconciling bool
 	// stops counts Stop calls, so a restart can tell another stop came.
@@ -417,6 +419,7 @@ func (in *Instance) startLocked() error {
 	in.readyAt = time.Time{}
 	in.wordsShown = false
 	in.maps = nil
+	in.bridge = nil // keys last as long as the process they were given to
 	in.state = Starting
 	if c, err := logfile.Open(filepath.Join(in.def.Dir, ConsoleLog)); err != nil {
 		in.managerLineLocked("Could not open " + ConsoleLog + ": " + err.Error())
@@ -832,6 +835,8 @@ func (in *Instance) handleLocked(e logparse.Entry) {
 			in.networkLocked(e.Text)
 		case e.Tag == "announcement":
 			in.sawCard(e.Text)
+		case e.Tag == "Plugins":
+			hidden = in.bridgeLocked(e.Text) || hidden
 		case e.Tag == "throwdown" && (in.OnThrowdown != nil || in.OnNotice != nil):
 			if t, ok := logparse.ParseThrowdown(e.Text, in.namesLocked()); ok {
 				if in.OnThrowdown != nil {

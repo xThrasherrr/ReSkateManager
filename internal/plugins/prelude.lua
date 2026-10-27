@@ -15,7 +15,8 @@ local function line(...)
 end
 
 -- on(event, fn) calls fn(e) each time event happens on one of the plugin's
--- servers: "player.joined", "player.left", "chat", "map", "state", or
+-- servers: "player.joined", "player.left", "chat", "map", "state",
+-- "reskate" (a message from a ReSkate plugin on the server), or
 -- "throwdown." and a kind ("throwdown.finished").
 function on(event, fn) call("on", event, fn) end
 

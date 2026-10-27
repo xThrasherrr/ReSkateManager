@@ -186,6 +186,26 @@ on("throwdown.finished", function(e) log("won", e.mode, e.results[1].name, e.res
 	}
 }
 
+// A ReSkate plugin's hello and messages, with JSON's whole numbers as Lua's
+// integers.
+func TestReSkateEvents(t *testing.T) {
+	m := newManager(t)
+	addPlugin(t, m, "hud", "", `
+on("reskate", function(e)
+  if e.hello then return log("hello", e.plugin, e.server) end
+  log("got", e.plugin, math.type(e.data.n), e.data.n, e.data.won[1], e.data.x, e.data.id, e.hello)
+end)`)
+	enable(t, m, "hud")
+	a := m.Notice("a")
+	a(instance.Notice{Kind: instance.NoticeReSkate, Plugin: "races"})
+	a(instance.Notice{Kind: instance.NoticeReSkate, Plugin: "races", Text: `{"n":3,"won":["Bea"],"x":1.5,"id":76561198000000001}`})
+	want := []string{"hello races a", "got races integer 3 Bea 1.5 76561198000000001 nil"}
+	waitFor(t, func() bool { return len(lines(m, "hud")) == len(want) })
+	if got := lines(m, "hud"); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestBadCalls(t *testing.T) {
 	m := newManager(t)
 	addPlugin(t, m, "typo", "", `

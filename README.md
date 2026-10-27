@@ -319,6 +319,18 @@ Events, each with `e.server`, the server's ID. Times are unix seconds, and `id` 
 | `map` | `map`, when everyone has loaded it |
 | `state` | `state` and `was`: `starting`, `running`, `stopping`, `stopped`, `crashed` or `updating`; `map` once known |
 | `throwdown.placed`, `.removed`, `.joined`, `.left`, `.started`, `.quit`, `.lead`, `.scored`, `.landed`, `.missed`, `.finished` | `kind`, `mode` (`jam`, `spot_battle`, `skate`), `leader` and `player` as `{name, id}`, and by kind `points`, `round`, `best`, `turn`, `queue`, `near`, `players` or `results` (each `{name, id, place, points, quit}`, or `landed` and `missed` for S.K.A.T.E.). Needs the server's **Log player activity** on |
+| `reskate` | `plugin`, the id of a ReSkate plugin on the server (its folder in `Plugins`), and `data`, what it sent; or `hello = true` and no `data` as it starts, to send it what it needs again |
+
+A ReSkate plugin on a server (ReSkate 2.1.2 on) talks to the manager's plugins through the server's log, as it has no other way out of a dedicated server. It adds a console command named `rsm` and its id, and says `reskate.log("rsm hello")` as it starts, and again every 10 seconds until the manager answers by running `rsm <id> key <key>`. Then each message is `reskate.log("rsm " .. key .. " " .. base64(json))`: one line of 2000 characters at most, its JSON 8 tables deep at most, and 50 lines a second across everything the plugin logs. ReSkate has no base64, so the plugin brings its own: the standard alphabet, with or without the `=` padding. The key is new each time the server starts, and goes only to that plugin's command: any plugin can print a line that looks like another's, so a message without its plugin's key is dropped, and the server's console notes the first. Messages and keys stay out of the console.
+
+```lua
+-- In the ReSkate plugin's server copy ("side": "server", with the console permission)
+local key
+reskate.console.command("rsm " .. reskate.id:lower(), "The manager's messages", function(args)
+  if args[1] == "key" then key = args[2] end
+end)
+local function send(t) if key then reskate.log("rsm " .. key .. " " .. base64(reskate.json.encode(t))) end end
+```
 
 `server.*` and `ui.*` calls name a server first, by its ID: an event's `e.server` is the one it happened on, and a plugin limited to some servers can't reach the others. Reading needs nothing. The other calls send a command, and each needs a permission the plugin asks for in `permissions` and an owner grants it on its card:
 

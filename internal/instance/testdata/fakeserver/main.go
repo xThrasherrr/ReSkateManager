@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -85,6 +86,7 @@ func main() {
 	}
 	players := map[string]string{}
 	banned := map[string]bool{}
+	keys := map[string]string{} // the server plugins' keys from the manager, by id
 	in := bufio.NewScanner(os.Stdin)
 	for in.Scan() {
 		line := in.Text()
@@ -119,6 +121,20 @@ func main() {
 			os.Exit(3)
 		case "emit": // test hook: a line of the server's own, as "emit [throwdown] ..."
 			log(arg)
+			log("ok")
+		case "rsm": // a server plugin's console command, "rsm <id> ...": "rsm <id> key <key>" keeps its key
+			id, rest, _ := strings.Cut(arg, " ")
+			if k, ok := strings.CutPrefix(rest, "key "); ok {
+				keys[id] = k
+			}
+			log("Ran by a plugin.")
+		case "bridge": // test hook: "bridge <id> <json>", that plugin's message to the manager, with its key
+			id, data, _ := strings.Cut(arg, " ")
+			if keys[id] == "" {
+				log("no key")
+				break
+			}
+			log("[Plugins] [" + id + "] rsm " + keys[id] + " " + base64.StdEncoding.EncodeToString([]byte(data)))
 			log("ok")
 		case "typed": // test hook: "typed <runs> <name> /<word> [text]", a player's chat command as the server logs it
 			runs, rest, _ := strings.Cut(arg, " ")
