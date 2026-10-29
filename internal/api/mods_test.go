@@ -200,7 +200,7 @@ func TestManageMods(t *testing.T) {
 	zw.Close()
 	var ts *httptest.Server
 	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if serveListing(w, r, ts.URL, `[{"full_name":"Sk8r-BBCity","package_url":"`+ts.URL+`/p/","versions":[
+		if serveListing(w, r, ts.URL, `[{"full_name":"Sk8r-BBCity","package_url":"`+ts.URL+`/p/","categories":["Maps","plugins"],"versions":[
 			{"version_number":"1.1.0","download_url":"`+ts.URL+`/package/download/Sk8r/BBCity/1.1.0/"}]}]`) {
 			return
 		}
@@ -224,7 +224,8 @@ func TestManageMods(t *testing.T) {
 	code, b := p.do("GET", "/api/instances/a/mods/updates", "")
 	var updates map[string]modUpdate
 	json.Unmarshal(b, &updates)
-	if u := updates["Sk8r-BBCity-1.0.0"]; code != 200 || len(updates) != 1 || u.Latest != "1.1.0" || !u.Newer {
+	// Plugins in any case, as the game matches it.
+	if u := updates["Sk8r-BBCity-1.0.0"]; code != 200 || len(updates) != 1 || u.Latest != "1.1.0" || !u.Newer || !u.Plugin {
 		t.Fatalf("updates: %d %s", code, b)
 	}
 

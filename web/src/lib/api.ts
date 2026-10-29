@@ -703,6 +703,7 @@ export interface ModUpdate {
 	url: string;
 	latest: string;
 	newer: boolean; // latest is newer than the installed version
+	plugin: boolean; // listed under Plugins, which ReSkate 2.1.3 needs before players' games run its plugin
 }
 
 /** The launcher profile a server shares (ReSkate 2.0.8): the maps it loads that Thunderstore has. */

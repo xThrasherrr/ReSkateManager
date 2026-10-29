@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/instance"
@@ -15,6 +16,9 @@ type modUpdate struct {
 	URL     string `json:"url"`
 	Latest  string `json:"latest"`
 	Newer   bool   `json:"newer"` // Latest is newer than the installed version
+	// Listed under Plugins: from ReSkate 2.1.3 players' games run a
+	// Thunderstore package's plugin only then (the server doesn't check).
+	Plugin bool `json:"plugin"`
 }
 
 // modUpdates matches the server's mods against Thunderstore, by folder. Mods
@@ -45,7 +49,8 @@ func (a *API) writeModUpdates(w http.ResponseWriter, r *http.Request, dir string
 			continue
 		}
 		latest := p.Latest().Number
-		out[m.Folder] = modUpdate{Package: p.FullName, URL: p.URL, Latest: latest, Newer: serverconfig.NewerVersion(latest, m.Version)}
+		plugin := slices.ContainsFunc(p.Categories, func(c string) bool { return strings.EqualFold(c, "Plugins") })
+		out[m.Folder] = modUpdate{Package: p.FullName, URL: p.URL, Latest: latest, Newer: serverconfig.NewerVersion(latest, m.Version), Plugin: plugin}
 	}
 	writeJSON(w, 200, out)
 }

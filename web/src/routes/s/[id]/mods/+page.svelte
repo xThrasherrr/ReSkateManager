@@ -84,6 +84,8 @@
 	const every = $derived(list?.everyRequired ?? []);
 	const ownReq = (mod: Mod) => !!mod.package && requires(required, mod.package);
 	const everyReq = (mod: Mod) => !!mod.package && requires(every, mod.package);
+	// On Thunderstore but not under Plugins: players' games (2.1.3) refuse its plugin, the server doesn't.
+	const notPlugin = (mod: Mod) => mod.plugin && updates[mod.folder]?.plugin === false;
 	// Everything players must have here: this server's, then every server's it doesn't have too, each with its mod here if there is one.
 	const requiredRows = $derived(
 		[...required.map((entry) => ({ entry, every: false })), ...every.filter((e) => !requires(required, e)).map((entry) => ({ entry, every: true }))].map((r) => ({
@@ -200,6 +202,11 @@
 		{#if mod.shared}<span class="sticker sticker-info" title="Linked from the shared mods, which update and delete it">Shared</span>{/if}
 		{#if mod.serverPlugin}<span class="sticker sticker-accent" title="The server runs its plugin too, while the mod is enabled (ReSkate's plugins)">Server plugin</span>
 		{:else if mod.plugin}<span class="sticker" title="A Luau plugin that players' games run (ReSkate's plugins)">Plugin</span>{/if}
+		{#if notPlugin(mod)}<span
+				class="sticker sticker-warn"
+				title="Thunderstore doesn't list it under Plugins, so players' games don't run its plugin (ReSkate 2.1.3){mod.serverPlugin ? '. The server still does' : ''}"
+				>Not a Thunderstore plugin</span
+			>{/if}
 		{#if pluginsHere && everyReq(mod)}<span class="sticker sticker-info" title="Every server requires it of players; change that in the mod browser">Required on every server</span>
 			<!-- Editors see it on the Require toggle. -->
 		{:else if pluginsHere && ownReq(mod) && !canUpload}<span class="sticker sticker-info" title="Players must have it to join; their game gets it as they join">Required</span>{/if}
@@ -255,7 +262,8 @@
 {#snippet controls(mod: Mod)}
 	{@const updating = uploads.pending(ctx.id, mod.folder)}
 	<div class="flex shrink-0 flex-wrap items-center gap-1.5">
-		{#if canUpload && pluginsHere && mod.plugin && mod.package && !everyReq(mod)}
+		<!-- Not offered for a package players' games won't run, but one already required can be taken off. -->
+		{#if canUpload && pluginsHere && mod.plugin && mod.package && !everyReq(mod) && (ownReq(mod) || !notPlugin(mod))}
 			<button
 				class="btn btn-sm"
 				aria-pressed={ownReq(mod)}
@@ -358,6 +366,9 @@
 							<span class="font-mono text-xs text-faint">{r.entry}</span>
 							{#if r.every}<span class="sticker sticker-info" title="Change it in the mod browser">Every server</span>{/if}
 							{#if r.mod}<span class="sticker" title="In this server's Mods{r.mod.serverPlugin ? ', and the server runs its plugin' : ''}">Installed here</span>{/if}
+							{#if r.mod && notPlugin(r.mod)}<span class="sticker sticker-warn" title="Thunderstore doesn't list it under Plugins, so players' games get it but don't run its plugin"
+									>Not a Thunderstore plugin</span
+								>{/if}
 							<span class="flex-1"></span>
 							{#if canUpload && !r.every}
 								<button
