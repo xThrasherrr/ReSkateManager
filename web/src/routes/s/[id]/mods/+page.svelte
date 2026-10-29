@@ -214,9 +214,13 @@
 			<span class="sticker {p.state === 'running' ? 'sticker-info' : 'sticker-warn'}">Plugin {p.state}</span>
 			{#if p.state === 'running'}<span>{p.mb?.toFixed(1) ?? 0} MB, {p.tickMs?.toFixed(3) ?? 0} ms a tick</span>{/if}
 			{#if canUpload}
-				<button class="btn btn-ghost btn-sm" disabled={working === mod.folder} onclick={() => pluginAction(mod, p, 'reload')} title="Load its files again"
-					><Icon name="restart" size={12} /> Reload</button
-				>
+				<!-- 2.1.3 refuses to reload a switched-off plugin; Switch on starts it -->
+				{#if p.state !== 'switched off'}<button
+						class="btn btn-ghost btn-sm"
+						disabled={working === mod.folder}
+						onclick={() => pluginAction(mod, p, 'reload')}
+						title="Load its files again"><Icon name="restart" size={12} /> Reload</button
+					>{/if}
 				<button
 					class="btn btn-ghost btn-sm"
 					disabled={working === mod.folder}
