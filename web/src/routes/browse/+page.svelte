@@ -627,7 +627,7 @@
 						{/each}
 					</ul>
 					<p class="mt-1 text-xs text-faint">
-						A player without it is asked once as they join, and their game gets it. A server asks from its next start. Only a plugin with a server half needs
+						A player without it is asked once as they join, and their game gets it, then asks them to turn it on. A server asks from its next start. Only a plugin with a server half needs
 						installing on the server too.
 					</p>
 				</div>

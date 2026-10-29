@@ -153,7 +153,7 @@ var Fields = []Field{
 	{Key: "reserved_slots", Label: "Reserved slots", Group: "Reserved slots", Type: TypeInt, Min: 0, Max: 248, Help: "Of the max players, kept for the players below and the admins. 0 is none.", Default: 0.0},
 	{Key: "reserved", Label: "Players with a reserved slot", Group: "Reserved slots", Type: TypeList, Help: "SteamID64s. They can join a full server; admins always can.", Default: []string{}},
 
-	{Key: "plugins.required", Label: "Plugins every player must have", Group: "Plugins", Type: TypeList, Max: maxRequiredPlugins, Restart: true, Help: "Thunderstore packages: Owner-Name, or Owner-Name-1.2.3 for at least that version. Players without them get them as they join.", Default: []string{}},
+	{Key: "plugins.required", Label: "Plugins every player must have", Group: "Plugins", Type: TypeList, Max: maxRequiredPlugins, Restart: true, Help: "Thunderstore packages: Owner-Name, or Owner-Name-1.2.3 for at least that version. Players without them get them as they join, and are asked to turn each one on.", Default: []string{}},
 
 	{Key: "map_pool", Label: "Maps in the pool", Group: "Map pool", Type: TypeMaps, Help: "The maps players vote between, in rotation order.", Default: []string{}},
 	{Key: "map_rotation_minutes", Label: "Minutes on each map", Group: "Map pool", Type: TypeInt, Min: 0, Max: 1440, Help: "Then the server moves to the next pool map. 0 is off.", Default: 0.0},

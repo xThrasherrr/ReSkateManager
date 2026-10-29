@@ -209,7 +209,9 @@
 			>{/if}
 		{#if pluginsHere && everyReq(mod)}<span class="sticker sticker-info" title="Every server requires it of players; change that in the mod browser">Required on every server</span>
 			<!-- Editors see it on the Require toggle. -->
-		{:else if pluginsHere && ownReq(mod) && !canUpload}<span class="sticker sticker-info" title="Players must have it to join; their game gets it as they join">Required</span>{/if}
+		{:else if pluginsHere && ownReq(mod) && !canUpload}<span class="sticker sticker-info" title="Players must have it to join; their game gets it as they join and asks them to turn it on"
+				>Required</span
+			>{/if}
 		{#if mod.disabled}<span class="sticker">Disabled</span>{/if}
 	</ModCredits>
 {/snippet}
@@ -269,7 +271,7 @@
 				aria-pressed={ownReq(mod)}
 				disabled={working === mod.folder || updating}
 				onclick={() => setRequired(mod.package!, mod.title, !ownReq(mod), mod.folder)}
-				title={ownReq(mod) ? 'Players no longer need it to join' : 'Players must have it to join: their game gets it as they join'}
+				title={ownReq(mod) ? 'Players no longer need it to join' : 'Players must have it to join: their game gets it as they join and asks them to turn it on'}
 				><Icon name={ownReq(mod) ? 'check' : 'users'} size={12} /> {ownReq(mod) ? 'Required' : 'Require'}</button
 			>
 		{/if}
@@ -352,7 +354,9 @@
 			<div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b-2 border-line px-4 py-3">
 				<div class="min-w-0 flex-1 basis-72">
 					<h2>Plugins players must have</h2>
-					<p class="text-sm text-muted">A player without one is asked once as they join, and their game gets it from Thunderstore.</p>
+					<p class="text-sm text-muted">
+						A player without one is asked once as they join, and their game gets it from Thunderstore. Then it asks them to turn each one on: until they do, it doesn't run.
+					</p>
 				</div>
 				{#if canUpload}
 					<a class="btn btn-sm" href="/browse?to={encodeURIComponent(ctx.id)}&category=Plugins"><Icon name="plus" size={12} /> Add from the mod browser</a>
@@ -477,7 +481,7 @@
 				<h2 class="border-b-2 border-line px-4 py-3">Other mods</h2>
 				<p class="px-4 pt-3 text-xs text-faint">
 					These have no reskate-levels.json, so they add no maps. Only players' games use them, apart from server plugins, which the server runs too.{pluginsHere
-						? ' Require a plugin, and players without it get it as they join.'
+						? ' Require a plugin, and players without it get it as they join and are asked to turn it on.'
 						: ''}
 				</p>
 				<ul class="divide-y divide-line/60 px-1 py-1.5">
