@@ -179,7 +179,7 @@ log(3, show(stats.top("wins")))
 		`bad argument #2 to 'stats.top' (period is "all", "month" or "week")`,
 		`bad argument #2 to 'stats.top' (a limit from 1 to 100)`,
 		`bad argument #4 to 'stats.add' (a number, not NaN or infinity)`,
-		`bad argument #3 to 'stats.rank' (no option limit; it takes server, period)`,
+		`bad argument #3 to 'stats.rank' (no option limit; it takes server, period, at)`,
 		`bad argument #2 to 'stats.top' (no server s9)`,
 		"18 1:1:Zee=3 1:2:Bea=3 1:1:Zee=3",
 		"19 3000 0 0",
@@ -208,6 +208,116 @@ log(3, show(stats.top("wins")))
 	if err != nil || fmt.Sprint(list) != "[{lap a Fastest lap s fastest true} {wins a Wins wins sum false}]" {
 		t.Errorf("boards: %v, %v", list, err)
 	}
+}
+
+// onClock puts the manager's clock in zone for one test.
+func onClock(t *testing.T, zone string) *time.Location {
+	loc, err := time.LoadLocation(zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Local
+	t.Cleanup(func() { time.Local = old })
+	time.Local = loc
+	return loc
+}
+
+// stats.period: when the month or week holding a time starts and ends on the
+// manager's clock, and its name, a DST change included.
+func TestPeriod(t *testing.T) {
+	loc := onClock(t, "America/Denver")
+	at := func(s string) int64 {
+		tm, err := time.ParseInLocation("2006-01-02 15:04", s, loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tm.Unix()
+	}
+	m := newManager(t)
+	addPlugin(t, m, "a", "", fmt.Sprintf(`
+local function try(i, f, ...) log(i, select(2, pcall(f, ...))) end
+log(1, stats.period("month", %d))
+log(2, stats.period("month", %d))
+log(3, stats.period("month", %d))
+log(4, stats.period("week", %d))
+log(5, stats.period("month"))
+try(6, stats.period, "all")
+try(7, stats.period, "year", %d)
+try(8, stats.period, "month", -1)
+try(9, stats.period, "month", 1.5)
+try(10, stats.period, "month", "x")
+`, at("2026-10-31 23:59"), at("2026-11-01 00:00"), at("2026-12-10 12:00"), at("2026-10-28 12:00"), at("2026-10-28 12:00")))
+	enable(t, m, "a")
+	now := time.Now()
+	month := store.PeriodStart("month", now)
+	next := store.PeriodStart("month", time.Unix(month, 0).AddDate(0, 1, 0))
+	checkLines(t, m, "a", []string{
+		fmt.Sprintf("1 %d %d 2026-10", at("2026-10-01 00:00"), at("2026-11-01 00:00")),
+		fmt.Sprintf("2 %d %d 2026-11", at("2026-11-01 00:00"), at("2026-12-01 00:00")), // MDT to MST: 30 days and an hour
+		fmt.Sprintf("3 %d %d 2026-12", at("2026-12-01 00:00"), at("2027-01-01 00:00")),
+		fmt.Sprintf("4 %d %d 2026-10-26", at("2026-10-26 00:00"), at("2026-11-02 00:00")), // a Wednesday's week, over the change
+		fmt.Sprintf("5 %d %d %s", month, next, time.Unix(month, 0).Format("2006-01")),
+		`bad argument #1 to 'stats.period' (period is "month" or "week")`,
+		`bad argument #1 to 'stats.period' (period is "month" or "week")`,
+		`bad argument #2 to 'stats.period' (a time in whole unix seconds)`,
+		`bad argument #2 to 'stats.period' (a time in whole unix seconds)`,
+		`bad argument #2 to 'stats.period' (a time in whole unix seconds)`,
+	})
+}
+
+// at reads a board over a past month or week, not over now's, and refuses a
+// time to come and playtime.
+func TestBoardsAt(t *testing.T) {
+	callTime(t, 5*time.Second)
+	readTime(t, 4*time.Second)
+	m := newManager(t)
+	servers(t, m, "s1")
+	const p1, p2 = "76561198000000001", "76561198000000002"
+	last := store.PeriodStart("month", time.Now()) - 86400 // a day before this month began
+	ctx := context.Background()
+	if err := m.Store.SaveBoards(ctx, []store.Board{{ID: "wins", Plugin: "a", Title: "wins", Keep: store.KeepSum}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Store.AddScores(ctx, []store.Score{
+		{Board: "wins", Keep: store.KeepSum, Server: "s1", SteamID: p1, Value: 5, At: last},
+		{Board: "wins", Keep: store.KeepSum, Server: "s1", SteamID: p2, Value: 2, At: last},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	addPlugin(t, m, "a", "", `
+local P1, P2 = "`+p1+`", "`+p2+`"
+local function show(list)
+  local out = {}
+  for _, r in ipairs(list) do out[#out + 1] = r.rank .. ":" .. r.id:sub(-1) .. "=" .. tostring(r.value) end
+  return table.concat(out, " ")
+end
+local function try(i, f, ...) log(i, select(2, pcall(f, ...))) end
+stats.define("wins")
+stats.add("wins", "s1", P2, 3)
+local month, ends = stats.period("month")
+log(1, show(stats.top("wins", {period = "month", at = month - 1})))
+log(2, show(stats.top("wins", {period = "month"})))
+local rank, value = stats.rank("wins", P1, {period = "month", at = month - 1})
+log(3, rank, value, stats.rank("wins", P1, {period = "month"}))
+log(4, show(stats.around("wins", P2, {period = "month", at = month - 1, limit = 1})))
+log(5, show(stats.top("wins", {at = month - 1})))
+try(6, stats.top, "wins", {period = "month", at = ends})
+try(7, stats.top, "playtime", {period = "month", at = month - 1})
+try(8, stats.top, "wins", {at = 1.5})
+try(9, stats.rank, "wins", P1, {limit = 3})
+`)
+	enable(t, m, "a")
+	checkLines(t, m, "a", []string{
+		"1 1:1=5 2:2=2",
+		"2 1:2=3",
+		"3 1 5 nil",
+		"4 2:2=2",
+		"5 1:1=5 1:2=5", // all time is all time, whatever at says
+		`bad argument #2 to 'stats.top' (at can't be later than now)`,
+		`bad argument #2 to 'stats.top' (playtime is read as it is now, without at)`,
+		`bad argument #2 to 'stats.top' (a time in whole unix seconds)`,
+		`bad argument #3 to 'stats.rank' (no option limit; it takes server, period, at)`,
+	})
 }
 
 // A score read straight after it's added counts, and one added since a
@@ -334,7 +444,7 @@ func TestSnapshots(t *testing.T) {
 	m := newManager(t)
 	d := m.data
 	b, _ := d.board(store.PlaytimeBoard)
-	first, err := d.ranking(b, "", "all", readWait)
+	first, err := d.ranking(b, "", "all", time.Now(), readWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +452,7 @@ func TestSnapshots(t *testing.T) {
 	d.mu.Lock()
 	d.snaps[k].at = time.Now().Add(-snapAge)
 	d.mu.Unlock()
-	if again, err := d.ranking(b, "", "all", readWait); err != nil || again != first {
+	if again, err := d.ranking(b, "", "all", time.Now(), readWait); err != nil || again != first {
 		t.Fatalf("an old snapshot: %p, %v, want the one there, %p", again, err, first)
 	}
 	waitFor(t, func() bool {

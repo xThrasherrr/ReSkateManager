@@ -79,14 +79,17 @@ playtime = api("playtime", {"total", "sessions"})
 -- stats.* ranks players on boards. stats.define(board, {title =, unit =,
 -- keep = "sum", "best" or "fastest", public =}) makes one of the plugin's,
 -- and stats.add(board, server, steamId, n) gives a player n on it.
--- stats.top(board [, {server =, period =, limit =}]), stats.rank(board,
--- steamId [, {server =, period =}]) and stats.around(board, steamId [,
--- {server =, period =, limit =}]) read any board, "playtime" too: all the
--- servers unless one is named, over "all" time, the "month" or the "week"
--- (from Monday, on the manager's clock). Rows are {rank, id, name, value};
--- rank returns rank and value. Each returns nil and why when the board
--- can't be read.
-stats = api("stats", {"define", "add", "top", "rank", "around"})
+-- stats.top(board [, {server =, period =, limit =, at =}]), stats.rank(board,
+-- steamId [, {server =, period =, at =}]) and stats.around(board, steamId [,
+-- {server =, period =, limit =, at =}]) read any board, "playtime" too: all
+-- the servers unless one is named, over "all" time, the "month" or the "week"
+-- (from Monday, on the manager's clock); at, unix seconds, reads the month or
+-- week that held it instead, a past one included (not on playtime). Rows are
+-- {rank, id, name, value}; rank returns rank and value. Each returns nil and
+-- why when the board can't be read. stats.period("month" or "week" [, at])
+-- is when the one holding at (now without it) starts and ends, and its name,
+-- "2026-10" or the Monday's "2026-10-26".
+stats = api("stats", {"define", "add", "top", "rank", "around", "period"})
 
 -- ui.card(server, steamId or "all", card [, fn]) shows a card at the top of
 -- one player's screen, or everyone's: card is text, or {title =, lines =

@@ -399,13 +399,13 @@ func merge(s *store.Score, n store.Score) {
 	}
 }
 
-// ranking is a board's players in order, from its snapshot. One added to
-// since is worked out afresh, waiting up to wait for it and making do with
-// the one before past that; one that's only old is worked out again in the
-// background.
-func (d *data) ranking(b store.Board, server, period string, wait time.Duration) (*ranking, error) {
+// ranking is a board's players in order over the period holding at, from its
+// snapshot. One added to since is worked out afresh, waiting up to wait for it
+// and making do with the one before past that; one that's only old is worked
+// out again in the background.
+func (d *data) ranking(b store.Board, server, period string, at time.Time, wait time.Duration) (*ranking, error) {
 	now := time.Now()
-	k := snapKey{b.ID, server, period, store.PeriodStart(period, now)}
+	k := snapKey{b.ID, server, period, store.PeriodStart(period, at)}
 	d.mu.Lock()
 	if d.ctx.Err() != nil {
 		d.mu.Unlock()
@@ -457,7 +457,11 @@ func (d *data) work(k snapKey, b store.Board, sn *snapshot) {
 	err := d.flush(d.ctx, b.ID)
 	var list []store.Ranked
 	if err == nil {
-		list, err = d.st.Ranking(d.ctx, store.BoardQuery{Board: b, Server: k.server, Period: k.period, Now: time.Now()})
+		q := store.BoardQuery{Board: b, Server: k.server, Period: k.period, Now: time.Now()}
+		if b.ID != store.PlaytimeBoard { // playtime counts open visits up to now, so it's only read now
+			q.Now = time.Unix(k.starts, 0) // the period the snapshot is of, a past one included
+		}
+		list, err = d.st.Ranking(d.ctx, q)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -535,7 +539,7 @@ func (m *Manager) PublicBoards(server, period string, limit int) []Top {
 	out := make([]Top, len(list))
 	for i, b := range list {
 		out[i] = Top{ID: b.ID, Title: b.Title, Unit: b.Unit, Keep: b.Keep, Rows: []TopRow{}}
-		rk, err := d.ranking(b, server, period, panelWait)
+		rk, err := d.ranking(b, server, period, time.Now(), panelWait)
 		if err != nil {
 			out[i].Error = busy(err)
 			continue
@@ -709,7 +713,7 @@ func (r *runner) dataCall(name string, args []any) ([]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		n, names, limit := 2, []string{"server", "period", "limit"}, 10
+		n, names, limit := 2, []string{"server", "period", "limit", "at"}, 10
 		var steam string
 		if name != "stats.top" {
 			if steam, err = steamID(name, 2, arg(1)); err != nil {
@@ -717,7 +721,7 @@ func (r *runner) dataCall(name string, args []any) ([]any, error) {
 			}
 			n, limit = 3, 5
 			if name == "stats.rank" {
-				names = names[:2]
+				names = []string{"server", "period", "at"}
 			}
 		}
 		opts, err := options(name, n, arg(n-1), names...)
@@ -745,7 +749,21 @@ func (r *runner) dataCall(name string, args []any) ([]any, error) {
 		if limit, err = limitArg(name, n, opts["limit"], limit); err != nil {
 			return nil, err
 		}
-		rk, err := d.ranking(b, server, period, readWait)
+		// at reads the month or week that held it, a past one included.
+		at := time.Now()
+		if v := opts["at"]; v != nil {
+			t, err := timeArg(name, n, v)
+			switch {
+			case err != nil:
+				return nil, err
+			case t.After(at):
+				return nil, fmt.Errorf("bad argument #%d to '%s' (at can't be later than now)", n, name)
+			case b.ID == store.PlaytimeBoard:
+				return nil, fmt.Errorf("bad argument #%d to '%s' (playtime is read as it is now, without at)", n, name)
+			}
+			at = t
+		}
+		rk, err := d.ranking(b, server, period, at, readWait)
 		if err != nil {
 			return []any{nil, busy(err)}, nil
 		}
@@ -762,8 +780,37 @@ func (r *runner) dataCall(name string, args []any) ([]any, error) {
 		}
 		from := max(0, min(i-(limit-1)/2, len(rk.list)-limit))
 		return []any{rows(rk.list[from:min(from+limit, len(rk.list))])}, nil
+	case "stats.period":
+		period, ok := arg(0).(string)
+		if !ok || period != "month" && period != "week" {
+			return nil, fmt.Errorf("bad argument #1 to '%s' (period is \"month\" or \"week\")", name)
+		}
+		at := time.Now()
+		if arg(1) != nil {
+			var err error
+			if at, err = timeArg(name, 2, arg(1)); err != nil {
+				return nil, err
+			}
+		}
+		starts := store.PeriodStart(period, at)
+		s := time.Unix(starts, 0).In(time.Local)
+		next, label := s.AddDate(0, 1, 0), s.Format("2006-01")
+		if period == "week" {
+			next, label = s.AddDate(0, 0, 7), s.Format("2006-01-02")
+		}
+		// Through PeriodStart again, so a period that ends on a DST change still ends at midnight.
+		return []any{starts, store.PeriodStart(period, next), label}, nil
 	}
 	return nil, fmt.Errorf("no function %s", name)
+}
+
+// timeArg is a time given in whole unix seconds, from 0 to the end of year 9999.
+func timeArg(call string, n int, v any) (time.Time, error) {
+	f, ok := number(v)
+	if !ok || f < 0 || f > 253402300799 || f != math.Trunc(f) {
+		return time.Time{}, fmt.Errorf("bad argument #%d to '%s' (a time in whole unix seconds)", n, call)
+	}
+	return time.Unix(int64(f), 0), nil
 }
 
 func boardArg(d *data, call string, v any) (store.Board, error) {
