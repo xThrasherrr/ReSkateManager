@@ -306,3 +306,15 @@ func TestSweepLeftovers(t *testing.T) {
 		t.Errorf("left %v", left)
 	}
 }
+
+// A plugin's zip from Thunderstore installs without its version, so its id
+// can name console commands; a map's keeps it (TestInstallModLayouts).
+func TestInstallPluginDropsVersion(t *testing.T) {
+	manifest := `{"api":1,"entry":"plugin/main.lua","side":"both"}`
+	for zipName, want := range map[string]string{"baked-baked_core-2.2.0.zip": "baked-baked_core", "baked_core.zip": "baked_core"} {
+		folder, _, err := installMod(t.TempDir(), writeZip(t, "reskate-plugin.json", manifest, "plugin/main.lua", ""), zipName)
+		if err != nil || folder != want {
+			t.Errorf("%s: %q, %v; want %q", zipName, folder, err, want)
+		}
+	}
+}

@@ -8,10 +8,15 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/xThrasherrr/ReSkateManager/internal/safezip"
 )
+
+// packageVersion is the -1.2.3 Thunderstore ends a package's zip name with.
+var packageVersion = regexp.MustCompile(`-\d+\.\d+\.\d+$`)
 
 // Variables so tests can lower them.
 var (
@@ -60,6 +65,12 @@ func UnpackMod(dir, zipPath, zipName string) (*Unpacked, error) {
 		folder = strings.TrimSpace(path.Base(strings.ReplaceAll(zipName, `\`, "/")))
 		if ext := path.Ext(folder); strings.EqualFold(ext, ".zip") {
 			folder = strings.TrimSpace(strings.TrimSuffix(folder, ext))
+		}
+		// A plugin's folder is its id, which its console commands and the
+		// bridge's "rsm <id>" are named after, and they take no dots; a map
+		// keeps the version, which a host names its package by.
+		if slices.ContainsFunc(files, func(e zipEntry) bool { return e.name == "reskate-plugin.json" }) {
+			folder = packageVersion.ReplaceAllString(folder, "")
 		}
 	}
 	if !ValidModFolder(folder) {
